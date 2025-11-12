@@ -59,12 +59,9 @@ class BackgroundOrderService {
 
   @pragma('vm:entry-point')
   static Future<bool> onIosBackground(ServiceInstance service) async {
-    // ... this function is correct ...
     return true;
   }
 
-  /// Converts complex Firestore data types (Timestamp, GeoPoint)
-  /// into simple, JSON-encodable types.
   @pragma('vm:entry-point')
   static Map<String, dynamic> _sanitizeDataForInvoke(
       Map<String, dynamic> data) {
@@ -72,20 +69,16 @@ class BackgroundOrderService {
 
     data.forEach((key, value) {
       if (value is Timestamp) {
-        // Convert Timestamp to milliseconds (int)
         sanitizedMap[key] = value.millisecondsSinceEpoch;
       } else if (value is GeoPoint) {
-        // Convert GeoPoint to a simple Map
         sanitizedMap[key] = {
           'latitude': value.latitude,
           'longitude': value.longitude,
         };
       } else if (value is Map) {
-        // Recursively sanitize nested maps
         sanitizedMap[key] =
             _sanitizeDataForInvoke(value as Map<String, dynamic>);
       } else if (value is List) {
-        // Recursively sanitize items in a list
         sanitizedMap[key] = value.map((item) {
           if (item is Map) {
             return _sanitizeDataForInvoke(item as Map<String, dynamic>);
@@ -96,13 +89,11 @@ class BackgroundOrderService {
           } else if (item is String || item is num || item is bool || item == null) {
             return item;
           }
-          return item.toString(); // Fallback for other complex types
+          return item.toString();
         }).toList();
       } else if (value is String || value is num || value is bool || value == null) {
-        // Keep simple, JSON-encodable types
         sanitizedMap[key] = value;
       } else {
-        // Fallback for other unknown complex types
         sanitizedMap[key] = value.toString();
       }
     });
@@ -164,6 +155,7 @@ class BackgroundOrderService {
       debugPrint('✅ Background Service: App is BACKGROUND');
     });
 
+
     service.on('updateBranchIds').listen((event) async {
       if (event is Map<String, dynamic>) {
         final List<String> branchIds =
@@ -200,7 +192,6 @@ class BackgroundOrderService {
             });
             debugPrint(
                 '🎯 Background Service: Received ${snapshot.docs.length} orders. App in foreground: $isAppInForeground');
-
             for (var doc in snapshot.docs) {
               final orderId = doc.id;
               if (!processedOrderIds.contains(orderId)) {
@@ -212,8 +203,7 @@ class BackgroundOrderService {
                 if (!isAppInForeground) {
                   // App is in background or terminated.
                   // Show notification, play sound, vibrate.
-                  debugPrint(
-                      'App is background, showing local notification.');
+                  debugPrint('App is background, showing local notification.');
                   await _showOrderNotification(doc, localNotifications);
                   await _playNotificationSound(audioPlayer);
                   await _vibrate();
@@ -252,7 +242,6 @@ class BackgroundOrderService {
       }
     });
 
-    // Initialize with empty branches; RestaurantStatusService will update it
     service.invoke('updateBranchIds', {'branchIds': []});
   }
 
@@ -272,7 +261,7 @@ class BackgroundOrderService {
         importance: Importance.max,
         priority: Priority.high,
         showWhen: true,
-        playSound: true, // This will use the default sound
+        playSound: true,
         enableVibration: true,
       );
       const NotificationDetails platformChannelSpecifics =
@@ -295,7 +284,7 @@ class BackgroundOrderService {
       // Set release mode to ensure sound plays repeatedly
       await audioPlayer.setReleaseMode(ReleaseMode.loop);
       await audioPlayer.play(AssetSource('notification.mp3'));
-      debugPrint('🔊 Background Service: Playing sound');
+      debugPrint('🔊 Background Service: Playing sound loop');
 
       // Stop the sound after a few seconds
       Future.delayed(const Duration(seconds: 5), () {
@@ -327,7 +316,6 @@ class BackgroundOrderService {
     final service = FlutterBackgroundService();
     try {
       await service.startService();
-      // Initialize with empty list; RestaurantStatusService will update it
       service.invoke('updateBranchIds', {'branchIds': []});
       debugPrint("🚀 Background Service: Main service started successfully.");
     } catch (e) {

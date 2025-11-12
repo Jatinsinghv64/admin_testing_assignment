@@ -1,23 +1,16 @@
-import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:http/http.dart';
 import 'package:provider/provider.dart';
-
 import '../Widgets/RestaurantStatusService.dart';
-import '../Widgets/RiderAssignment.dart';
-import '../Widgets/placeholders.dart';
 import '../main.dart';
-import 'AnalyticsScreen.dart';
 import 'DashboardScreen.dart';
 import 'MenuManagement.dart';
 import 'OrdersScreen.dart';
 import 'RidersScreen.dart';
 import 'SettingsScreen.dart';
 
-import '../Widgets/notification.dart' as notif;
+
+
 
 
 
@@ -35,11 +28,6 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Widget> _screens = [];
   List<BottomNavigationBarItem> _navItems = [];
   late Map<AppTab, AppScreen> _allScreens;
-  StreamSubscription? _backgroundServiceSubscription;
-
-  // Dialog management
-  bool _isDialogShowing = false;
-  final Set<String> _processedOrderIds = {};
 
   // Restaurant status
   bool _isRestaurantStatusInitialized = false;
@@ -56,7 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
 
-    // Initialize screens here after the instance is created
+    // ... (Your _allScreens map initialization is correct) ...
     _allScreens = {
       AppTab.dashboard: AppScreen(
         tab: AppTab.dashboard,
@@ -100,14 +88,17 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     };
 
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _buildNavItems();
-      _listenToBackgroundService();
+      // ❌ REMOVED: _listenToBackgroundService();
+      // This logic is now correctly in OrderNotificationService
       _initializeRestaurantStatus();
     });
   }
 
   void _initializeRestaurantStatus() {
+    // ... (This function is correct, no changes needed) ...
     final scopeService = context.read<UserScopeService>();
     final statusService = context.read<RestaurantStatusService>();
 
@@ -122,213 +113,17 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _listenToBackgroundService() {
-    try {
-      final service = FlutterBackgroundService();
+  // ❌ REMOVED: _listenToBackgroundService()
+  // ❌ REMOVED: _showInAppOrderDialog()
+  // ❌ REMOVED: _handleOrderAcceptance()
+  // ❌ REMOVED: _updateOrderStatus()
 
-      _backgroundServiceSubscription = service.on('new_order').listen((event) {
-        debugPrint('🎯 HomeScreen: Received order from background service');
-
-        if (event != null && mounted) {
-          try {
-            final data = Map<String, dynamic>.from(event);
-            final orderId = data['id']?.toString() ?? 'unknown';
-            final orderNumber = data['dailyOrderNumber']?.toString() ?? 'N/A';
-
-            debugPrint('🎯 HomeScreen: Order data received - ID: $orderId, Number: $orderNumber');
-
-            // Use WidgetsBinding to ensure we're in the right context
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                _showInAppOrderDialog(data);
-              }
-            });
-          } catch (e) {
-            debugPrint('❌ HomeScreen: Error processing order data: $e');
-          }
-        }
-      });
-
-      debugPrint('✅ HomeScreen: Background service listener initialized');
-
-    } catch (e) {
-      debugPrint('❌ HomeScreen: Error setting up background service listener: $e');
-    }
-  }
-
-  void _showInAppOrderDialog(Map<String, dynamic> data) {
-    final orderId = data['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
-
-    // Prevent duplicate dialogs
-    if (_isDialogShowing) {
-      debugPrint('🚫 Dialog already showing, skipping order: $orderId');
-      return;
-    }
-
-    if (_processedOrderIds.contains(orderId)) {
-      debugPrint('🚫 Order already processed: $orderId');
-      return;
-    }
-
-    _processedOrderIds.add(orderId);
-    _isDialogShowing = true;
-
-    debugPrint('🔄 Preparing to show dialog for order: $orderId');
-
-    // Extract order details with null safety
-    final orderNumber = data['dailyOrderNumber']?.toString() ??
-        orderId.substring(0, 6).toUpperCase();
-    final customerName = data['customerName']?.toString() ?? 'N/A';
-    final addressMap = data['deliveryAddress'] as Map<String, dynamic>?;
-    final address = addressMap?['street']?.toString() ?? 'N/A';
-    final itemsList = (data['items'] as List<dynamic>?) ?? [];
-    final orderType = data['Order_type']?.toString() ?? 'Unknown';
-
-    final items = itemsList.map((item) {
-      final itemMap = item as Map<String, dynamic>? ?? {};
-      final itemName = itemMap['name']?.toString() ?? 'Unknown';
-      final qty = itemMap['quantity']?.toString() ?? '1';
-      return '$qty x $itemName';
-    }).toList();
-
-    final itemsString = items.join('\n');
-
-    debugPrint('🎯 Showing dialog for order: $orderNumber');
-
-    // Use a slight delay to ensure context is ready
-    Future.delayed(Duration(milliseconds: 100), () {
-      if (!mounted) return;
-
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) {
-          return notif.NewOrderDialog(
-            orderNumber: orderNumber,
-            customerName: customerName,
-            address: address,
-            itemsString: itemsString,
-            orderType: orderType,
-            onAccept: () {
-              debugPrint('✅ Order accepted: $orderId');
-              Navigator.of(dialogContext).pop();
-              _handleOrderAcceptance(orderId);
-              _isDialogShowing = false;
-            },
-            onReject: () {
-              debugPrint('❌ Order rejected: $orderId');
-              Navigator.of(dialogContext).pop();
-              _updateOrderStatus(orderId, 'cancelled');
-              _isDialogShowing = false;
-            },
-            onAutoAccept: () {
-              debugPrint('🤖 Order auto-accepted: $orderId');
-              Navigator.of(dialogContext).pop();
-              _handleOrderAcceptance(orderId);
-              _isDialogShowing = false;
-            },
-          );
-        },
-      ).then((_) {
-        // Ensure flag is reset when dialog is closed by other means
-        _isDialogShowing = false;
-        debugPrint('✅ Dialog closed for order: $orderId');
-      }).catchError((error) {
-        _isDialogShowing = false;
-        debugPrint('❌ Dialog error: $error');
-      });
-    });
-  }
-
-  Future<void> _handleOrderAcceptance(String orderId) async {
-    try {
-      final db = FirebaseFirestore.instance;
-
-      // Update order status
-      await db.collection('Orders').doc(orderId).update({
-        'status': 'preparing',
-        'timestamps.preparing': FieldValue.serverTimestamp(),
-      });
-
-      debugPrint('✅ Order $orderId accepted and status updated to preparing');
-
-      // Auto-assign rider if needed
-      final userScope = context.read<UserScopeService>();
-      if (userScope.branchId.isNotEmpty) {
-        await RiderAssignmentService.autoAssignRider(
-          orderId: orderId,
-          branchId: userScope.branchId,
-        );
-      }
-
-      // Show success message
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Order #$orderId accepted successfully'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
-
-    } catch (e) {
-      debugPrint('❌ Error accepting order: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error accepting order: ${e.toString()}'),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 5),
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _updateOrderStatus(String orderId, String status) async {
-    try {
-      final db = FirebaseFirestore.instance;
-      final Map<String, dynamic> updateData = {'status': status};
-
-      if (status == 'cancelled') {
-        updateData['timestamps.cancelled'] = FieldValue.serverTimestamp();
-      }
-
-      await db.collection('Orders').doc(orderId).update(updateData);
-
-      debugPrint('📝 Order $orderId status updated to $status');
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Order #$orderId $status'),
-            backgroundColor: status == 'cancelled' ? Colors.orange : Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
-
-    } catch (e) {
-      debugPrint('❌ Error updating order status: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error updating order: ${e.toString()}'),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 5),
-          ),
-        );
-      }
-    }
-  }
-
-  // Restaurant status methods
+  // ✅ KEPT: All functions for Restaurant Status Toggle
   Widget _buildRestaurantToggle(RestaurantStatusService statusService) {
+    // ... (This function is correct, no changes needed) ...
     return Stack(
       alignment: Alignment.center,
       children: [
-        // Toggle background with loading state
         if (statusService.isLoading)
           Container(
             width: 50,
@@ -361,8 +156,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showStatusChangeConfirmation(bool newValue) {
+    // ... (This function is correct, no changes needed) ...
     final statusService = context.read<RestaurantStatusService>();
-    final userScope = context.read<UserScopeService>();
 
     showDialog(
       context: context,
@@ -399,7 +194,6 @@ class _HomeScreenState extends State<HomeScreen> {
               try {
                 await statusService.toggleRestaurantStatus(newValue);
 
-                // Show success message
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -413,7 +207,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 }
               } catch (e) {
-                // Show error message
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -436,7 +229,9 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
   void _buildNavItems() {
+    // ... (This function is correct, no changes needed) ...
     if (_isBuildingNavItems) return;
     _isBuildingNavItems = true;
 
@@ -456,7 +251,6 @@ class _HomeScreenState extends State<HomeScreen> {
       allowedScreens.add(_allScreens[AppTab.riders]!);
     }
 
-    // Use WidgetsBinding to avoid setState during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         setState(() {
@@ -471,17 +265,17 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+
   @override
   void didChangeDependencies() {
+    // ... (This function is correct, no changes needed) ...
     super.didChangeDependencies();
 
-    // Only rebuild nav items if user scope changes and we're not already building
     final userScope = context.watch<UserScopeService>();
     if (!_isBuildingNavItems) {
       _buildNavItems();
     }
 
-    // Re-initialize restaurant status if needed
     if (!_isRestaurantStatusInitialized) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _initializeRestaurantStatus();
@@ -489,16 +283,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+
   @override
   void dispose() {
-    _backgroundServiceSubscription?.cancel();
-    _processedOrderIds.clear();
+    // ❌ REMOVED: _backgroundServiceSubscription?.cancel();
+    // ❌ REMOVED: _processedOrderIds.clear();
     debugPrint('🛑 HomeScreen disposed');
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // ... (This function is correct, no changes needed) ...
     final userScope = context.watch<UserScopeService>();
     final statusService = context.watch<RestaurantStatusService>();
     final String appBarTitle = userScope.isSuperAdmin
@@ -520,12 +316,10 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text(appBarTitle),
         actions: [
-          // Restaurant Status Toggle
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
             child: Row(
               children: [
-                // Status text with better visibility
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
@@ -551,8 +345,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-
-          // Settings button only
           if (userScope.can(Permissions.canManageSettings))
             IconButton(
               tooltip: 'Settings',

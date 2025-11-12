@@ -1,8 +1,12 @@
-import 'dart:async';
+
+// ❌ REMOVED: import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
+// ❌ REMOVED: import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
+// ❌ REMOVED: import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_background_service/flutter_background_service.dart'; // Import service
@@ -16,15 +20,17 @@ import 'firebase_options.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// All FCM-related code (handlers, global plugins, channels) has been removed.
+// ❌ REMOVED: flutterLocalNotificationsPlugin
+// ❌ REMOVED: AndroidNotificationChannel
+// ❌ REMOVED: _firebaseMessagingBackgroundHandler
+// ❌ REMOVED: _showNotification
+// ❌ REMOVED: _onNotificationTap
+// ❌ REMOVED: showInAppOrderDialog
 
-/// This function is still used by notification.dart (via the dialog)
-/// to navigate to the order screen.
 void _navigateToOrder(String orderId) {
+  // This function is still used by notification.dart (via the dialog)
   final context = navigatorKey.currentContext;
   if (context != null) {
-    // This navigation finds the HomeScreen and lets the OrdersScreen logic
-    // (which checks OrderSelectionService) handle the highlighting.
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => HomeScreen()),
           (route) => false,
@@ -34,6 +40,8 @@ void _navigateToOrder(String orderId) {
     debugPrint("❌ Cannot navigate! Navigator context is null.");
   }
 }
+
+// ❌ REMOVED: _initializeLocalNotifications
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,15 +60,17 @@ void main() async {
   bool isRunning = await service.isRunning();
 
   if (!isRunning) {
-    debugPrint("🚀 MAIN: Service is not running. Starting it.");
-    // If not running, start it.
+    debugPrint(
+        "🚀 MAIN: Service is not running. Starting it.");
     await BackgroundOrderService.startService();
   } else {
-    debugPrint("✅ MAIN: Service is already running. Initialization complete.");
+    debugPrint(
+        "✅ MAIN: Service is already running. Initialization complete.");
   }
   // --- END: ROBUST SERVICE LAUNCH ---
 
-  // Removed call to _initializeLocalNotifications()
+  // ❌ REMOVED: await _initializeLocalNotifications();
+
   runApp(const MyApp());
 }
 
@@ -77,7 +87,6 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider<UserScopeService>(
           create: (_) => UserScopeService(),
         ),
-        // This service now listens to the BackgroundService, not Firestore/FCM
         ChangeNotifierProvider<OrderNotificationService>(
           create: (_) => OrderNotificationService(),
         ),
@@ -89,6 +98,7 @@ class MyApp extends StatelessWidget {
         navigatorKey: navigatorKey,
         title: 'Branch Admin App',
         theme: ThemeData(
+          // ... Your theme data ...
           primarySwatch: Colors.deepPurple,
           visualDensity: VisualDensity.adaptivePlatformDensity,
           scaffoldBackgroundColor: Colors.grey[50],
@@ -140,7 +150,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// Permission constants
+// ... (Permissions, AppScreen, AuthService, AuthWrapper, LoginScreen remain the same) ...
 class Permissions {
   static const String canViewDashboard = 'canViewDashboard';
   static const String canManageInventory = 'canManageInventory';
@@ -333,6 +343,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
+
 // ScopeLoader
 class ScopeLoader extends StatefulWidget {
   final User user;
@@ -473,7 +484,8 @@ class UserScopeService with ChangeNotifier {
       final staffSnap = await _db.collection('staff').doc(_userEmail).get();
 
       if (!staffSnap.exists) {
-        debugPrint('❌ Scope Error: No staff document found for $_userEmail.');
+        debugPrint(
+            '❌ Scope Error: No staff document found for $_userEmail.');
         await clearScope();
         return false;
       }
@@ -482,7 +494,8 @@ class UserScopeService with ChangeNotifier {
       final bool isActive = data?['isActive'] ?? false;
 
       if (!isActive) {
-        debugPrint('❌ Scope Error: Staff member $_userEmail is not active.');
+        debugPrint(
+            '❌ Scope Error: Staff member $_userEmail is not active.');
         await clearScope();
         return false;
       }
