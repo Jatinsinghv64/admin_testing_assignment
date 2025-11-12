@@ -1,5 +1,6 @@
-
 // ❌ REMOVED: import 'dart:convert';
+import 'dart:async'; // ✅ **ADD THIS IMPORT**
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
@@ -29,6 +30,10 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 // ❌ REMOVED: _onNotificationTap
 // ❌ REMOVED: showInAppOrderDialog
 
+/*
+  ❌ DELETED THIS FUNCTION TO BREAK CIRCULAR DEPENDENCY
+  We moved this logic into OrderNotificationService in notification.dart
+
 void _navigateToOrder(String orderId) {
   // This function is still used by notification.dart (via the dialog)
   final context = navigatorKey.currentContext;
@@ -42,6 +47,7 @@ void _navigateToOrder(String orderId) {
     debugPrint("❌ Cannot navigate! Navigator context is null.");
   }
 }
+*/
 
 // ❌ REMOVED: _initializeLocalNotifications
 
@@ -207,7 +213,11 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     final notificationService = context.read<OrderNotificationService>();
     final statusService = context.read<RestaurantStatusService>();
 
-    final bool isSuccess = await scopeService.loadUserScope(widget.user);
+    // ✅ **ADD THIS**
+    final authService = context.read<AuthService>();
+
+    // ✅ **MODIFY THIS LINE**
+    final bool isSuccess = await scopeService.loadUserScope(widget.user, authService);
 
     if (isSuccess && mounted) {
       // Initialize restaurant status service
@@ -265,6 +275,9 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
 class UserScopeService with ChangeNotifier {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // ✅ **ADD THIS** to manage the real-time listener
+  StreamSubscription? _scopeSubscription;
+
   String _role = 'unknown';
   List<String> _branchIds = [];
   Map<String, bool> _permissions = {};
@@ -284,8 +297,13 @@ class UserScopeService with ChangeNotifier {
     return _permissions[permissionKey] ?? false;
   }
 
-  Future<bool> loadUserScope(User user) async {
+  // ✅ **MODIFY** the signature to accept AuthService
+  Future<bool> loadUserScope(User user, AuthService authService) async {
     if (_isLoaded) return true;
+
+    // ✅ **CANCEL** any old subscription before starting a new one.
+    await _scopeSubscription?.cancel();
+    _scopeSubscription = null;
 
     try {
       _userEmail = user.email ?? '';
@@ -295,12 +313,13 @@ class UserScopeService with ChangeNotifier {
 
       debugPrint('🎯 Loading user scope for: $_userEmail');
 
+      // 1. Perform the initial load with .get()
       final staffSnap = await _db.collection('staff').doc(_userEmail).get();
 
       if (!staffSnap.exists) {
         debugPrint(
             '❌ Scope Error: No staff document found for $_userEmail.');
-        await clearScope();
+        await clearScope(); // clearScope will notify listeners
         return false;
       }
 
@@ -310,10 +329,11 @@ class UserScopeService with ChangeNotifier {
       if (!isActive) {
         debugPrint(
             '❌ Scope Error: Staff member $_userEmail is not active.');
-        await clearScope();
+        await clearScope(); // clearScope will notify listeners
         return false;
       }
 
+      // 2. Initial load is successful, set data
       _role = data?['role'] as String? ?? 'unknown';
       _branchIds = List<String>.from(data?['branchIds'] ?? []);
       _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
@@ -321,16 +341,65 @@ class UserScopeService with ChangeNotifier {
 
       debugPrint(
           '✅ Scope Loaded: $_userEmail | Role: $_role | Branches: $_branchIds | Permissions: $_permissions');
+
+      // 3. ✅ **START THE REAL-TIME LISTENER**
+      // This stream will now watch for changes in the background.
+      _scopeSubscription = _db
+          .collection('staff')
+          .doc(_userEmail)
+          .snapshots()
+          .listen(
+            (snapshot) => _handleScopeUpdate(snapshot, authService),
+        onError: (error) => _handleScopeError(error, authService),
+      );
+
       notifyListeners();
       return true;
     } catch (e) {
       debugPrint('❌ Error loading user scope: $e');
-      await clearScope();
+      await clearScope(); // clearScope will notify listeners
       return false;
     }
   }
 
+  /// ✅ **ADD THIS** - Handles real-time updates from the stream.
+  void _handleScopeUpdate(DocumentSnapshot snapshot, AuthService authService) {
+    if (!snapshot.exists) {
+      debugPrint('User scope document was deleted. Signing out.');
+      authService.signOut(); // This triggers AuthWrapper to clear scope
+      return;
+    }
+
+    final data = snapshot.data() as Map<String, dynamic>?;
+    final bool isActive = data?['isActive'] ?? false;
+
+    if (!isActive) {
+      debugPrint('User is no longer active. Signing out.');
+      authService.signOut(); // This triggers AuthWrapper to clear scope
+      return;
+    }
+
+    // Optional: Update data if it changed (e.g., permissions changed)
+    _role = data?['role'] as String? ?? 'unknown';
+    _branchIds = List<String>.from(data?['branchIds'] ?? []);
+    _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
+
+    // We call notifyListeners() to ensure any UI depending on
+    // roles or permissions is updated in real-time.
+    notifyListeners();
+  }
+
+  /// ✅ **ADD THIS** - Handles stream errors.
+  void _handleScopeError(Object error, AuthService authService) {
+    debugPrint('Error listening to user scope: $error. Signing out.');
+    authService.signOut(); // This triggers AuthWrapper to clear scope
+  }
+
   Future<void> clearScope() async {
+    // ✅ **MODIFY** to cancel the stream subscription.
+    await _scopeSubscription?.cancel();
+    _scopeSubscription = null;
+
     _role = 'unknown';
     _branchIds = [];
     _permissions = {};
@@ -339,5 +408,3 @@ class UserScopeService with ChangeNotifier {
     notifyListeners();
   }
 }
-
-

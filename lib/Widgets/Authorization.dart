@@ -44,8 +44,13 @@ class AuthWrapper extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.active) {
           final User? user = snapshot.data;
           if (user == null) {
+            // ✅ **FIX: User is signed out.**
+            // Before showing LoginScreen, clear the scope.
+            // This cancels any active stream listeners.
+            context.read<UserScopeService>().clearScope();
             return const LoginScreen();
           }
+          // User is signed in.
           return ScopeLoader(user: user);
         }
         return const Scaffold(

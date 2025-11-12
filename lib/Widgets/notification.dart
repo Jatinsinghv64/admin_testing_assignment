@@ -3,207 +3,127 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vibration/vibration.dart';
 
 // ❌ REMOVED: import '../Screens/OrdersScreen.dart'; // No longer needed for navigation
+import '../Screens/MainScreen.dart';
 import '../Screens/OrdersScreen.dart';
 import '../main.dart';
 import 'RiderAssignment.dart';
 
 class OrderNotificationService with ChangeNotifier {
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  static const String _soundKey = 'notification_sound_enabled';
+  static const String _vibrateKey = 'notification_vibrate_enabled';
+
+  bool _playSound = true;
+  bool _vibrate = true;
+
+  bool get playSound => _playSound;
+  bool get vibrate => _vibrate;
+
   final AudioPlayer _audioPlayer = AudioPlayer();
-  static const String _notificationSoundPath = 'notification.mp3';
+  final service = FlutterBackgroundService();
+  GlobalKey<NavigatorState>? _navigatorKey;
 
-  bool _isDialogShowing = false;
-  UserScopeService? _scopeService;
+  OrderNotificationService() {
+    // Load preferences when service is created
+    _loadPreferences();
+  }
 
-  StreamSubscription<Map<String, dynamic>?>? _serviceListener;
+  Future<void> _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    _playSound = prefs.getBool(_soundKey) ?? true;
+    _vibrate = prefs.getBool(_vibrateKey) ?? true;
+    notifyListeners();
+  }
 
-  /// ✅ CRITICAL: This method must be called after login
-  void init(UserScopeService scope, GlobalKey<NavigatorState> navigatorKey) {
-    _scopeService = scope;
+  Future<void> setPlaySound(bool value) async {
+    _playSound = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_soundKey, value);
+    notifyListeners();
+  }
 
-    final service = FlutterBackgroundService();
+  Future<void> setVibrate(bool value) async {
+    _vibrate = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_vibrateKey, value);
+    notifyListeners();
+  }
 
-    // Cancel any existing listener before creating a new one
-    _serviceListener?.cancel();
+  void init(UserScopeService scopeService, GlobalKey<NavigatorState> key) {
+    _navigatorKey = key;
+    // Listen for messages from the background service
+    service.on('new_order').listen((payload) {
+      if (payload != null) {
+        final orderId = payload['orderId'] as String?;
+        final title = payload['title'] as String?;
+        final body = payload['body'] as String?;
 
-    // Listen for 'new_order' events from the background service
-    _serviceListener = service.on('new_order').listen((event) {
-      debugPrint(
-          "🎯 OrderNotificationService: Received 'new_order' event from background.");
+        if (orderId != null && scopeService.isLoaded) {
+          // Check if the order belongs to this admin's branch(es)
+          final branchIds = (payload['branchIds'] as List?)?.cast<String>() ?? [];
+          final bool branchMatch = scopeService.isSuperAdmin ||
+              branchIds.any((id) => scopeService.branchIds.contains(id));
 
-      final navContext = navigatorKey.currentContext;
-      if (navContext != null && event != null && event is Map<String, dynamic>) {
-        final data = event;
-        final orderId = data['orderId'] as String?;
-
-        if (orderId != null && !_isDialogShowing) {
-          debugPrint('🎯 OrderNotificationService: Showing dialog for $orderId');
-          // Show the in-app popup
-          _showNewOrderPopup(navContext, orderId, data);
-        } else {
-          debugPrint(
-              '🎯 OrderNotificationService: Dialog busy or orderId null, skipping popup.');
+          if (branchMatch) {
+            _triggerNotification(orderId, title, body);
+          }
         }
       }
     });
-
-    debugPrint(
-        '✅ OrderNotificationService: Initialized and listening to BackgroundService.');
   }
 
-  /// Triggers device vibration
-  Future<void> _vibrate() async {
-    try {
-      bool? hasVibrator = await Vibration.hasVibrator();
-      if (hasVibrator == true) {
-        Vibration.vibrate(pattern: [500, 1000]);
-        debugPrint('📳 Device vibrated');
+  Future<void> _triggerNotification(String orderId, String? title, String? body) async {
+    if (_playSound) {
+      // Re-initialize player to avoid issues
+      final player = AudioPlayer();
+      await player.play(AssetSource('notification.mp3'));
+    }
+    if (_vibrate) {
+      if (await Vibration.hasVibrator() ?? false) {
+        Vibration.vibrate(duration: 500);
       }
-    } catch (e) {
-      debugPrint('Error vibrating: $e');
     }
-  }
 
-  /// Plays the notification sound from assets
-  Future<void> _playNotificationSound() async {
-    try {
-      await _audioPlayer.play(AssetSource(_notificationSoundPath));
-      debugPrint('🔊 OrderNotificationService: Playing sound');
-    } catch (e) {
-      debugPrint('Error playing notification sound: $e');
-      debugPrint('Please ensure "assets/$_notificationSoundPath" is in your assets and pubspec.yaml');
-    }
-  }
-
-  /// Shows the actual pop-up dialog.
-  void _showNewOrderPopup(
-      BuildContext context,
-      String orderId,
-      Map<String, dynamic> data,
-      ) {
-    if (_isDialogShowing) return;
-    _isDialogShowing = true;
-
-    debugPrint('🎯 Showing new order dialog for: $orderId');
-
-    // Play sound and vibrate for the in-app dialog
-    _playNotificationSound();
-    _vibrate();
-
-    showDialog(
-      context: context,
-      barrierDismissible: false, // User must make a choice
-      builder: (dialogContext) {
-        // ✅ CHANGED: Pass the entire 'data' map to the dialog
-        return NewOrderDialog(
-          orderData: data,
-          onAccept: () {
-            debugPrint('✅ Order accepted: $orderId');
-            Navigator.of(dialogContext).pop();
-            _handleOrderAcceptance(context, orderId);
-          },
-          onReject: () {
-            debugPrint('❌ Order rejected: $orderId');
-            Navigator.of(dialogContext).pop();
-            _updateOrderStatus(orderId, 'cancelled');
-          },
-          onAutoAccept: () {
-            debugPrint('🤖 Order auto-accepted: $orderId');
-            Navigator.of(dialogContext).pop();
-            _handleOrderAcceptance(context, orderId);
-          },
+    // ✅ **MOVED _navigateToOrder HERE**
+    void _navigateToOrder(String orderId) {
+      final context = _navigatorKey?.currentContext;
+      if (context != null) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => HomeScreen()),
+              (route) => false,
         );
-      },
-    ).then((_) {
-      // Ensure flag is reset when dialog is closed
-      _isDialogShowing = false;
-      debugPrint(
-          '🎯 Dialog closed, isDialogShowing reset to: $_isDialogShowing');
-    });
-  }
-
-  /// Runs the status update, printing, and rider assignment tasks in the background.
-  Future<void> _handleOrderAcceptance(
-      BuildContext context, String orderId) async {
-    // Check if scope is available
-    if (_scopeService == null || _scopeService!.branchId.isEmpty) {
-      debugPrint(
-          "Error: UserScopeService not initialized or has no branchId. Cannot assign rider.");
-      // Still update status
-      await _updateOrderStatus(orderId, 'preparing');
-      return;
+        debugPrint("Navigating to order: $orderId");
+      } else {
+        debugPrint("❌ Cannot navigate! Navigator context is null.");
+      }
     }
 
-    final String branchId = _scopeService!.branchId;
-
-    // 1. Update status
-    await _updateOrderStatus(orderId, 'preparing');
-
-    try {
-      // 2. Fetch the full document
-      final orderDoc = await _db.collection('Orders').doc(orderId).get();
-      if (!orderDoc.exists) {
-        debugPrint("Order $orderId not found for printing/assignment.");
-        return;
-      }
-
-      // 3. Print receipt (using the main navigator context)
-      if (context.mounted) {
-        await printReceipt(context, orderDoc);
-      }
-
-      // 4. Auto-assign rider, passing the branchId
-      await RiderAssignmentService.autoAssignRider(
-        orderId: orderId,
-        branchId: branchId,
+    void showInAppOrderDialog(BuildContext context, String orderId, String? title, String? body) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title ?? 'New Order!'),
+          content: Text(body ?? 'You have a new pending order.'),
+          actions: [
+            TextButton(
+              child: const Text('Dismiss'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            ElevatedButton(
+              child: const Text('View Order'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _navigateToOrder(orderId); // ✅ **FIX:** This now calls the method inside this class
+              },
+            ),
+          ],
+        ),
       );
-    } catch (e) {
-      debugPrint("Error during print/auto-assign: $e");
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error during print/auto-assign: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
-  }
-
-  /// Updates an order's status in Firestore.
-  Future<void> _updateOrderStatus(String orderId, String newStatus) async {
-    try {
-      final Map<String, dynamic> updateData = {'status': newStatus};
-
-      if (newStatus == 'preparing') {
-        updateData['timestamps.preparing'] = FieldValue.serverTimestamp();
-      } else if (newStatus == 'cancelled') {
-        updateData['timestamps.cancelled'] = FieldValue.serverTimestamp();
-      }
-
-      await _db.collection('Orders').doc(orderId).update(updateData);
-
-      debugPrint(
-          '✅ OrderNotificationService: Order $orderId status updated to "$newStatus"');
-    } catch (e) {
-      debugPrint(
-          '❌ OrderNotificationService: Failed to update order $orderId: $e');
-    }
-  }
-
-  /// Cleans up the listener when the service is disposed.
-  @override
-  void dispose() {
-    _serviceListener?.cancel(); // Cancel the service listener
-    _audioPlayer.dispose();
-    RiderAssignmentService.dispose();
-    debugPrint('🎯 OrderNotificationService: Disposed and service listener cancelled.');
-    super.dispose();
-  }
-}
+  }}
 
 //
 // -------------------------------------------------------------------
