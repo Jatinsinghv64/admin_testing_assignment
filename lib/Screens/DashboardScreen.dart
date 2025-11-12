@@ -7,6 +7,7 @@ import 'package:http/http.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../Widgets/ScopeLoader.dart';
 import '../Widgets/placeholders.dart';
 import '../main.dart';
 import 'OrdersScreen.dart';
