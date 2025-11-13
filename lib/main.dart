@@ -101,6 +101,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider<RestaurantStatusService>(
           create: (_) => RestaurantStatusService(),
         ),
+        ChangeNotifierProvider(create: (_) => BadgeCountProvider()),
       ],
       child: MaterialApp(
         navigatorKey: navigatorKey,

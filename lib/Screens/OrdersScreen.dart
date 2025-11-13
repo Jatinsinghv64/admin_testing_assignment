@@ -20,6 +20,28 @@ import 'package:pdf/widgets.dart' as pw;
 /// Main screen for viewing and managing orders.
 /// Filters orders based on the user's role (super_admin vs. branch_admin)
 /// and the selected order type/status.
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
+// import 'package:flutter/material.dart' as pw; // This line seems unused, commenting out.
+import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:provider/provider.dart';
+import '../Widgets/RiderAssignment.dart';
+import '../main.dart'; // Assuming navigatorKey and UserScopeService is here
+import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+
+/// Main screen for viewing and managing orders.
+/// Filters orders based on the user's role (super_admin vs. branch_admin)
+/// and the selected order type/status.
+///
+// final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>(); // This is already in main.dart
+
+/// Main screen for viewing and managing orders.
+/// Filters orders based on the user's role (super_admin vs. branch_admin)
+/// and the selected order type/status.
 class OrdersScreen extends StatefulWidget {
   final String? initialOrderType;
   final String? initialStatus;
@@ -129,7 +151,9 @@ class _OrdersScreenState extends State<OrdersScreen>
       'rider_assigned',
       'pickedUp',
       'delivered',
-      'cancelled'
+      'cancelled',
+      // --- ADDED STATUS ---
+      'needs_rider_assignment',
     ];
   }
 
@@ -229,70 +253,8 @@ class _OrdersScreenState extends State<OrdersScreen>
     }
   }
 
-  // Method to assign rider
-  // ✅ [SECURE FIX] Updated to use WriteBatch for atomic operations.
-  Future<void> _assignRider(BuildContext context, String orderId) async {
-    if (!mounted) return;
-
-    final userScope = context.read<UserScopeService>();
-    final currentBranchId = userScope.branchId;
-
-    final rider = await showDialog<String>(
-      context: context,
-      builder: (context) =>
-          _RiderSelectionDialog(currentBranchId: currentBranchId),
-    );
-
-    if (rider != null && rider.isNotEmpty) {
-      // --- START OF FIX ---
-      try {
-        final db = FirebaseFirestore.instance;
-        final orderRef = db.collection('Orders').doc(orderId);
-        final driverRef = db.collection('Drivers').doc(rider);
-
-        // Create a new WriteBatch
-        final WriteBatch batch = db.batch();
-
-        // 1. Update the Order document
-        batch.update(orderRef, {
-          'status': 'rider_assigned',
-          'riderId': rider,
-          'timestamps.riderAssigned': FieldValue.serverTimestamp(),
-          // 'timestamp': FieldValue.serverTimestamp(), // This was in your original code.
-          // Be careful: this overwrites the order *creation* time.
-          // I recommend removing it unless you have a specific reason for it.
-        });
-
-        // 2. Update the Driver document
-        batch.update(driverRef, {
-          'assignedOrderId': orderId,
-          'isAvailable': false,
-        });
-
-        // 3. Commit both operations atomically
-        await batch.commit();
-        // --- END OF FIX ---
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Rider assigned to order $orderId.'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to assign rider: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    }
-  }
+  // --- METHOD REMOVED ---
+  // Future<void> _assignRider(BuildContext context, String orderId) async { ... }
 
   @override
   Widget build(BuildContext context) {
@@ -376,7 +338,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                     color: Colors.deepPurple.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.filter_list_rounded,
                     color: Colors.deepPurple,
                     size: 20,
@@ -407,6 +369,9 @@ class _OrdersScreenState extends State<OrdersScreen>
                     'Preparing', 'preparing', Icons.restaurant_rounded),
                 _buildEnhancedStatusChip(
                     'Prepared', 'prepared', Icons.done_all_rounded),
+                // --- ADDED CHIP ---
+                _buildEnhancedStatusChip('Needs Assign',
+                    'needs_rider_assignment', Icons.person_pin_circle_outlined),
                 _buildEnhancedStatusChip('Rider Assigned', 'rider_assigned',
                     Icons.delivery_dining_rounded),
                 _buildEnhancedStatusChip(
@@ -429,6 +394,10 @@ class _OrdersScreenState extends State<OrdersScreen>
     Color chipColor;
     switch (value) {
       case 'pending':
+        chipColor = Colors.orange;
+        break;
+    // --- ADDED COLOR ---
+      case 'needs_rider_assignment':
         chipColor = Colors.orange;
         break;
       case 'preparing':
@@ -512,7 +481,7 @@ class _OrdersScreenState extends State<OrdersScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                CircularProgressIndicator(
+                const CircularProgressIndicator(
                   valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
                 ),
                 const SizedBox(height: 16),
@@ -563,11 +532,12 @@ class _OrdersScreenState extends State<OrdersScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Orders will appear here when placed.',
+                  'Orders with status "${_selectedStatus}" will appear here.',
                   style: TextStyle(
                     color: Colors.grey[500],
                     fontSize: 14,
                   ),
+                  textAlign: TextAlign.center,
                 ),
               ],
             ),
@@ -643,7 +613,7 @@ class _OrdersScreenState extends State<OrdersScreen>
               order: orderDoc,
               orderType: orderType,
               onStatusChange: updateOrderStatus,
-              onAssigned: _assignRider,
+              // onAssigned: _assignRider, // --- PARAMETER REMOVED ---
               isHighlighted: isHighlighted,
             );
           },
@@ -686,7 +656,8 @@ class _OrderCard extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> order;
   final String orderType;
   final Function(BuildContext, String, String) onStatusChange;
-  final Function(BuildContext, String) onAssigned;
+  // --- PARAMETER REMOVED ---
+  // final Function(BuildContext, String) onAssigned;
   final bool isHighlighted;
 
   const _OrderCard({
@@ -694,7 +665,7 @@ class _OrderCard extends StatelessWidget {
     required this.order,
     required this.orderType,
     required this.onStatusChange,
-    required this.onAssigned,
+    // required this.onAssigned, // --- PARAMETER REMOVED ---
     this.isHighlighted = false,
   });
 
@@ -725,7 +696,8 @@ class _OrderCard extends StatelessWidget {
     final List<Widget> buttons = [];
     final data = order.data() as Map? ?? {};
     final bool isAutoAssigning = data.containsKey('autoAssignStarted');
-    final bool needsManualAssignment = status == 'needs_rider_assignment';
+    // --- VARIABLE NO LONGER NEEDED ---
+    // final bool needsManualAssignment = status == 'needs_rider_assignment';
 
     // Consistent styling for all buttons
     const EdgeInsets btnPadding =
@@ -850,25 +822,28 @@ class _OrderCard extends StatelessWidget {
     }
     // **Flow for DELIVERY orders**
     else if (orderTypeLower == 'delivery') {
-      if ((status == 'prepared' || needsManualAssignment) && !isAutoAssigning) {
-        buttons.add(
-          ElevatedButton.icon(
-            icon: const Icon(Icons.delivery_dining, size: 16),
-            label:
-            Text(needsManualAssignment ? 'Assign Manually' : 'Assign Rider'),
-            onPressed: () => onAssigned(context, order.id),
-            style: ElevatedButton.styleFrom(
-              backgroundColor:
-              needsManualAssignment ? Colors.orange : Colors.blue,
-              foregroundColor: Colors.white,
-              padding: btnPadding,
-              minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        );
-      }
+      // --- BUTTON LOGIC REMOVED ---
+      // if ((status == 'prepared' || needsManualAssignment) && !isAutoAssigning) {
+      //   buttons.add(
+      //     ElevatedButton.icon(
+      //       icon: const Icon(Icons.delivery_dining, size: 16),
+      //       label:
+      //       Text(needsManualAssignment ? 'Assign Manually' : 'Assign Rider'),
+      //       onPressed: () => onAssigned(context, order.id), // <-- This is removed
+      //       style: ElevatedButton.styleFrom(
+      //         backgroundColor:
+      //         needsManualAssignment ? Colors.orange : Colors.blue,
+      //         foregroundColor: Colors.white,
+      //         padding: btnPadding,
+      //         minimumSize: btnMinSize,
+      //         shape: RoundedRectangleBorder(
+      //             borderRadius: BorderRadius.circular(12)),
+      //       ),
+      //     ),
+      //   );
+      // }
+
+      // We still keep the "Mark as Delivered" button for 'pickedUp' status
       if (status == 'pickedUp') {
         buttons.add(
           ElevatedButton.icon(
@@ -1011,11 +986,11 @@ class _OrderCard extends StatelessWidget {
                 Container(
                   margin: const EdgeInsets.only(right: 8),
                   padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     color: Colors.blue,
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.arrow_forward,
                     color: Colors.white,
                     size: 12,
@@ -1082,7 +1057,7 @@ class _OrderCard extends StatelessWidget {
                     ),
                     if (isAutoAssigning) ...[
                       const SizedBox(height: 4),
-                      Text(
+                      const Text(
                         'Auto-assigning rider...',
                         style: TextStyle(
                           color: Colors.blue,
@@ -1099,10 +1074,10 @@ class _OrderCard extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: Colors.orange.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(6),
-                          border:
-                          Border.all(color: Colors.orange.withOpacity(0.3)),
+                          border: Border.all(
+                              color: Colors.orange.withOpacity(0.3)),
                         ),
-                        child: Text(
+                        child: const Text(
                           'Needs manual assignment',
                           style: TextStyle(
                             color: Colors.orange,
@@ -1416,191 +1391,7 @@ class _OrderCard extends StatelessWidget {
   }
 }
 
-// -----------------------------------------------------------------------------
-// Enhanced Rider Selection Dialog
-// -----------------------------------------------------------------------------
 
-class _RiderSelectionDialog extends StatelessWidget {
-  final String currentBranchId;
-
-  const _RiderSelectionDialog({required this.currentBranchId});
-
-  @override
-  Widget build(BuildContext context) {
-    // Build the branch-aware query for available drivers
-    Query query = FirebaseFirestore.instance
-        .collection('Drivers')
-        .where('isAvailable', isEqualTo: true)
-        .where('status', isEqualTo: 'online');
-
-    // Filter by branch
-    // This assumes non-super admins will always have a currentBranchId
-    if (currentBranchId.isNotEmpty) {
-      query = query.where('branchIds', arrayContains: currentBranchId);
-    } else {
-      // Handle super_admin case if they don't have a branchId
-      // This will show all online/available drivers
-      // Or you could build a branch selector for them
-    }
-
-    return AlertDialog(
-      title: const Row(
-        children: [
-          Icon(Icons.delivery_dining, color: Colors.deepPurple),
-          SizedBox(width: 8),
-          Text('Select Available Rider'),
-        ],
-      ),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: StreamBuilder<QuerySnapshot>(
-          stream: query.snapshots(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(
-                child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
-                ),
-              );
-            }
-            if (snapshot.hasError) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Error loading riders: ${snapshot.error}', // Show error
-                    style: TextStyle(color: Colors.red),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              );
-            }
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.person_off_outlined,
-                      size: 48, color: Colors.grey[400]),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No available riders found',
-                    style: TextStyle(color: Colors.grey),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'All riders are currently busy or offline.', // More descriptive
-                    style: TextStyle(
-                      color: Colors.grey[500],
-                      fontSize: 12,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              );
-            }
-
-            final drivers = snapshot.data!.docs;
-            return ListView.builder(
-              shrinkWrap: true,
-              itemCount: drivers.length,
-              itemBuilder: (context, index) {
-                final driverDoc = drivers[index];
-                final data = driverDoc.data() as Map<String, dynamic>;
-                final String name = data['name'] ?? 'Unnamed Driver';
-                final String phone = data['phone'] ?? 'No phone';
-                final String vehicle =
-                    data['vehicle']?['type'] ?? 'No vehicle'; // Corrected path
-
-                return Card(
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  elevation: 1,
-                  child: ListTile(
-                    leading: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Colors.deepPurple.withOpacity(0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.person,
-                        color: Colors.deepPurple,
-                      ),
-                    ),
-                    title: Text(
-                      name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(phone),
-                        Text(
-                          vehicle,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                    trailing: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 6,
-                            height: 6,
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.green,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Available',
-                            style: TextStyle(
-                              color: Colors.green,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    onTap: () {
-                      Navigator.of(context).pop(driverDoc.id);
-                    },
-                  ),
-                );
-              },
-            );
-          },
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-      ],
-    );
-  }
-}
-
-/// A simple static service to pass a selected orderId from one screen
-/// (like Dashboard) to the OrdersScreen.
 
 Future<void> printReceipt(
     BuildContext context, DocumentSnapshot orderDoc) async {
@@ -1835,7 +1626,8 @@ Future<void> printReceipt(
                                 pw.SizedBox(width: 10),
                                 pw.Text(
                                     '- QAR ${discount.toStringAsFixed(2)}',
-                                    style: bold.copyWith(color: PdfColors.green),
+                                    style:
+                                    bold.copyWith(color: PdfColors.green),
                                     textAlign: pw.TextAlign.right),
                               ],
                             ),
@@ -1907,3 +1699,195 @@ class OrderSelectionService {
     _selectedOrder = {};
   }
 }
+
+
+
+// -----------------------------------------------------------------------------
+// Enhanced Rider Selection Dialog
+// -----------------------------------------------------------------------------
+
+class _RiderSelectionDialog extends StatelessWidget {
+  final String currentBranchId;
+
+  const _RiderSelectionDialog({required this.currentBranchId});
+
+  @override
+  Widget build(BuildContext context) {
+    // Build the branch-aware query for available drivers
+    Query query = FirebaseFirestore.instance
+        .collection('Drivers')
+        .where('isAvailable', isEqualTo: true)
+        .where('status', isEqualTo: 'online');
+
+    // Filter by branch
+    // This assumes non-super admins will always have a currentBranchId
+    if (currentBranchId.isNotEmpty) {
+      query = query.where('branchIds', arrayContains: currentBranchId);
+    } else {
+      // Handle super_admin case if they don't have a branchId
+      // This will show all online/available drivers
+      // Or you could build a branch selector for them
+    }
+
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.delivery_dining, color: Colors.deepPurple),
+          SizedBox(width: 8),
+          Text('Select Available Rider'),
+        ],
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: StreamBuilder<QuerySnapshot>(
+          stream: query.snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
+                ),
+              );
+            }
+            if (snapshot.hasError) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Error loading riders: ${snapshot.error}', // Show error
+                    style: TextStyle(color: Colors.red),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              );
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.person_off_outlined,
+                      size: 48, color: Colors.grey[400]),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'No available riders found',
+                    style: TextStyle(color: Colors.grey),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'All riders are currently busy or offline.', // More descriptive
+                    style: TextStyle(
+                      color: Colors.grey[500],
+                      fontSize: 12,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              );
+            }
+
+            final drivers = snapshot.data!.docs;
+            return ListView.builder(
+              shrinkWrap: true,
+              itemCount: drivers.length,
+              itemBuilder: (context, index) {
+                final driverDoc = drivers[index];
+                final data = driverDoc.data() as Map<String, dynamic>;
+                final String name = data['name'] ?? 'Unnamed Driver';
+                final String phone = data['phone'] ?? 'No phone';
+                final String vehicle =
+                    data['vehicle']?['type'] ?? 'No vehicle'; // Corrected path
+
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  elevation: 1,
+                  child: ListTile(
+                    leading: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.deepPurple.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.person,
+                        color: Colors.deepPurple,
+                      ),
+                    ),
+                    title: Text(
+                      name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(phone),
+                        Text(
+                          vehicle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.green,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Available',
+                            style: TextStyle(
+                              color: Colors.green,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.of(context).pop(driverDoc.id);
+                    },
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+      ],
+    );
+  }
+}
+
+/// A simple static service to pass a selected orderId from one screen
+/// (like Dashboard) to the OrdersScreen.
+
+
+/// A simple static service to pass a selected orderId from one screen
+/// (like Dashboard) to the OrdersScreen.

@@ -1,5 +1,3 @@
-
-
 import 'package:flutter/material.dart';
 
 class Permissions {
@@ -8,6 +6,8 @@ class Permissions {
   static const canViewAnalytics = 'canViewAnalytics';
   static const String canManageOrders = 'canManageOrders';
   static const String canManageRiders = 'canManageRiders';
+  // --- ADDED PERMISSION ---
+  static const String canManageManualAssignment = 'canManageManualAssignment';
   static const String canManageSettings = 'canManageSettings';
   static const String canManageStaff = 'canManageStaff';
   static const String canManageCoupons = 'canManageCoupons';
@@ -26,4 +26,13 @@ class AppScreen {
   });
 }
 
-enum AppTab { dashboard, inventory, orders, riders, analytics, settings }
+// --- ADDED AppTab ---
+enum AppTab {
+  dashboard,
+  inventory,
+  orders,
+  riders,
+  manualAssignment, // Added
+  analytics,
+  settings
+}
