@@ -6,11 +6,10 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vibration/vibration.dart';
 
-// ❌ REMOVED: import '../Screens/OrdersScreen.dart'; // No longer needed for navigation
 import '../Screens/MainScreen.dart';
-import '../Screens/OrdersScreen.dart';
+
 import '../main.dart';
-import 'RiderAssignment.dart';
+
 
 class OrderNotificationService with ChangeNotifier {
   static const String _soundKey = 'notification_sound_enabled';
@@ -68,7 +67,53 @@ class OrderNotificationService with ChangeNotifier {
               branchIds.any((id) => scopeService.branchIds.contains(id));
 
           if (branchMatch) {
+            // This plays sound and vibrates
             _triggerNotification(orderId, title, body);
+
+            // --- ✅ START OF FIX ---
+            // Get the current context to show a dialog
+            final context = _navigatorKey?.currentContext;
+            if (context != null) {
+              // Define the actions for the dialog buttons
+              VoidCallback onAccept = () {
+                FirebaseFirestore.instance
+                    .collection('Orders')
+                    .doc(orderId)
+                    .update({'status': 'preparing'});
+                Navigator.of(context).pop(); // Close dialog
+              };
+
+              VoidCallback onReject = () {
+                FirebaseFirestore.instance
+                    .collection('Orders')
+                    .doc(orderId)
+                    .update({'status': 'cancelled'});
+                Navigator.of(context).pop(); // Close dialog
+              };
+
+              VoidCallback onAutoAccept = () {
+                FirebaseFirestore.instance
+                    .collection('Orders')
+                    .doc(orderId)
+                    .update({'status': 'preparing'});
+                // Dialog closes itself via timer
+              };
+
+              // Show the NewOrderDialog
+              showDialog(
+                context: context,
+                barrierDismissible: false, // Prevent closing by tapping outside
+                builder: (dialogContext) => NewOrderDialog(
+                  orderData: payload, // Pass the full order data
+                  onAccept: onAccept,
+                  onReject: onReject,
+                  onAutoAccept: onAutoAccept,
+                ),
+              );
+            } else {
+              debugPrint("❌ OrderNotificationService: Cannot show dialog, context is null.");
+            }
+            // --- ✅ END OF FIX ---
           }
         }
       }
@@ -101,6 +146,8 @@ class OrderNotificationService with ChangeNotifier {
       }
     }
 
+    // This function is defined but no longer called from the listener.
+    // It is kept here in case you want to use it for a simpler dialog later.
     void showInAppOrderDialog(BuildContext context, String orderId, String? title, String? body) {
       showDialog(
         context: context,
