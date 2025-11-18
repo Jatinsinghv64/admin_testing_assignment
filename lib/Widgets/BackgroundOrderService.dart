@@ -6,12 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
-
-
-
-
 import 'package:firebase_core/firebase_core.dart';
-
 import '../firebase_options.dart';
 
 @pragma('vm:entry-point')
@@ -86,12 +81,18 @@ class BackgroundOrderService {
             return item.millisecondsSinceEpoch;
           } else if (item is GeoPoint) {
             return {'latitude': item.latitude, 'longitude': item.longitude};
-          } else if (item is String || item is num || item is bool || item == null) {
+          } else if (item is String ||
+              item is num ||
+              item is bool ||
+              item == null) {
             return item;
           }
           return item.toString();
         }).toList();
-      } else if (value is String || value is num || value is bool || value == null) {
+      } else if (value is String ||
+          value is num ||
+          value is bool ||
+          value == null) {
         sanitizedMap[key] = value;
       } else {
         sanitizedMap[key] = value.toString();
@@ -119,8 +120,7 @@ class BackgroundOrderService {
     final Set<String> processedOrderIds = {};
     StreamSubscription? orderListener;
 
-    // ✅ ADDED: Track app lifecycle state
-    bool isAppInForeground = true; // Assume foreground at start
+    bool isAppInForeground = true;
 
     final FlutterLocalNotificationsPlugin localNotifications =
     FlutterLocalNotificationsPlugin();
@@ -144,7 +144,6 @@ class BackgroundOrderService {
         ?.createNotificationChannel(orderChannel);
     debugPrint('✅ Background Service: Local Notifications Initialized');
 
-    // ✅ ADDED: Listeners for app state from UI
     service.on('appInForeground').listen((_) {
       isAppInForeground = true;
       debugPrint('✅ Background Service: App is FOREGROUND');
@@ -154,7 +153,6 @@ class BackgroundOrderService {
       isAppInForeground = false;
       debugPrint('✅ Background Service: App is BACKGROUND');
     });
-
 
     service.on('updateBranchIds').listen((event) async {
       if (event is Map<String, dynamic>) {
@@ -190,38 +188,38 @@ class BackgroundOrderService {
               'title': 'Restaurant Open',
               'content': 'Monitoring orders for ${branchIds.join(', ')}'
             });
-            debugPrint(
-                '🎯 Background Service: Received ${snapshot.docs.length} orders. App in foreground: $isAppInForeground');
-            for (var doc in snapshot.docs) {
+
+            for (var change in snapshot.docChanges) {
+              final doc = change.doc;
               final orderId = doc.id;
-              if (!processedOrderIds.contains(orderId)) {
-                processedOrderIds.add(orderId);
-                debugPrint(
-                    '🎯 Background Service: New order detected: $orderId');
 
-                // ✅ --- MODIFIED LOGIC ---
-                if (!isAppInForeground) {
-                  // App is in background or terminated.
-                  // Show notification, play sound, vibrate.
-                  debugPrint('App is background, showing local notification.');
-                  await _showOrderNotification(doc, localNotifications);
-                  await _playNotificationSound(audioPlayer);
-                  await _vibrate();
-                } else {
-                  // App is in foreground, just log it.
-                  // The UI (OrderNotificationService) will handle its own sound/vibration.
+              if (change.type == DocumentChangeType.added) {
+                if (!processedOrderIds.contains(orderId)) {
+                  processedOrderIds.add(orderId);
                   debugPrint(
-                      'App is foreground, skipping local notification.');
-                }
+                      '🎯 Background Service: New order detected: $orderId');
 
-                // ✅ ALWAYS invoke the event.
-                // The foreground UI (OrderNotificationService) will receive this.
-                final data = doc.data() as Map<String, dynamic>;
-                data['orderId'] = orderId;
-                data['id'] = orderId;
-                final sanitizedData = _sanitizeDataForInvoke(data);
-                service.invoke('new_order', sanitizedData);
-                // --- END MODIFIED LOGIC ---
+                  if (!isAppInForeground) {
+                    debugPrint('App is background, showing local notification.');
+                    await _showOrderNotification(doc, localNotifications);
+                    await _playNotificationSound(audioPlayer);
+                    await _vibrate();
+                  } else {
+                    debugPrint(
+                        'App is foreground, skipping local notification.');
+                  }
+
+                  final data = doc.data();
+                  // doc.data() for DocumentSnapshot returns T?, so we check for null
+                  if (data != null) {
+                    data['orderId'] = orderId;
+                    data['id'] = orderId;
+                    final sanitizedData = _sanitizeDataForInvoke(data);
+                    service.invoke('new_order', sanitizedData);
+                  }
+                }
+              } else if (change.type == DocumentChangeType.removed) {
+                processedOrderIds.remove(orderId);
               }
             }
           }, onError: (error) {
@@ -245,11 +243,16 @@ class BackgroundOrderService {
     service.invoke('updateBranchIds', {'branchIds': []});
   }
 
+  // ✅ FIXED: Changed parameter to DocumentSnapshot to accept both types
   static Future<void> _showOrderNotification(
-      QueryDocumentSnapshot doc,
+      DocumentSnapshot<Map<String, dynamic>> doc,
       FlutterLocalNotificationsPlugin plugin) async {
     try {
-      final data = doc.data() as Map<String, dynamic>;
+      final data = doc.data();
+
+      // ✅ FIXED: Added null check because DocumentSnapshot data can technically be null
+      if (data == null) return;
+
       final orderNumber = data['dailyOrderNumber']?.toString() ??
           doc.id.substring(0, 6).toUpperCase();
       final customerName = data['customerName']?.toString() ?? 'N/A';
@@ -281,12 +284,10 @@ class BackgroundOrderService {
 
   static Future<void> _playNotificationSound(AudioPlayer audioPlayer) async {
     try {
-      // Set release mode to ensure sound plays repeatedly
       await audioPlayer.setReleaseMode(ReleaseMode.loop);
       await audioPlayer.play(AssetSource('notification.mp3'));
       debugPrint('🔊 Background Service: Playing sound loop');
 
-      // Stop the sound after a few seconds
       Future.delayed(const Duration(seconds: 5), () {
         audioPlayer.stop();
         audioPlayer.setReleaseMode(ReleaseMode.release);
@@ -303,7 +304,7 @@ class BackgroundOrderService {
     try {
       bool? hasVibrator = await Vibration.hasVibrator();
       if (hasVibrator == true) {
-        Vibration.vibrate(pattern: [500, 1000, 500, 1000]); // Vibrate twice
+        Vibration.vibrate(pattern: [500, 1000, 500, 1000]);
         debugPrint('📳 Background Service: Vibrating');
       }
     } catch (e) {
