@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:provider/provider.dart';
-import '../Widgets/RiderAssignment.dart';
 import '../main.dart'; // Assuming navigatorKey is here
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
@@ -21,17 +20,8 @@ import 'package:pdf/widgets.dart' as pw;
 /// Filters orders based on the user's role (super_admin vs. branch_admin)
 /// and the selected order type/status.
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/services.dart';
-// import 'package:flutter/material.dart' as pw; // This line seems unused, commenting out.
+
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
-import 'package:provider/provider.dart';
-import '../Widgets/RiderAssignment.dart';
-import '../main.dart'; // Assuming navigatorKey and UserScopeService is here
-import 'package:printing/printing.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 
 /// Main screen for viewing and managing orders.
 /// Filters orders based on the user's role (super_admin vs. branch_admin)
@@ -42,615 +32,406 @@ import 'package:pdf/widgets.dart' as pw;
 /// Main screen for viewing and managing orders.
 /// Filters orders based on the user's role (super_admin vs. branch_admin)
 /// and the selected order type/status.
+
+
+import 'dart:async';
+
+import 'dart:async';
+
+
+
 class OrdersScreen extends StatefulWidget {
-  final String? initialOrderType;
-  final String? initialStatus;
-  final String? initialOrderId; // The ID of the order to scroll to/highlight
-
-  const OrdersScreen({
-    super.key,
-    this.initialOrderType,
-    this.initialStatus,
-    this.initialOrderId,
-  });
-
   @override
-  State<OrdersScreen> createState() => _OrdersScreenState();
+  _OrdersScreenState createState() => _OrdersScreenState();
 }
 
-class _OrdersScreenState extends State<OrdersScreen>
-    with SingleTickerProviderStateMixin {
+class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  String _selectedStatus = 'all';
-  late ScrollController _scrollController;
-  final Map<String, GlobalKey> _orderKeys = {};
-  bool _shouldScrollToOrder = false;
 
-  // Add this to track if we need to scroll to a specific order from dashboard
-  String? _orderToScrollTo;
-  String? _orderToScrollType;
-  String? _orderToScrollStatus;
+  // --- FIX 1: REMOVED ALL NOTIFICATION LOGIC ---
+  // The OrderNotificationService, initialized in your main.dart or
+  // MainScreen.dart, is already responsible for new order sounds
+  // and popups. This screen should not do it again.
+  //
+  // final OrderNotificationService _notificationService = OrderNotificationService(); // <- DELETED
+  // StreamSubscription<QuerySnapshot>? _newOrdersSubscription; // <- DELETED
+  // --- END FIX 1 ---
 
-  final Map<String, String> _orderTypeMap = {
-    'Delivery': 'delivery',
-    'Takeaway': 'takeaway',
-    'Pickup': 'pickup',
-    'Dine-in': 'dine_in',
-  };
+  // Manage selectedBranchId locally in this screen's state
+  String _selectedBranchId = 'all';
+
+  final List<String> _orderStatusTabs = [
+    'pending',
+    'preparing',
+    'prepared',
+    'rider_assigned',
+    'out_for_delivery',
+    'needs_rider_assignment', // Added for the new server flow
+  ];
 
   @override
   void initState() {
     super.initState();
-    _scrollController = ScrollController();
+    _tabController = TabController(length: _orderStatusTabs.length, vsync: this);
 
-    // Check if there's a selected order from dashboard
-    final selectedOrder = OrderSelectionService.getSelectedOrder();
-    if (selectedOrder['orderId'] != null) {
-      _orderToScrollTo = selectedOrder['orderId'];
-      _orderToScrollType = selectedOrder['orderType'];
-      _orderToScrollStatus = selectedOrder['status'];
-      _shouldScrollToOrder = true;
+    // Simplified initState.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final scopeService = Provider.of<UserScopeService>(context, listen: false);
 
-      // Set initial status filter based on order from dashboard
-      if (_orderToScrollStatus != null &&
-          _getStatusValues().contains(_orderToScrollStatus)) {
-        _selectedStatus = _orderToScrollStatus!;
-      }
-    }
-
-    // Initialize tab controller based on widget parameters or dashboard selection
-    int initialTabIndex = 0;
-    if (widget.initialOrderType != null) {
-      final orderTypes = _orderTypeMap.values.toList();
-      initialTabIndex = orderTypes.indexOf(widget.initialOrderType!);
-      if (initialTabIndex == -1) initialTabIndex = 0;
-    } else if (_orderToScrollType != null) {
-      // Use order type from dashboard selection
-      final orderTypes = _orderTypeMap.values.toList();
-      initialTabIndex = orderTypes.indexOf(_orderToScrollType!);
-      if (initialTabIndex == -1) initialTabIndex = 0;
-    }
-
-    _tabController = TabController(
-      length: _orderTypeMap.length,
-      vsync: this,
-      initialIndex: initialTabIndex,
-    );
-
-    // Add listener to reset scroll flag when tab changes
-    _tabController.addListener(() {
-      if (!_tabController.indexIsChanging) {
-        setState(() {
-          _shouldScrollToOrder =
-              widget.initialOrderId != null || _orderToScrollTo != null;
-        });
+        // Set default branch if user only has one
+        if (!scopeService.isSuperAdmin && scopeService.branchIds.length == 1) {
+          if (mounted) {
+            setState(() {
+              _selectedBranchId = scopeService.branchIds.first;
+            });
+          }
+        }
       }
     });
 
-    // Set shouldScrollToOrder flag if an initial order ID is provided or from dashboard
-    _shouldScrollToOrder =
-        widget.initialOrderId != null || _orderToScrollTo != null;
+    // _listenForNewOrders(); // <- DELETED
   }
+
+  // --- FIX 1 (CONTINUED): REMOVED REDUNDANT METHOD ---
+  // void _listenForNewOrders() { ... } // <- ENTIRE METHOD DELETED
+  // --- END FIX 1 ---
 
   @override
   void dispose() {
-    // Clear the selected order when leaving OrdersScreen
-    OrderSelectionService.clearSelectedOrder();
     _tabController.dispose();
-    _scrollController.dispose();
+    // _newOrdersSubscription?.cancel(); // <- DELETED
     super.dispose();
   }
 
-  // Helper to get all valid status values
-  List<String> _getStatusValues() {
-    return [
-      'all',
-      'pending',
-      'preparing',
-      'prepared',
-      'rider_assigned',
-      'pickedUp',
-      'delivered',
-      'cancelled',
-      // --- ADDED STATUS ---
-      'needs_rider_assignment',
-    ];
-  }
-
-  // Method to update order status in Firestore
-  // ✅ [SECURE FIX] Updated to use WriteBatch for atomic operations.
-  Future<void> updateOrderStatus(
-      BuildContext context, String orderId, String newStatus) async {
-    // Use mounted check in async methods
-    if (!mounted) return;
+  Future<void> _updateOrderStatus(BuildContext context, String orderId, String newStatus) async {
+    // This is the loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return Center(child: CircularProgressIndicator());
+      },
+    );
 
     try {
-      final db = FirebaseFirestore.instance;
-      final orderRef = db.collection('Orders').doc(orderId);
-
-      // Use a WriteBatch for atomicity
-      final WriteBatch batch = db.batch();
-
-      final Map<String, dynamic> updateData = {
+      await FirebaseFirestore.instance.collection('Orders').doc(orderId).update({
         'status': newStatus,
-      };
+        'timestamps.$newStatus': FieldValue.serverTimestamp(),
+      });
 
-      if (newStatus == 'prepared') {
-        updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
-      } else if (newStatus == 'delivered') {
-        updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
+      // This is the core logic. When status is 'preparing',
+      // the Cloud Function will take over.
 
-        // --- START OF FIX ---
-        // We must read the doc *first* to see if a rider needs to be freed.
-        final orderDoc = await orderRef.get();
-        final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-        final String orderType =
-            (data['Order_type'] as String?)?.toLowerCase() ?? '';
-        final String? riderId =
-        data.containsKey('riderId') ? data['riderId'] as String? : null;
-
-        if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
-          final driverRef = db.collection('Drivers').doc(riderId);
-          batch.update(driverRef, {
-            'assignedOrderId': '',
-            'isAvailable': true,
-          });
-        }
-        // --- END OF FIX ---
-      } else if (newStatus == 'cancelled') {
-        updateData['timestamps.cancelled'] = FieldValue.serverTimestamp();
-
-        // IMPORTANT FIX: Cancel auto-assignment when order is cancelled
-        await RiderAssignmentService.cancelAutoAssignment(orderId);
-
-        // --- START OF FIX ---
-        // We must read the doc *first* to see if a rider needs to be freed.
-        final orderDoc = await orderRef.get();
-        final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-        final String? riderId = data['riderId'] as String?;
-
-        if (riderId != null && riderId.isNotEmpty) {
-          // Free up the rider
-          final driverRef = db.collection('Drivers').doc(riderId);
-          batch.update(driverRef, {
-            'assignedOrderId': '',
-            'isAvailable': true,
-          });
-
-          // Remove rider from order
-          updateData['riderId'] = FieldValue.delete();
-        }
-        // --- END OF FIX ---
-      } else if (newStatus == 'pickedUp') {
-        updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
-      } else if (newStatus == 'rider_assigned') {
-        updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
-      }
-
-      // Add the main order update to the batch
-      batch.update(orderRef, updateData);
-
-      // Commit all changes atomically
-      await batch.commit();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Order $orderId status updated to "$newStatus"!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      Navigator.of(context).pop(); // Dismiss loading dialog
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Order status updated to $newStatus')),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to update order status: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      Navigator.of(context).pop(); // Dismiss loading dialog
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update status: $e')),
+      );
     }
   }
 
-  // --- METHOD REMOVED ---
-  // Future<void> _assignRider(BuildContext context, String orderId) async { ... }
 
   @override
   Widget build(BuildContext context) {
+    // Get the correct service
+    final scopeService = Provider.of<UserScopeService>(context);
+
     return Scaffold(
-      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.white,
-        centerTitle: true,
-        title: const Text(
-          'Orders',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Colors.deepPurple,
-            fontSize: 24,
-          ),
+        title: Text('Live Orders'),
+        bottom: TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          tabs: _orderStatusTabs.map((status) => Tab(text: status.toUpperCase().replaceAll('_', ' '))).toList(),
         ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(kToolbarHeight),
-          child: _buildOrderTypeTabs(),
-        ),
-      ),
-      body: Column(
-        children: [
-          _buildEnhancedStatusFilterBar(),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: _orderTypeMap.values.map((orderTypeKey) {
-                return _buildOrdersList(orderTypeKey);
-              }).toList(),
-            ),
+        actions: [
+          // --- FIX 2: REBUILD DROPDOWN WITH STREAMBUILDER ---
+          // This StreamBuilder fetches the Branch documents using the
+          // 'branchIds' from your UserScopeService.
+          StreamBuilder<QuerySnapshot>(
+            // If super admin, get all branches. Otherwise, get only branches
+            // matching the IDs from the scope service.
+            stream: scopeService.isSuperAdmin
+                ? FirebaseFirestore.instance.collection('Branch').snapshots()
+                : (scopeService.branchIds.isEmpty
+                ? Stream.empty() // Handle case where user has no branches
+                : FirebaseFirestore.instance
+                .collection('Branch')
+                .where(FieldPath.documentId, whereIn: scopeService.branchIds)
+                .snapshots()),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                // If no branches, show nothing in the app bar
+                return SizedBox.shrink();
+              }
+
+              // Create the list of DropdownMenuItem widgets from the documents
+              var branchItems = snapshot.data!.docs.map((doc) {
+                // Assuming branch documents have 'name' field
+                var branchName = (doc.data() as Map<String, dynamic>)['name'] ?? 'Unknown Branch';
+                return DropdownMenuItem<String>(
+                  value: doc.id,
+                  child: Text(branchName, style: TextStyle(color: Colors.white)),
+                );
+              }).toList();
+
+              // Add the "All Branches" option ONLY if super admin
+              if (scopeService.isSuperAdmin) {
+                branchItems.insert(0, DropdownMenuItem<String>(
+                  value: 'all',
+                  child: Text('All Branches', style: TextStyle(color: Colors.white)),
+                ));
+              }
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: DropdownButton<String>(
+                  value: _selectedBranchId,
+                  dropdownColor: Theme.of(context).appBarTheme.backgroundColor,
+                  icon: Icon(Icons.store, color: Colors.white),
+                  underline: Container(),
+                  onChanged: (String? newValue) {
+                    if (newValue != null) {
+                      setState(() {
+                        _selectedBranchId = newValue; // Update local state
+                      });
+                      // No need to call _listenForNewOrders,
+                      // the OrderList StreamBuilder will rebuild automatically
+                    }
+                  },
+                  items: branchItems,
+                ),
+              );
+            },
           ),
+          // --- END FIX 2 ---
         ],
       ),
-    );
-  }
-
-  Widget _buildOrderTypeTabs() {
-    return Container(
-      color: Colors.white,
-      child: TabBar(
+      body: TabBarView(
         controller: _tabController,
-        indicatorSize: TabBarIndicatorSize.tab,
-        indicatorColor: Colors.deepPurple,
-        labelColor: Colors.deepPurple,
-        unselectedLabelColor: Colors.grey,
-        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-        tabs: _orderTypeMap.keys.map((tabName) {
-          return Tab(text: tabName);
+        children: _orderStatusTabs.map((status) {
+          return OrderList(
+            status: status,
+            onUpdateStatus: _updateOrderStatus,
+            selectedBranchId: _selectedBranchId, // Pass local state down
+          );
         }).toList(),
       ),
     );
   }
+}
 
-  Widget _buildEnhancedStatusFilterBar() {
-    return Container(
-      margin: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.deepPurple.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.deepPurple.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.filter_list_rounded,
-                    color: Colors.deepPurple,
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                const Text(
-                  'Filter by Status',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.deepPurple,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Filter chips
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-            child: Row(
-              children: [
-                _buildEnhancedStatusChip('All', 'all', Icons.apps_rounded),
-                _buildEnhancedStatusChip(
-                    'Placed', 'pending', Icons.schedule_rounded),
-                _buildEnhancedStatusChip(
-                    'Preparing', 'preparing', Icons.restaurant_rounded),
-                _buildEnhancedStatusChip(
-                    'Prepared', 'prepared', Icons.done_all_rounded),
-                // --- ADDED CHIP ---
-                _buildEnhancedStatusChip('Needs Assign',
-                    'needs_rider_assignment', Icons.person_pin_circle_outlined),
-                _buildEnhancedStatusChip('Rider Assigned', 'rider_assigned',
-                    Icons.delivery_dining_rounded),
-                _buildEnhancedStatusChip(
-                    'Picked Up', 'pickedUp', Icons.local_shipping_rounded),
-                _buildEnhancedStatusChip(
-                    'Delivered', 'delivered', Icons.check_circle_rounded),
-                _buildEnhancedStatusChip(
-                    'Cancelled', 'cancelled', Icons.cancel_rounded),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+//
+// --- NO CHANGES BELOW THIS LINE ---
+//
 
-  Widget _buildEnhancedStatusChip(String label, String value, IconData icon) {
-    final bool isSelected = _selectedStatus == value;
-    // Keep your existing color mapping
-    Color chipColor;
-    switch (value) {
-      case 'pending':
-        chipColor = Colors.orange;
-        break;
-    // --- ADDED COLOR ---
-      case 'needs_rider_assignment':
-        chipColor = Colors.orange;
-        break;
-      case 'preparing':
-        chipColor = Colors.teal;
-        break;
-      case 'prepared':
-        chipColor = Colors.blueAccent;
-        break;
-      case 'rider_assigned':
-        chipColor = Colors.purple;
-        break;
-      case 'pickedUp':
-        chipColor = Colors.deepPurple;
-        break;
-      case 'delivered':
-        chipColor = Colors.green;
-        break;
-      case 'cancelled':
-        chipColor = Colors.red;
-        break;
-      default:
-        chipColor = Colors.deepPurple;
+class OrderList extends StatelessWidget {
+  final String status;
+  final String selectedBranchId;
+  final Function(BuildContext, String, String) onUpdateStatus;
+
+  OrderList({required this.status, required this.onUpdateStatus, required this.selectedBranchId});
+
+  @override
+  Widget build(BuildContext context) {
+    Query query = FirebaseFirestore.instance
+        .collection('Orders')
+        .where('status', isEqualTo: status);
+
+    // Safely add ordering
+    if (status == 'pending' || status == 'preparing' || status =='prepared' || status == 'rider_assigned' || status == 'out_for_delivery' || status == 'needs_rider_assignment') {
+      query = query.orderBy('timestamps.$status', descending: true);
+    } else {
+      // Fallback for statuses without a dedicated timestamp
+      query = query.orderBy('timestamps.pending', descending: true);
     }
 
-    return Container(
-      margin: const EdgeInsets.only(right: 12),
-      child: FilterChip(
-        showCheckmark: false,
-        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        visualDensity: const VisualDensity(horizontal: -1, vertical: -2),
-        avatar: CircleAvatar(
-          radius: 12,
-          backgroundColor: isSelected
-              ? Colors.white.withOpacity(0.2)
-              : chipColor.withOpacity(0.12),
-          child: Icon(
-            icon,
-            size: 14,
-            color: isSelected ? Colors.white : chipColor,
-          ),
-        ),
-        labelPadding: const EdgeInsets.symmetric(horizontal: 8),
-        label: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : chipColor,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-            fontSize: 12,
-          ),
-        ),
-        selected: isSelected,
-        onSelected: (selected) {
-          setState(() {
-            _selectedStatus = selected ? value : 'all';
-            _shouldScrollToOrder =
-                widget.initialOrderId != null || _orderToScrollTo != null;
-          });
-        },
-        selectedColor: chipColor,
-        backgroundColor: chipColor.withOpacity(0.1),
-        elevation: isSelected ? 4 : 1,
-        shadowColor: chipColor.withOpacity(0.3),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(25),
-          side: BorderSide(
-            color: isSelected ? chipColor : chipColor.withOpacity(0.3),
-            width: 1.5,
-          ),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      ),
-    );
-  }
+    // Filter by branch
+    if (selectedBranchId != 'all') {
+      query = query.where('branchId', isEqualTo: selectedBranchId);
+    }
 
-  Widget _buildOrdersList(String orderType) {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _getOrdersStream(orderType),
+    return StreamBuilder<QuerySnapshot>(
+      stream: query.snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Loading orders...',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 16,
-                  ),
-                ),
-              ],
-            ),
-          );
+          return Center(child: CircularProgressIndicator());
         }
-
         if (snapshot.hasError) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
-                const SizedBox(height: 16),
-                Text(
-                  'Error: ${snapshot.error}',
-                  style: const TextStyle(color: Colors.red, fontSize: 16),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          );
+          print("OrderList Error (${status}): ${snapshot.error}");
+          return Center(child: Text('Error: ${snapshot.error}'));
         }
-
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.receipt_long_outlined,
-                    size: 64, color: Colors.grey[400]),
-                const SizedBox(height: 16),
-                Text(
-                  'No orders found.',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 18,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Orders with status "${_selectedStatus}" will appear here.',
-                  style: TextStyle(
-                    color: Colors.grey[500],
-                    fontSize: 14,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          );
+          return Center(child: Text('No $status orders.'));
         }
 
-        final docs = snapshot.data!.docs;
-
-        // Populate GlobalKeys and attempt to scroll if needed
-        // First check for widget.initialOrderId (direct navigation)
-        if (widget.initialOrderId != null && _shouldScrollToOrder) {
-          _orderKeys.clear();
-          for (var doc in docs) {
-            _orderKeys[doc.id] = GlobalKey();
-          }
-
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_shouldScrollToOrder) {
-              final key = _orderKeys[widget.initialOrderId!];
-              if (key != null && key.currentContext != null) {
-                Scrollable.ensureVisible(
-                  key.currentContext!,
-                  duration: const Duration(milliseconds: 500),
-                  curve: Curves.easeInOut,
-                  alignment: 0.1,
-                );
-                setState(() {
-                  _shouldScrollToOrder = false;
-                });
-              }
-            }
-          });
-        }
-
-        // THEN check for _orderToScrollTo (from dashboard)
-        if (_orderToScrollTo != null && _shouldScrollToOrder) {
-          _orderKeys.clear();
-          for (var doc in docs) {
-            _orderKeys[doc.id] = GlobalKey();
-          }
-
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_shouldScrollToOrder && _orderToScrollTo != null) {
-              final key = _orderKeys[_orderToScrollTo!];
-              if (key != null && key.currentContext != null) {
-                Scrollable.ensureVisible(
-                  key.currentContext!,
-                  duration: const Duration(milliseconds: 500),
-                  curve: Curves.easeInOut,
-                  alignment: 0.1,
-                );
-                setState(() {
-                  _shouldScrollToOrder = false;
-                  _orderToScrollTo = null; // Clear after scrolling
-                });
-              }
-            }
-          });
-        }
-
-        return ListView.separated(
-          controller: _scrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 16),
+        return ListView.builder(
+          itemCount: snapshot.data!.docs.length,
           itemBuilder: (context, index) {
-            final orderDoc = docs[index];
-            final isHighlighted = orderDoc.id == widget.initialOrderId ||
-                orderDoc.id == _orderToScrollTo;
-
-            return _OrderCard(
-              key: _orderKeys[orderDoc.id],
-              order: orderDoc,
-              orderType: orderType,
-              onStatusChange: updateOrderStatus,
-              // onAssigned: _assignRider, // --- PARAMETER REMOVED ---
-              isHighlighted: isHighlighted,
+            var order = snapshot.data!.docs[index];
+            return OrderCard(
+              order: order,
+              onUpdateStatus: onUpdateStatus,
             );
           },
         );
       },
     );
   }
+}
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _getOrdersStream(
-      String orderType) {
-    Query<Map<String, dynamic>> baseQuery = FirebaseFirestore.instance
-        .collection('Orders')
-        .where('Order_type', isEqualTo: orderType);
+class OrderCard extends StatelessWidget {
+  final QueryDocumentSnapshot order;
+  final Function(BuildContext, String, String) onUpdateStatus;
 
-    // Apply branch filter for non-super admin users
-    final userScope = context.read<UserScopeService>();
-    if (!userScope.isSuperAdmin) {
-      baseQuery =
-          baseQuery.where('branchIds', arrayContains: userScope.branchId);
+  OrderCard({required this.order, required this.onUpdateStatus});
+
+  String _formatTimestamp(Map<String, dynamic> data) {
+    var status = data['status'] ?? 'pending';
+    var timestamps = data['timestamps'] as Map<String, dynamic>?;
+
+    Timestamp? timestamp;
+    if (timestamps != null && timestamps.containsKey(status)) {
+      timestamp = timestamps[status] as Timestamp?;
     }
 
-    // Apply current day filtering for 'all' status
-    if (_selectedStatus == 'all') {
-      final now = DateTime.now();
-      final startOfToday = DateTime(now.year, now.month, now.day);
-      final endOfToday = startOfToday.add(const Duration(days: 1));
+    // Fallback
+    timestamp ??= timestamps?['pending'] as Timestamp?;
 
-      baseQuery = baseQuery
-          .where('timestamp', isGreaterThanOrEqualTo: startOfToday)
-          .where('timestamp', isLessThan: endOfToday);
-    } else {
-      baseQuery = baseQuery.where('status', isEqualTo: _selectedStatus);
+    if (timestamp != null) {
+      return DateFormat('g:i a, d MMM').format(timestamp.toDate());
+    }
+    return 'No time data';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    var data = order.data() as Map<String, dynamic>;
+    var items = (data['items'] as List<dynamic>?) ?? [];
+
+    return Card(
+      margin: EdgeInsets.all(10),
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: Text(
+                    'Order #${data['dailyOrderNumber'] ?? 'N/A'}',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Text(
+                  'QAR ${data['totalAmount']?.toStringAsFixed(2) ?? '0.00'}',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor),
+                ),
+              ],
+            ),
+            SizedBox(height: 8),
+            Text('Customer: ${data['customerName'] ?? 'N/A'}'),
+            Text('Type: ${data['Order_type'] ?? 'N/A'}'),
+            if (data['status'] == 'needs_rider_assignment' && data['assignmentNotes'] != null)
+              Text('Notes: ${data['assignmentNotes']}', style: TextStyle(color: Colors.red, fontStyle: FontStyle.italic)),
+            SizedBox(height: 8),
+            Text(
+              'Time: ${_formatTimestamp(data)}',
+              style: TextStyle(color: Colors.grey[700]),
+            ),
+            Divider(height: 20),
+            ...items.map((item) {
+              if (item is Map) {
+                return ListTile(
+                  title: Text(item['name'] ?? 'Item'),
+                  subtitle: Text('Qty: ${item['quantity']}'),
+                  trailing: Text('QAR ${item['price']?.toStringAsFixed(2) ?? '0.00'}'),
+                );
+              }
+              return SizedBox.shrink();
+            }).toList(),
+            SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: _buildActionButtons(context, order.id, data['status']),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildActionButtons(BuildContext context, String orderId, String status) {
+    List<Widget> buttons = [];
+
+    switch (status) {
+      case 'pending':
+        buttons.add(
+          ElevatedButton(
+            child: Text('Accept Order'),
+            onPressed: () => onUpdateStatus(context, orderId, 'preparing'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+          ),
+        );
+        buttons.add(
+          ElevatedButton(
+            child: Text('Reject Order'),
+            onPressed: () => onUpdateStatus(context, orderId, 'rejected'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+          ),
+        );
+        break;
+      case 'preparing':
+        buttons.add(
+          ElevatedButton(
+            child: Text('Order Prepared'),
+            onPressed: () => onUpdateStatus(context, orderId, 'prepared'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+          ),
+        );
+        break;
+      case 'prepared':
+        buttons.add(
+            Text('Waiting for rider...', style: TextStyle(fontStyle: FontStyle.italic))
+        );
+        break;
+      case 'rider_assigned':
+        buttons.add(
+          ElevatedButton(
+            child: Text('Out for Delivery'),
+            onPressed: () => onUpdateStatus(context, orderId, 'out_for_delivery'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+          ),
+        );
+        break;
+      case 'out_for_delivery':
+        buttons.add(
+          ElevatedButton(
+            child: Text('Mark as Delivered'),
+            onPressed: () => onUpdateStatus(context, orderId, 'delivered'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
+          ),
+        );
+        break;
+      case 'needs_rider_assignment':
+        buttons.add(
+            Text('Go to "Needs Assignment" tab', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
+        );
+        break;
     }
 
-    return baseQuery.orderBy('timestamp', descending: true).snapshots();
+    return buttons;
   }
 }
+
 
 class _OrderCard extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> order;
@@ -1390,7 +1171,6 @@ class _OrderCard extends StatelessWidget {
     );
   }
 }
-
 
 
 

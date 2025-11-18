@@ -27,15 +27,15 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
           RiderSelectionDialog(currentBranchId: currentBranchId),
     );
 
-    if (riderId != null && riderId.isNotEmpty) {
-      if (!mounted) return;
-      // Use the static method from RiderAssignmentService
-      await RiderAssignmentService.manualAssignRider(
-        orderId: orderId,
-        riderId: riderId,
-        context: context, // Pass the context for SnackBars
-      );
-    }
+    // if (riderId != null && riderId.isNotEmpty) {
+    //   if (!mounted) return;
+    //   // Use the static method from RiderAssignmentService
+    //   await RiderAssignmentService.manualAssignRider(
+    //     orderId: orderId,
+    //     riderId: riderId,
+    //     context: context, // Pass the context for SnackBars
+    //   );
+    // }
   }
 
   @override
