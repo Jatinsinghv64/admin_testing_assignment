@@ -8,6 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../firebase_options.dart';
 
 @pragma('vm:entry-point')
@@ -19,10 +20,13 @@ class BackgroundOrderService {
   static const String _orderChannelName = 'New Order Notifications';
   static const String _orderChannelDesc = 'This channel is used for important order notifications.';
 
+  static const String _prefsBranchKey = 'monitored_branch_ids';
+
   @pragma('vm:entry-point')
   static Future<void> initializeService() async {
     final service = FlutterBackgroundService();
 
+    // Channel for the Persistent Notification (Service running)
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
       _channelId,
       _channelName,
@@ -97,7 +101,6 @@ class BackgroundOrderService {
 
   @pragma('vm:entry-point')
   static Future<void> onStart(ServiceInstance service) async {
-    // Initialize Firebase
     if (Firebase.apps.isEmpty) {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
@@ -111,11 +114,9 @@ class BackgroundOrderService {
     StreamSubscription? arrayListener;
     StreamSubscription? singularListener;
 
-    bool isAppInForeground = false;
-
-    // Setup Local Notifications
     final FlutterLocalNotificationsPlugin localNotifications =
     FlutterLocalNotificationsPlugin();
+
     await localNotifications.initialize(
       const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -123,6 +124,8 @@ class BackgroundOrderService {
       ),
     );
 
+    // ✅ FIXED: Removed 'priority' and 'fullScreenIntent' from Channel definition
+    // 'importance: Importance.max' handles the priority level for the channel
     const AndroidNotificationChannel orderChannel = AndroidNotificationChannel(
       _orderChannelId,
       _orderChannelName,
@@ -137,133 +140,125 @@ class BackgroundOrderService {
         AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(orderChannel);
 
-    // Listeners for UI State
-    service.on('appInForeground').listen((_) {
-      isAppInForeground = true;
-      debugPrint('✅ Background Service: App is FOREGROUND');
-    });
+    Future<void> connectToFirestore(List<String> branchIds) async {
+      await arrayListener?.cancel();
+      await singularListener?.cancel();
+      arrayListener = null;
+      singularListener = null;
 
-    service.on('appInBackground').listen((_) {
-      isAppInForeground = false;
-      debugPrint('✅ Background Service: App is BACKGROUND');
-    });
+      if (branchIds.isEmpty) {
+        service.invoke('updateNotification', {
+          'title': 'Restaurant Closed',
+          'content': 'No branches active.'
+        });
+        return;
+      }
 
-    // Listen for Branch Updates
+      if (service is AndroidServiceInstance) {
+        service.setForegroundNotificationInfo(
+          title: 'Restaurant Active',
+          content: 'Monitoring ${branchIds.length} branches...',
+        );
+      }
+
+      service.invoke('updateNotification', {
+        'title': 'Restaurant Active',
+        'content': 'Monitoring ${branchIds.length} branches for orders'
+      });
+
+      debugPrint('✅ Background Service: Monitoring branches: $branchIds');
+
+      Future<void> handleSnapshot(QuerySnapshot snapshot, String source) async {
+        for (var change in snapshot.docChanges) {
+          if (change.type == DocumentChangeType.added) {
+            final doc = change.doc;
+            final orderId = doc.id;
+            final data = doc.data() as Map<String, dynamic>?;
+
+            if (data == null) continue;
+
+            final String status = (data['status'] ?? '').toString().toLowerCase();
+
+            if (status != 'pending') continue;
+
+            if (!processedOrderIds.contains(orderId)) {
+              processedOrderIds.add(orderId);
+              debugPrint('🎯 NEW PENDING ORDER ($source): $orderId');
+
+              if (data['branchIds'] == null) {
+                data['branchIds'] = branchIds;
+              }
+              data['orderId'] = orderId;
+
+              final sanitizedData = _sanitizeDataForInvoke(data);
+
+              await _showOrderNotification(doc as DocumentSnapshot<Map<String, dynamic>>, localNotifications);
+              await _playNotificationSound(audioPlayer);
+              await _vibrate();
+
+              service.invoke('new_order', sanitizedData);
+            }
+          } else if (change.type == DocumentChangeType.removed) {
+            processedOrderIds.remove(change.doc.id);
+          }
+        }
+      }
+
+      try {
+        final arrayQuery = db
+            .collection('Orders')
+            .where('branchIds', arrayContainsAny: branchIds)
+            .where('status', isEqualTo: 'pending');
+
+        arrayListener = arrayQuery.snapshots().listen(
+              (snap) => handleSnapshot(snap, "Array Query"),
+          onError: (e) => debugPrint('❌ Array Query Error: $e'),
+        );
+      } catch (e) {
+        debugPrint('❌ Setup Array Query Error: $e');
+      }
+
+      try {
+        final safeBranchIds = branchIds.take(10).toList();
+        final singularQuery = db
+            .collection('Orders')
+            .where('branchId', whereIn: safeBranchIds)
+            .where('status', isEqualTo: 'pending');
+
+        singularListener = singularQuery.snapshots().listen(
+              (snap) => handleSnapshot(snap, "Singular Query"),
+          onError: (e) => debugPrint('❌ Singular Query Error: $e'),
+        );
+      } catch (e) {
+        debugPrint('❌ Setup Singular Query Error: $e');
+      }
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final List<String>? savedBranches = prefs.getStringList(_prefsBranchKey);
+
+      if (savedBranches != null && savedBranches.isNotEmpty) {
+        debugPrint("💾 RESTART DETECTED: Restored ${savedBranches.length} branches from storage.");
+        await connectToFirestore(savedBranches);
+      } else {
+        debugPrint("⚠️ No persisted branches found. Waiting for UI update.");
+      }
+    } catch (e) {
+      debugPrint("⚠️ Error loading saved branches: $e");
+    }
+
     service.on('updateBranchIds').listen((event) async {
       if (event is Map<String, dynamic>) {
         final List<String> branchIds =
             (event['branchIds'] as List?)?.map((e) => e.toString()).toList() ??
                 [];
 
-        // Cleanup old listeners
-        await arrayListener?.cancel();
-        await singularListener?.cancel();
-        arrayListener = null;
-        singularListener = null;
-        processedOrderIds.clear();
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setStringList(_prefsBranchKey, branchIds);
+        debugPrint("💾 Saved branches to storage for persistence.");
 
-        if (branchIds.isEmpty) {
-          service.invoke('updateNotification', {
-            'title': 'Restaurant Closed',
-            'content': 'No branches active.'
-          });
-          return;
-        }
-
-        // Diagnostic: Check Auth
-        final user = FirebaseAuth.instance.currentUser;
-        if (user == null) {
-          debugPrint("⚠️ Background Service: No user logged in.");
-        }
-
-        service.invoke('updateNotification', {
-          'title': 'Restaurant Open',
-          'content': 'Monitoring ${branchIds.length} branches'
-        });
-
-        debugPrint('✅ Background Service: Monitoring branches: $branchIds');
-
-        // Helper to process snapshots
-        Future<void> handleSnapshot(QuerySnapshot snapshot, String source) async {
-          debugPrint("✅ $source Snapshot: ${snapshot.docs.length} docs found.");
-
-          for (var change in snapshot.docChanges) {
-            if (change.type == DocumentChangeType.added) {
-              final doc = change.doc;
-              final orderId = doc.id;
-              final data = doc.data() as Map<String, dynamic>?;
-
-              if (data == null) continue;
-
-              // ✅ ROBUST FIX: Check status in Code, not Query
-              // This catches 'Pending', 'pending', 'PENDING'
-              final String status = (data['status'] ?? '').toString().toLowerCase();
-
-              if (status != 'pending') {
-                // Ignore non-pending orders silently
-                continue;
-              }
-
-              if (!processedOrderIds.contains(orderId)) {
-                processedOrderIds.add(orderId);
-                debugPrint('🎯 NEW PENDING ORDER ($source): $orderId');
-
-                // Ensure branchIds exists for UI logic
-                if (data['branchIds'] == null) {
-                  data['branchIds'] = branchIds;
-                }
-                data['orderId'] = orderId;
-
-                final sanitizedData = _sanitizeDataForInvoke(data);
-
-                // 1. Show Local Notification (Only if Background)
-                if (!isAppInForeground) {
-                  await _showOrderNotification(doc as DocumentSnapshot<Map<String, dynamic>>, localNotifications);
-                  await _playNotificationSound(audioPlayer);
-                  await _vibrate();
-                }
-
-                // 2. Invoke UI Event (Always)
-                service.invoke('new_order', sanitizedData);
-              }
-            } else if (change.type == DocumentChangeType.removed) {
-              processedOrderIds.remove(change.doc.id);
-            }
-          }
-        }
-
-        // ---------------------------------------------------------
-        // QUERY 1: Check 'branchIds' (Array) - NO STATUS FILTER
-        // ---------------------------------------------------------
-        try {
-          final arrayQuery = db
-              .collection('Orders')
-              .where('branchIds', arrayContainsAny: branchIds);
-
-          arrayListener = arrayQuery.snapshots().listen(
-                (snap) => handleSnapshot(snap, "Array Query"),
-            onError: (e) => debugPrint('❌ Array Query Error: $e'),
-          );
-        } catch (e) {
-          debugPrint('❌ Setup Array Query Error: $e');
-        }
-
-        // ---------------------------------------------------------
-        // QUERY 2: Check 'branchId' (String) - NO STATUS FILTER
-        // ---------------------------------------------------------
-        try {
-          final safeBranchIds = branchIds.take(10).toList();
-          final singularQuery = db
-              .collection('Orders')
-              .where('branchId', whereIn: safeBranchIds);
-
-          singularListener = singularQuery.snapshots().listen(
-                (snap) => handleSnapshot(snap, "Singular Query"),
-            onError: (e) => debugPrint('❌ Singular Query Error: $e'),
-          );
-        } catch (e) {
-          debugPrint('❌ Setup Singular Query Error: $e');
-        }
+        await connectToFirestore(branchIds);
       }
     });
   }
@@ -277,37 +272,37 @@ class BackgroundOrderService {
     final orderNumber = data['dailyOrderNumber']?.toString() ??
         doc.id.substring(0, 6).toUpperCase();
     final customerName = data['customerName']?.toString() ?? 'Guest';
+    final double amount = (data['totalAmount'] as num?)?.toDouble() ?? 0.0;
 
+    // ✅ FIXED: priority and fullScreenIntent belong here, in AndroidNotificationDetails
     const AndroidNotificationDetails androidDetails =
     AndroidNotificationDetails(
       _orderChannelId,
       _orderChannelName,
       channelDescription: _orderChannelDesc,
       importance: Importance.max,
-      priority: Priority.high,
-      fullScreenIntent: true,
+      priority: Priority.high, // This allows the notification to pop up on screen
+      fullScreenIntent: true, // This allows waking the screen
       category: AndroidNotificationCategory.call,
       visibility: NotificationVisibility.public,
-      timeoutAfter: 30000,
+      timeoutAfter: 60000,
+      styleInformation: BigTextStyleInformation(''),
     );
 
     await plugin.show(
       doc.id.hashCode,
-      'New Order #$orderNumber',
-      'From: $customerName',
+      '🔔 NEW ORDER #$orderNumber',
+      'Total: QAR $amount\nFrom: $customerName',
       const NotificationDetails(android: androidDetails),
+      payload: doc.id,
     );
   }
 
   static Future<void> _playNotificationSound(AudioPlayer audioPlayer) async {
     try {
-      await audioPlayer.setReleaseMode(ReleaseMode.loop);
+      await audioPlayer.stop();
+      await audioPlayer.setReleaseMode(ReleaseMode.stop);
       await audioPlayer.play(AssetSource('notification.mp3'));
-
-      Future.delayed(const Duration(seconds: 15), () {
-        audioPlayer.stop();
-        audioPlayer.setReleaseMode(ReleaseMode.release);
-      });
     } catch (e) {
       debugPrint('Error playing sound: $e');
     }
@@ -315,7 +310,7 @@ class BackgroundOrderService {
 
   static Future<void> _vibrate() async {
     if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(pattern: [0, 500, 1000, 500, 1000, 500]);
+      Vibration.vibrate(pattern: [0, 500, 200, 500, 200, 500]);
     }
   }
 

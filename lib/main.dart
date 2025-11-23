@@ -7,9 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart'; // Needed for permissions
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-// Import your screens and widgets
 import 'Screens/LoginScreen.dart';
 import 'Screens/MainScreen.dart';
 import 'Widgets/Authorization.dart';
@@ -27,19 +26,19 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // --- ROBUST SERVICE LAUNCH ---
-  final service = FlutterBackgroundService();
-
-  // Initialize/Configure the service
+  // --- SERVICE LAUNCH ---
+  // We initialize the service here to ensure it's ready.
+  // If the app was killed and Android restarts the service, this
+  // initialization helps re-bind the background isolate.
   await BackgroundOrderService.initializeService();
 
-  // Check if it's running and start if needed
+  final service = FlutterBackgroundService();
   bool isRunning = await service.isRunning();
   if (!isRunning) {
     debugPrint("🚀 MAIN: Service is not running. Starting it.");
     await BackgroundOrderService.startService();
   } else {
-    debugPrint("✅ MAIN: Service is already running. Initialization complete.");
+    debugPrint("✅ MAIN: Service is already running.");
   }
 
   runApp(const MyApp());
@@ -144,7 +143,7 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     _service.invoke('appInForeground');
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _requestPermissions(); // ✅ Request Notification Permissions (Android 13+)
+      _requestPermissions();
       _loadScope();
     });
   }
@@ -199,10 +198,13 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
       // 2. Initialize UI Notification Listener
       notificationService.init(scopeService, navigatorKey);
 
-      // 3. ✅ CRITICAL FIX: Send Branch IDs to Background Service
-      // This starts the Firestore listener in the background isolate
-      debugPrint("🚀 Sending Branch IDs to Background Service: ${scopeService.branchIds}");
-      await BackgroundOrderService.updateListener(scopeService.branchIds);
+      // 3. ✅ PERSISTENCE FIX: Send Branch IDs to Background Service
+      if (scopeService.branchIds.isNotEmpty) {
+        debugPrint("🚀 Sending Branch IDs to Background Service: ${scopeService.branchIds}");
+        await BackgroundOrderService.updateListener(scopeService.branchIds);
+      } else {
+        debugPrint("⚠️ No Branch IDs found in scope. Background service will not monitor orders.");
+      }
 
       debugPrint('🎯 System Fully Initialized');
     } else {
@@ -262,7 +264,6 @@ class UserScopeService with ChangeNotifier {
   Future<bool> loadUserScope(User user, AuthService authService) async {
     if (_isLoaded) return true;
 
-    // Cancel any existing listener
     await _scopeSubscription?.cancel();
     _scopeSubscription = null;
 
@@ -272,7 +273,6 @@ class UserScopeService with ChangeNotifier {
 
       debugPrint('🎯 Loading user scope for: $_userEmail');
 
-      // Initial Fetch
       final staffSnap = await _db.collection('staff').doc(_userEmail).get();
 
       if (!staffSnap.exists) {
@@ -290,7 +290,6 @@ class UserScopeService with ChangeNotifier {
         return false;
       }
 
-      // Set Data
       _role = data?['role'] as String? ?? 'unknown';
       _branchIds = List<String>.from(data?['branchIds'] ?? []);
       _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
@@ -298,7 +297,6 @@ class UserScopeService with ChangeNotifier {
 
       debugPrint('✅ Scope Loaded: $_userEmail | Branches: $_branchIds');
 
-      // ✅ Start Real-time Listener
       _scopeSubscription = _db
           .collection('staff')
           .doc(_userEmail)
@@ -319,7 +317,6 @@ class UserScopeService with ChangeNotifier {
 
   void _handleScopeUpdate(DocumentSnapshot snapshot, AuthService authService) {
     if (!snapshot.exists) {
-      debugPrint('User scope document deleted. Signing out.');
       authService.signOut();
       return;
     }
@@ -328,12 +325,10 @@ class UserScopeService with ChangeNotifier {
     final bool isActive = data?['isActive'] ?? false;
 
     if (!isActive) {
-      debugPrint('User deactivated. Signing out.');
       authService.signOut();
       return;
     }
 
-    // Update local state
     _role = data?['role'] as String? ?? 'unknown';
     _branchIds = List<String>.from(data?['branchIds'] ?? []);
     _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
@@ -341,7 +336,6 @@ class UserScopeService with ChangeNotifier {
   }
 
   void _handleScopeError(Object error, AuthService authService) {
-    debugPrint('Error listening to user scope: $error. Signing out.');
     authService.signOut();
   }
 
