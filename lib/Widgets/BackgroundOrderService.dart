@@ -62,20 +62,25 @@ class BackgroundOrderService {
   }
 
   @pragma('vm:entry-point')
-  static Map<String, dynamic> _sanitizeDataForInvoke(Map<String, dynamic> data) {
+  static Map<String, dynamic> _sanitizeDataForInvoke(
+      Map<String, dynamic> data) {
     final sanitizedMap = <String, dynamic>{};
 
     data.forEach((key, value) {
       if (value is Timestamp) {
         sanitizedMap[key] = value.millisecondsSinceEpoch;
       } else if (value is GeoPoint) {
-        sanitizedMap[key] = {'latitude': value.latitude, 'longitude': value.longitude};
+        sanitizedMap[key] = {
+          'latitude': value.latitude,
+          'longitude': value.longitude
+        };
       } else if (value is Map) {
-        sanitizedMap[key] = _sanitizeDataForInvoke(value as Map<String, dynamic>);
+        sanitizedMap[key] =
+            _sanitizeDataForInvoke(Map<String, dynamic>.from(value));
       } else if (value is List) {
         sanitizedMap[key] = value.map((item) {
           if (item is Map) {
-            return _sanitizeDataForInvoke(item as Map<String, dynamic>);
+            return _sanitizeDataForInvoke(Map<String, dynamic>.from(item));
           } else if (item is Timestamp) {
             return item.millisecondsSinceEpoch;
           } else if (item is GeoPoint) {
@@ -102,12 +107,15 @@ class BackgroundOrderService {
     final FirebaseFirestore db = FirebaseFirestore.instance;
     final AudioPlayer audioPlayer = AudioPlayer();
     final Set<String> processedOrderIds = {};
-    StreamSubscription? orderListener;
 
-    bool isAppInForeground = true;
+    StreamSubscription? arrayListener;
+    StreamSubscription? singularListener;
+
+    bool isAppInForeground = false;
 
     // Setup Local Notifications
-    final FlutterLocalNotificationsPlugin localNotifications = FlutterLocalNotificationsPlugin();
+    final FlutterLocalNotificationsPlugin localNotifications =
+    FlutterLocalNotificationsPlugin();
     await localNotifications.initialize(
       const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -140,31 +148,32 @@ class BackgroundOrderService {
       debugPrint('✅ Background Service: App is BACKGROUND');
     });
 
-    // Listen for Branch Updates (The critical part)
+    // Listen for Branch Updates
     service.on('updateBranchIds').listen((event) async {
       if (event is Map<String, dynamic>) {
-        final List<String> branchIds = List<String>.from(event['branchIds'] ?? []);
+        final List<String> branchIds =
+            (event['branchIds'] as List?)?.map((e) => e.toString()).toList() ??
+                [];
 
-        // Cleanup old listener
-        await orderListener?.cancel();
-        orderListener = null;
+        // Cleanup old listeners
+        await arrayListener?.cancel();
+        await singularListener?.cancel();
+        arrayListener = null;
+        singularListener = null;
         processedOrderIds.clear();
 
         if (branchIds.isEmpty) {
           service.invoke('updateNotification', {
             'title': 'Restaurant Closed',
-            'content': 'Service is idle.'
+            'content': 'No branches active.'
           });
           return;
         }
 
-        // ✅ DIAGNOSTIC CHECK: AUTH STATUS
+        // Diagnostic: Check Auth
         final user = FirebaseAuth.instance.currentUser;
         if (user == null) {
-          debugPrint("❌ Background Service CRITICAL: NO USER LOGGED IN. Firestore query will likely fail due to security rules.");
-          debugPrint("⚠️ Ensure you are signed in on the main thread, or that your SHA-1 keys are correct in Firebase Console.");
-        } else {
-          debugPrint("✅ Background Service: Authenticated as ${user.uid}");
+          debugPrint("⚠️ Background Service: No user logged in.");
         }
 
         service.invoke('updateNotification', {
@@ -172,57 +181,88 @@ class BackgroundOrderService {
           'content': 'Monitoring ${branchIds.length} branches'
         });
 
-        debugPrint('✅ Background Service: Started monitoring branches: $branchIds');
+        debugPrint('✅ Background Service: Monitoring branches: $branchIds');
 
+        // Helper to process snapshots
+        Future<void> handleSnapshot(QuerySnapshot snapshot, String source) async {
+          debugPrint("✅ $source Snapshot: ${snapshot.docs.length} docs found.");
+
+          for (var change in snapshot.docChanges) {
+            if (change.type == DocumentChangeType.added) {
+              final doc = change.doc;
+              final orderId = doc.id;
+              final data = doc.data() as Map<String, dynamic>?;
+
+              if (data == null) continue;
+
+              // ✅ ROBUST FIX: Check status in Code, not Query
+              // This catches 'Pending', 'pending', 'PENDING'
+              final String status = (data['status'] ?? '').toString().toLowerCase();
+
+              if (status != 'pending') {
+                // Ignore non-pending orders silently
+                continue;
+              }
+
+              if (!processedOrderIds.contains(orderId)) {
+                processedOrderIds.add(orderId);
+                debugPrint('🎯 NEW PENDING ORDER ($source): $orderId');
+
+                // Ensure branchIds exists for UI logic
+                if (data['branchIds'] == null) {
+                  data['branchIds'] = branchIds;
+                }
+                data['orderId'] = orderId;
+
+                final sanitizedData = _sanitizeDataForInvoke(data);
+
+                // 1. Show Local Notification (Only if Background)
+                if (!isAppInForeground) {
+                  await _showOrderNotification(doc as DocumentSnapshot<Map<String, dynamic>>, localNotifications);
+                  await _playNotificationSound(audioPlayer);
+                  await _vibrate();
+                }
+
+                // 2. Invoke UI Event (Always)
+                service.invoke('new_order', sanitizedData);
+              }
+            } else if (change.type == DocumentChangeType.removed) {
+              processedOrderIds.remove(change.doc.id);
+            }
+          }
+        }
+
+        // ---------------------------------------------------------
+        // QUERY 1: Check 'branchIds' (Array) - NO STATUS FILTER
+        // ---------------------------------------------------------
         try {
-          final query = db
+          final arrayQuery = db
               .collection('Orders')
-              .where('status', isEqualTo: 'pending')
               .where('branchIds', arrayContainsAny: branchIds);
 
-          orderListener = query.snapshots().listen((snapshot) async {
-            // ✅ LOG SUCCESSFUL CONNECTION
-            debugPrint("✅ Background Service: Connected to Firestore. Docs count: ${snapshot.docs.length}");
-
-            for (var change in snapshot.docChanges) {
-              if (change.type == DocumentChangeType.added) {
-                final doc = change.doc;
-                final orderId = doc.id;
-
-                if (!processedOrderIds.contains(orderId)) {
-                  processedOrderIds.add(orderId);
-                  debugPrint('🎯 NEW ORDER DETECTED: $orderId');
-
-                  final data = doc.data();
-                  if (data != null) {
-                    // 1. Show Notification if Background
-                    if (!isAppInForeground) {
-                      await _showOrderNotification(doc, localNotifications);
-                      await _playNotificationSound(audioPlayer);
-                      await _vibrate();
-                    }
-
-                    // 2. Invoke UI Event
-                    data['orderId'] = orderId;
-                    final sanitizedData = _sanitizeDataForInvoke(data);
-                    service.invoke('new_order', sanitizedData);
-                  }
-                }
-              } else if (change.type == DocumentChangeType.removed) {
-                processedOrderIds.remove(change.doc.id);
-              }
-            }
-          }, onError: (error) {
-            debugPrint('❌ Background Service Listener Error: $error');
-            if (error.toString().contains('requires an index')) {
-              debugPrint('⚠️ MISSING INDEX: Copy the link from the console above to create it.');
-            }
-            if (error.toString().contains('permission-denied')) {
-              debugPrint('⚠️ PERMISSION DENIED: Check Firestore Rules or SHA-1 keys.');
-            }
-          });
+          arrayListener = arrayQuery.snapshots().listen(
+                (snap) => handleSnapshot(snap, "Array Query"),
+            onError: (e) => debugPrint('❌ Array Query Error: $e'),
+          );
         } catch (e) {
-          debugPrint('❌ Background Service Query Error: $e');
+          debugPrint('❌ Setup Array Query Error: $e');
+        }
+
+        // ---------------------------------------------------------
+        // QUERY 2: Check 'branchId' (String) - NO STATUS FILTER
+        // ---------------------------------------------------------
+        try {
+          final safeBranchIds = branchIds.take(10).toList();
+          final singularQuery = db
+              .collection('Orders')
+              .where('branchId', whereIn: safeBranchIds);
+
+          singularListener = singularQuery.snapshots().listen(
+                (snap) => handleSnapshot(snap, "Singular Query"),
+            onError: (e) => debugPrint('❌ Singular Query Error: $e'),
+          );
+        } catch (e) {
+          debugPrint('❌ Setup Singular Query Error: $e');
         }
       }
     });
@@ -234,10 +274,12 @@ class BackgroundOrderService {
     final data = doc.data();
     if (data == null) return;
 
-    final orderNumber = data['dailyOrderNumber']?.toString() ?? doc.id.substring(0, 6).toUpperCase();
+    final orderNumber = data['dailyOrderNumber']?.toString() ??
+        doc.id.substring(0, 6).toUpperCase();
     final customerName = data['customerName']?.toString() ?? 'Guest';
 
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+    const AndroidNotificationDetails androidDetails =
+    AndroidNotificationDetails(
       _orderChannelId,
       _orderChannelName,
       channelDescription: _orderChannelDesc,
@@ -246,7 +288,7 @@ class BackgroundOrderService {
       fullScreenIntent: true,
       category: AndroidNotificationCategory.call,
       visibility: NotificationVisibility.public,
-      timeoutAfter: 30000, // Cancel after 30s if not interacted
+      timeoutAfter: 30000,
     );
 
     await plugin.show(
@@ -262,7 +304,6 @@ class BackgroundOrderService {
       await audioPlayer.setReleaseMode(ReleaseMode.loop);
       await audioPlayer.play(AssetSource('notification.mp3'));
 
-      // Stop after 15 seconds automatically if not stopped by UI
       Future.delayed(const Duration(seconds: 15), () {
         audioPlayer.stop();
         audioPlayer.setReleaseMode(ReleaseMode.release);
@@ -286,7 +327,6 @@ class BackgroundOrderService {
     }
   }
 
-  // ✅ Helper to update branches from UI
   static Future<void> updateListener(List<String> branchIds) async {
     final service = FlutterBackgroundService();
     service.invoke('updateBranchIds', {'branchIds': branchIds});

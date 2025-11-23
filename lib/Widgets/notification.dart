@@ -20,7 +20,6 @@ class OrderNotificationService with ChangeNotifier {
   bool get playSound => _playSound;
   bool get vibrate => _vibrate;
 
-  final AudioPlayer _audioPlayer = AudioPlayer();
   final service = FlutterBackgroundService();
   GlobalKey<NavigatorState>? _navigatorKey;
 
@@ -51,27 +50,49 @@ class OrderNotificationService with ChangeNotifier {
 
   void init(UserScopeService scopeService, GlobalKey<NavigatorState> key) {
     _navigatorKey = key;
+    debugPrint("🔔 OrderNotificationService: Initialized and listening for 'new_order'");
 
     // Listen for 'new_order' events from the background service
     service.on('new_order').listen((payload) {
+      debugPrint("🔔 UI Received 'new_order' PAYLOAD: $payload");
+
       if (payload != null) {
         final orderId = payload['orderId'] as String?;
         final title = payload['title'] as String?;
         final body = payload['body'] as String?;
 
         if (orderId != null && scopeService.isLoaded) {
-          // Check if this order belongs to one of the admin's branches
-          final branchIds = (payload['branchIds'] as List?)?.cast<String>() ?? [];
+          // ✅ FIX: Robust Branch Parsing (Prevents silent crashes on type casting)
+          List<String> eventBranchIds = [];
+          try {
+            if (payload['branchIds'] != null) {
+              // Handle both List<dynamic> and List<String> safely
+              eventBranchIds = List.from(payload['branchIds'])
+                  .map((e) => e.toString())
+                  .toList();
+            }
+          } catch (e) {
+            debugPrint("⚠️ Branch parsing error (non-fatal): $e");
+          }
+
+          // ✅ FIX: Improved Matching Logic
+          // If eventBranchIds is empty, we assume it's valid because the BackgroundService
+          // wouldn't have sent it if it didn't match our Firestore query.
           final bool branchMatch = scopeService.isSuperAdmin ||
-              branchIds.any((id) => scopeService.branchIds.contains(id));
+              eventBranchIds.isEmpty ||
+              eventBranchIds.any((id) => scopeService.branchIds.contains(id));
 
           if (branchMatch) {
-            // 1. Trigger Sound/Vibration (App is in foreground or this isolate is active)
+            debugPrint("✅ Branch Match Successful! Triggering Actions.");
+
+            // 1. Trigger Sound/Vibration
             _triggerNotification(orderId, title, body);
 
-            // 2. Show In-App Dialog if context is available
+            // 2. Show In-App Dialog
             final context = _navigatorKey?.currentContext;
             if (context != null) {
+              debugPrint("✅ Context found. Showing Dialog.");
+
               // Define actions
               VoidCallback onAccept = () {
                 FirebaseFirestore.instance
@@ -94,10 +115,8 @@ class OrderNotificationService with ChangeNotifier {
                     .collection('Orders')
                     .doc(orderId)
                     .update({'status': 'preparing'});
-                // Dialog usually closes itself via timer in onAutoAccept logic or stays open
               };
 
-              // ✅ VITAL: Callback to View Order
               VoidCallback onViewOrder = () {
                 Navigator.of(context).pop(); // Close dialog
                 _navigateToOrder(orderId);   // Navigate
@@ -111,12 +130,14 @@ class OrderNotificationService with ChangeNotifier {
                   onAccept: onAccept,
                   onReject: onReject,
                   onAutoAccept: onAutoAccept,
-                  onViewOrder: onViewOrder, // Pass the navigation callback
+                  onViewOrder: onViewOrder,
                 ),
               );
             } else {
-              debugPrint("❌ OrderNotificationService: Cannot show dialog, context is null.");
+              debugPrint("❌ CRITICAL: Cannot show dialog. Navigator context is null.");
             }
+          } else {
+            debugPrint("⚠️ Order ignored: Branch mismatch. User branches: ${scopeService.branchIds}, Order branches: $eventBranchIds");
           }
         }
       }
@@ -125,9 +146,12 @@ class OrderNotificationService with ChangeNotifier {
 
   Future<void> _triggerNotification(String orderId, String? title, String? body) async {
     if (_playSound) {
-      final player = AudioPlayer();
-      // Ensure you have 'assets/notification.mp3' in pubspec.yaml
-      await player.play(AssetSource('notification.mp3'));
+      try {
+        final player = AudioPlayer();
+        await player.play(AssetSource('notification.mp3'));
+      } catch(e) {
+        debugPrint("Error playing sound: $e");
+      }
     }
     if (_vibrate) {
       if (await Vibration.hasVibrator() ?? false) {
@@ -136,18 +160,15 @@ class OrderNotificationService with ChangeNotifier {
     }
   }
 
-  // ✅ ROBUST NAVIGATION: Sets the target order before switching screens
   void _navigateToOrder(String orderId) {
     debugPrint("🔔 Navigating to order: $orderId");
 
-    // 1. Set the "Target" order in the static service
     OrderSelectionService.setSelectedOrder(
       orderId: orderId,
-      orderType: null, // If unknown, OrdersScreen will try to find it or default
-      status: 'pending', // Usually new orders are pending
+      orderType: null,
+      status: 'pending',
     );
 
-    // 2. Navigate to HomeScreen (which contains OrdersScreen)
     final context = _navigatorKey?.currentContext;
     if (context != null) {
       Navigator.of(context).pushAndRemoveUntil(
@@ -161,14 +182,14 @@ class OrderNotificationService with ChangeNotifier {
 }
 
 // -------------------------------------------------------------------
-// ✅ NewOrderDialog: Enhanced with "View Order" functionality
+// ✅ NewOrderDialog Component
 // -------------------------------------------------------------------
 class NewOrderDialog extends StatefulWidget {
   final Map<String, dynamic> orderData;
   final VoidCallback onAccept;
   final VoidCallback onReject;
   final VoidCallback onAutoAccept;
-  final VoidCallback onViewOrder; // Added callback
+  final VoidCallback onViewOrder;
 
   const NewOrderDialog({
     Key? key,
@@ -186,9 +207,8 @@ class NewOrderDialog extends StatefulWidget {
 class NewOrderDialogState extends State<NewOrderDialog> {
   Timer? _timer;
   int _countdown = 30;
-  bool _isExpanded = false;
 
-  // Getters
+  // Getters with safe defaults
   String get orderId => widget.orderData['orderId']?.toString() ?? 'N/A';
   String get orderNumber => widget.orderData['dailyOrderNumber']?.toString() ?? orderId.substring(0, 6).toUpperCase();
   String get customerName => widget.orderData['customerName']?.toString() ?? 'N/A';
