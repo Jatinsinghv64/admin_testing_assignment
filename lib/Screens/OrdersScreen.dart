@@ -1,51 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
-// import 'package:flutter/material.dart' as pw; // This line seems unused, commenting out.
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:provider/provider.dart';
-import '../Widgets/RiderAssignment.dart';
-import '../main.dart'; // Assuming navigatorKey is here
 import 'package:printing/printing.dart';
-import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
-/// Main screen for viewing and managing orders.
-/// Filters orders based on the user's role (super_admin vs. branch_admin)
-/// and the selected order type/status.
-///
-// final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>(); // This is already in main.dart
-
-/// Main screen for viewing and managing orders.
-/// Filters orders based on the user's role (super_admin vs. branch_admin)
-/// and the selected order type/status.
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/services.dart';
-// import 'package:flutter/material.dart' as pw; // This line seems unused, commenting out.
-import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
-import 'package:provider/provider.dart';
 import '../Widgets/RiderAssignment.dart';
-import '../main.dart'; // Assuming navigatorKey and UserScopeService is here
-import 'package:printing/printing.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
+import '../main.dart';
 
-/// Main screen for viewing and managing orders.
-/// Filters orders based on the user's role (super_admin vs. branch_admin)
-/// and the selected order type/status.
-///
-// final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>(); // This is already in main.dart
-
-/// Main screen for viewing and managing orders.
-/// Filters orders based on the user's role (super_admin vs. branch_admin)
-/// and the selected order type/status.
 class OrdersScreen extends StatefulWidget {
   final String? initialOrderType;
   final String? initialStatus;
-  final String? initialOrderId; // The ID of the order to scroll to/highlight
+  final String? initialOrderId;
 
   const OrdersScreen({
     super.key,
@@ -66,7 +34,9 @@ class _OrdersScreenState extends State<OrdersScreen>
   final Map<String, GlobalKey> _orderKeys = {};
   bool _shouldScrollToOrder = false;
 
-  // Add this to track if we need to scroll to a specific order from dashboard
+  // ✅ ADDED: Track which orders are currently being processed (showing loading)
+  final Set<String> _processingOrderIds = {};
+
   String? _orderToScrollTo;
   String? _orderToScrollType;
   String? _orderToScrollStatus;
@@ -91,21 +61,18 @@ class _OrdersScreenState extends State<OrdersScreen>
       _orderToScrollStatus = selectedOrder['status'];
       _shouldScrollToOrder = true;
 
-      // Set initial status filter based on order from dashboard
       if (_orderToScrollStatus != null &&
           _getStatusValues().contains(_orderToScrollStatus)) {
         _selectedStatus = _orderToScrollStatus!;
       }
     }
 
-    // Initialize tab controller based on widget parameters or dashboard selection
     int initialTabIndex = 0;
     if (widget.initialOrderType != null) {
       final orderTypes = _orderTypeMap.values.toList();
       initialTabIndex = orderTypes.indexOf(widget.initialOrderType!);
       if (initialTabIndex == -1) initialTabIndex = 0;
     } else if (_orderToScrollType != null) {
-      // Use order type from dashboard selection
       final orderTypes = _orderTypeMap.values.toList();
       initialTabIndex = orderTypes.indexOf(_orderToScrollType!);
       if (initialTabIndex == -1) initialTabIndex = 0;
@@ -117,7 +84,6 @@ class _OrdersScreenState extends State<OrdersScreen>
       initialIndex: initialTabIndex,
     );
 
-    // Add listener to reset scroll flag when tab changes
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
         setState(() {
@@ -127,21 +93,18 @@ class _OrdersScreenState extends State<OrdersScreen>
       }
     });
 
-    // Set shouldScrollToOrder flag if an initial order ID is provided or from dashboard
     _shouldScrollToOrder =
         widget.initialOrderId != null || _orderToScrollTo != null;
   }
 
   @override
   void dispose() {
-    // Clear the selected order when leaving OrdersScreen
     OrderSelectionService.clearSelectedOrder();
     _tabController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  // Helper to get all valid status values
   List<String> _getStatusValues() {
     return [
       'all',
@@ -152,23 +115,24 @@ class _OrdersScreenState extends State<OrdersScreen>
       'pickedUp',
       'delivered',
       'cancelled',
-      // --- ADDED STATUS ---
       'needs_rider_assignment',
     ];
   }
 
-  // Method to update order status in Firestore
-  // ✅ [SECURE FIX] Updated to use WriteBatch for atomic operations.
+  // ✅ MODIFIED: Added loading state logic
   Future<void> updateOrderStatus(
       BuildContext context, String orderId, String newStatus) async {
-    // Use mounted check in async methods
     if (!mounted) return;
+
+    // 1. Set loading state
+    setState(() {
+      _processingOrderIds.add(orderId);
+    });
 
     try {
       final db = FirebaseFirestore.instance;
       final orderRef = db.collection('Orders').doc(orderId);
 
-      // Use a WriteBatch for atomicity
       final WriteBatch batch = db.batch();
 
       final Map<String, dynamic> updateData = {
@@ -180,8 +144,6 @@ class _OrdersScreenState extends State<OrdersScreen>
       } else if (newStatus == 'delivered') {
         updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
 
-        // --- START OF FIX ---
-        // We must read the doc *first* to see if a rider needs to be freed.
         final orderDoc = await orderRef.get();
         final data = orderDoc.data() as Map<String, dynamic>? ?? {};
         final String orderType =
@@ -196,48 +158,37 @@ class _OrdersScreenState extends State<OrdersScreen>
             'isAvailable': true,
           });
         }
-        // --- END OF FIX ---
       } else if (newStatus == 'cancelled') {
         updateData['timestamps.cancelled'] = FieldValue.serverTimestamp();
-
-        // IMPORTANT FIX: Cancel auto-assignment when order is cancelled
         await RiderAssignmentService.cancelAutoAssignment(orderId);
 
-        // --- START OF FIX ---
-        // We must read the doc *first* to see if a rider needs to be freed.
         final orderDoc = await orderRef.get();
         final data = orderDoc.data() as Map<String, dynamic>? ?? {};
         final String? riderId = data['riderId'] as String?;
 
         if (riderId != null && riderId.isNotEmpty) {
-          // Free up the rider
           final driverRef = db.collection('Drivers').doc(riderId);
           batch.update(driverRef, {
             'assignedOrderId': '',
             'isAvailable': true,
           });
-
-          // Remove rider from order
           updateData['riderId'] = FieldValue.delete();
         }
-        // --- END OF FIX ---
       } else if (newStatus == 'pickedUp') {
         updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
       } else if (newStatus == 'rider_assigned') {
         updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
       }
 
-      // Add the main order update to the batch
       batch.update(orderRef, updateData);
-
-      // Commit all changes atomically
       await batch.commit();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Order $orderId status updated to "$newStatus"!'),
+            content: Text('Order status updated to "$newStatus"!'),
             backgroundColor: Colors.green,
+            duration: const Duration(seconds: 1),
           ),
         );
       }
@@ -250,11 +201,15 @@ class _OrdersScreenState extends State<OrdersScreen>
           ),
         );
       }
+    } finally {
+      // 2. Clear loading state
+      if (mounted) {
+        setState(() {
+          _processingOrderIds.remove(orderId);
+        });
+      }
     }
   }
-
-  // --- METHOD REMOVED ---
-  // Future<void> _assignRider(BuildContext context, String orderId) async { ... }
 
   @override
   Widget build(BuildContext context) {
@@ -327,7 +282,6 @@ class _OrdersScreenState extends State<OrdersScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
             child: Row(
@@ -356,7 +310,6 @@ class _OrdersScreenState extends State<OrdersScreen>
               ],
             ),
           ),
-          // Filter chips
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
@@ -369,7 +322,6 @@ class _OrdersScreenState extends State<OrdersScreen>
                     'Preparing', 'preparing', Icons.restaurant_rounded),
                 _buildEnhancedStatusChip(
                     'Prepared', 'prepared', Icons.done_all_rounded),
-                // --- ADDED CHIP ---
                 _buildEnhancedStatusChip('Needs Assign',
                     'needs_rider_assignment', Icons.person_pin_circle_outlined),
                 _buildEnhancedStatusChip('Rider Assigned', 'rider_assigned',
@@ -390,13 +342,11 @@ class _OrdersScreenState extends State<OrdersScreen>
 
   Widget _buildEnhancedStatusChip(String label, String value, IconData icon) {
     final bool isSelected = _selectedStatus == value;
-    // Keep your existing color mapping
     Color chipColor;
     switch (value) {
       case 'pending':
         chipColor = Colors.orange;
         break;
-    // --- ADDED COLOR ---
       case 'needs_rider_assignment':
         chipColor = Colors.orange;
         break;
@@ -485,33 +435,14 @@ class _OrdersScreenState extends State<OrdersScreen>
                   valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
                 ),
                 const SizedBox(height: 16),
-                Text(
-                  'Loading orders...',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 16,
-                  ),
-                ),
+                Text('Loading orders...', style: TextStyle(color: Colors.grey[600])),
               ],
             ),
           );
         }
 
         if (snapshot.hasError) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
-                const SizedBox(height: 16),
-                Text(
-                  'Error: ${snapshot.error}',
-                  style: const TextStyle(color: Colors.red, fontSize: 16),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          );
+          return Center(child: Text('Error: ${snapshot.error}'));
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
@@ -519,26 +450,9 @@ class _OrdersScreenState extends State<OrdersScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.receipt_long_outlined,
-                    size: 64, color: Colors.grey[400]),
+                Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey[400]),
                 const SizedBox(height: 16),
-                Text(
-                  'No orders found.',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 18,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Orders with status "${_selectedStatus}" will appear here.',
-                  style: TextStyle(
-                    color: Colors.grey[500],
-                    fontSize: 14,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
+                Text('No orders found.', style: TextStyle(color: Colors.grey[600], fontSize: 18)),
               ],
             ),
           );
@@ -546,17 +460,15 @@ class _OrdersScreenState extends State<OrdersScreen>
 
         final docs = snapshot.data!.docs;
 
-        // Populate GlobalKeys and attempt to scroll if needed
-        // First check for widget.initialOrderId (direct navigation)
-        if (widget.initialOrderId != null && _shouldScrollToOrder) {
+        // Auto-scroll logic
+        if ((widget.initialOrderId != null || _orderToScrollTo != null) && _shouldScrollToOrder) {
           _orderKeys.clear();
-          for (var doc in docs) {
-            _orderKeys[doc.id] = GlobalKey();
-          }
+          for (var doc in docs) { _orderKeys[doc.id] = GlobalKey(); }
 
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_shouldScrollToOrder) {
-              final key = _orderKeys[widget.initialOrderId!];
+            final targetId = widget.initialOrderId ?? _orderToScrollTo;
+            if (_shouldScrollToOrder && targetId != null) {
+              final key = _orderKeys[targetId];
               if (key != null && key.currentContext != null) {
                 Scrollable.ensureVisible(
                   key.currentContext!,
@@ -566,32 +478,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                 );
                 setState(() {
                   _shouldScrollToOrder = false;
-                });
-              }
-            }
-          });
-        }
-
-        // THEN check for _orderToScrollTo (from dashboard)
-        if (_orderToScrollTo != null && _shouldScrollToOrder) {
-          _orderKeys.clear();
-          for (var doc in docs) {
-            _orderKeys[doc.id] = GlobalKey();
-          }
-
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_shouldScrollToOrder && _orderToScrollTo != null) {
-              final key = _orderKeys[_orderToScrollTo!];
-              if (key != null && key.currentContext != null) {
-                Scrollable.ensureVisible(
-                  key.currentContext!,
-                  duration: const Duration(milliseconds: 500),
-                  curve: Curves.easeInOut,
-                  alignment: 0.1,
-                );
-                setState(() {
-                  _shouldScrollToOrder = false;
-                  _orderToScrollTo = null; // Clear after scrolling
+                  _orderToScrollTo = null;
                 });
               }
             }
@@ -613,8 +500,9 @@ class _OrdersScreenState extends State<OrdersScreen>
               order: orderDoc,
               orderType: orderType,
               onStatusChange: updateOrderStatus,
-              // onAssigned: _assignRider, // --- PARAMETER REMOVED ---
               isHighlighted: isHighlighted,
+              // ✅ PASS PROCESSING STATE
+              isProcessing: _processingOrderIds.contains(orderDoc.id),
             );
           },
         );
@@ -628,14 +516,12 @@ class _OrdersScreenState extends State<OrdersScreen>
         .collection('Orders')
         .where('Order_type', isEqualTo: orderType);
 
-    // Apply branch filter for non-super admin users
     final userScope = context.read<UserScopeService>();
     if (!userScope.isSuperAdmin) {
       baseQuery =
           baseQuery.where('branchIds', arrayContains: userScope.branchId);
     }
 
-    // Apply current day filtering for 'all' status
     if (_selectedStatus == 'all') {
       final now = DateTime.now();
       final startOfToday = DateTime(now.year, now.month, now.day);
@@ -656,55 +542,61 @@ class _OrderCard extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> order;
   final String orderType;
   final Function(BuildContext, String, String) onStatusChange;
-  // --- PARAMETER REMOVED ---
-  // final Function(BuildContext, String) onAssigned;
   final bool isHighlighted;
+  // ✅ ADDED PROCESSING FLAG
+  final bool isProcessing;
 
   const _OrderCard({
     super.key,
     required this.order,
     required this.orderType,
     required this.onStatusChange,
-    // required this.onAssigned, // --- PARAMETER REMOVED ---
     this.isHighlighted = false,
+    this.isProcessing = false, // Default false
   });
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'pending':
-        return Colors.orange;
-      case 'preparing':
-        return Colors.teal;
-      case 'prepared':
-        return Colors.blueAccent;
-      case 'rider_assigned':
-        return Colors.purple;
-      case 'pickedup':
-        return Colors.deepPurple;
-      case 'delivered':
-        return Colors.green;
-      case 'cancelled':
-        return Colors.red;
-      case 'needs_rider_assignment':
-        return Colors.orange; // Use orange for needs assignment
-      default:
-        return Colors.grey;
+      case 'pending': return Colors.orange;
+      case 'preparing': return Colors.teal;
+      case 'prepared': return Colors.blueAccent;
+      case 'rider_assigned': return Colors.purple;
+      case 'pickedup': return Colors.deepPurple;
+      case 'delivered': return Colors.green;
+      case 'cancelled': return Colors.red;
+      case 'needs_rider_assignment': return Colors.orange;
+      default: return Colors.grey;
     }
   }
 
   Widget _buildActionButtons(BuildContext context, String status) {
+    // ✅ CHECK: IF PROCESSING, SHOW SPINNER
+    if (isProcessing) {
+      return const SizedBox(
+        width: double.infinity,
+        height: 50,
+        child: Center(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 20, height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.deepPurple),
+              ),
+              SizedBox(width: 10),
+              Text("Updating...", style: TextStyle(color: Colors.deepPurple, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+      );
+    }
+
     final List<Widget> buttons = [];
     final data = order.data() as Map? ?? {};
     final bool isAutoAssigning = data.containsKey('autoAssignStarted');
-    // --- VARIABLE NO LONGER NEEDED ---
-    // final bool needsManualAssignment = status == 'needs_rider_assignment';
 
-    // Consistent styling for all buttons
-    const EdgeInsets btnPadding =
-    EdgeInsets.symmetric(horizontal: 14, vertical: 10);
+    const EdgeInsets btnPadding = EdgeInsets.symmetric(horizontal: 14, vertical: 10);
     const Size btnMinSize = Size(0, 40);
-
-    // --- UNIVERSAL ACTIONS ---
 
     if (status == 'pending') {
       buttons.add(
@@ -717,8 +609,7 @@ class _OrderCard extends StatelessWidget {
             foregroundColor: Colors.white,
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
@@ -735,8 +626,7 @@ class _OrderCard extends StatelessWidget {
             foregroundColor: Colors.white,
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
@@ -755,10 +645,7 @@ class _OrderCard extends StatelessWidget {
             final s = (freshData['status'] as String?)?.toLowerCase() ?? '';
             if (s == 'cancelled') {
               ScaffoldMessenger.of(rootCtx).showSnackBar(
-                const SnackBar(
-                  content: Text('Cannot reprint a cancelled order.'),
-                  backgroundColor: Colors.red,
-                ),
+                const SnackBar(content: Text('Cannot reprint a cancelled order.'), backgroundColor: Colors.red),
               );
               return;
             }
@@ -769,18 +656,13 @@ class _OrderCard extends StatelessWidget {
             side: BorderSide(color: Colors.deepPurple.shade300),
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
     }
 
-    // --- ORDER-TYPE SPECIFIC ACTIONS ---
-
     final orderTypeLower = orderType.toLowerCase();
-
-    // **Custom flow for PICKUP orders**
     if (orderTypeLower == 'pickup') {
       if (status == 'prepared') {
         buttons.add(
@@ -793,15 +675,12 @@ class _OrderCard extends StatelessWidget {
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
         );
       }
-    }
-    // **Flow for other non-delivery types**
-    else if (orderTypeLower == 'takeaway' || orderTypeLower == 'dine_in') {
+    } else if (orderTypeLower == 'takeaway' || orderTypeLower == 'dine_in') {
       if (status == 'prepared') {
         buttons.add(
           ElevatedButton.icon(
@@ -813,37 +692,12 @@ class _OrderCard extends StatelessWidget {
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
         );
       }
-    }
-    // **Flow for DELIVERY orders**
-    else if (orderTypeLower == 'delivery') {
-      // --- BUTTON LOGIC REMOVED ---
-      // if ((status == 'prepared' || needsManualAssignment) && !isAutoAssigning) {
-      //   buttons.add(
-      //     ElevatedButton.icon(
-      //       icon: const Icon(Icons.delivery_dining, size: 16),
-      //       label:
-      //       Text(needsManualAssignment ? 'Assign Manually' : 'Assign Rider'),
-      //       onPressed: () => onAssigned(context, order.id), // <-- This is removed
-      //       style: ElevatedButton.styleFrom(
-      //         backgroundColor:
-      //         needsManualAssignment ? Colors.orange : Colors.blue,
-      //         foregroundColor: Colors.white,
-      //         padding: btnPadding,
-      //         minimumSize: btnMinSize,
-      //         shape: RoundedRectangleBorder(
-      //             borderRadius: BorderRadius.circular(12)),
-      //       ),
-      //     ),
-      //   );
-      // }
-
-      // We still keep the "Mark as Delivered" button for 'pickedUp' status
+    } else if (orderTypeLower == 'delivery') {
       if (status == 'pickedUp') {
         buttons.add(
           ElevatedButton.icon(
@@ -855,15 +709,13 @@ class _OrderCard extends StatelessWidget {
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
         );
       }
     }
 
-    // Auto-assigning indicator
     if (isAutoAssigning) {
       buttons.add(
         ConstrainedBox(
@@ -878,23 +730,9 @@ class _OrderCard extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: const [
-                SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation(Colors.blue),
-                  ),
-                ),
+                SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Colors.blue))),
                 SizedBox(width: 8),
-                Text(
-                  'Auto-assigning...',
-                  style: TextStyle(
-                    color: Colors.blue,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                ),
+                Text('Auto-assigning...', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600, fontSize: 13)),
               ],
             ),
           ),
@@ -902,7 +740,6 @@ class _OrderCard extends StatelessWidget {
       );
     }
 
-    // Cancel button
     if (status == 'pending' || status == 'preparing') {
       buttons.add(
         ElevatedButton.icon(
@@ -914,8 +751,7 @@ class _OrderCard extends StatelessWidget {
             foregroundColor: Colors.white,
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
@@ -932,19 +768,100 @@ class _OrderCard extends StatelessWidget {
     );
   }
 
+  // Helper methods
+  String _getStatusDisplayText(String status) {
+    switch (status.toLowerCase()) {
+      case 'needs_rider_assignment': return 'NEEDS ASSIGN';
+      case 'rider_assigned': return 'RIDER ASSIGNED';
+      case 'pickedup': return 'PICKED UP';
+      default: return status.toUpperCase();
+    }
+  }
+
+  double _getStatusFontSize(String status) {
+    final displayText = _getStatusDisplayText(status);
+    if (displayText.length > 12) return 9;
+    if (displayText.length > 8) return 10;
+    return 11;
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, color: Colors.deepPurple, size: 18),
+        const SizedBox(width: 8),
+        Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.deepPurple)),
+      ],
+    );
+  }
+
+  Widget _buildDetailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: Colors.deepPurple.shade400),
+          const SizedBox(width: 10),
+          Expanded(flex: 2, child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+          Expanded(flex: 3, child: Text(value, style: const TextStyle(fontSize: 13, color: Colors.black87))),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildItemRow(Map<String, dynamic> item) {
+    final String name = item['name'] ?? 'Unnamed Item';
+    final int qty = (item['quantity'] as num? ?? 1).toInt();
+    final double price = (item['price'] as num? ?? 0.0).toDouble();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            flex: 5,
+            child: Text.rich(TextSpan(
+                text: name,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                children: [
+                  TextSpan(text: ' (x$qty)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.normal, color: Colors.black54)),
+                ])),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text('QAR ${(price * qty).toStringAsFixed(2)}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 13, color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryRow(String label, double amount, {bool isTotal = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: isTotal ? 15 : 13, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal, color: isTotal ? Colors.black : Colors.grey[800])),
+          Text('QAR ${amount.toStringAsFixed(2)}', style: TextStyle(fontSize: isTotal ? 15 : 13, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal, color: isTotal ? Colors.black : Colors.grey[800])),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = order.data();
     final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
     final status = data['status']?.toString() ?? 'pending';
     final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
-    final orderNumber = data['dailyOrderNumber']?.toString() ??
-        order.id.substring(0, 6).toUpperCase();
+    final orderNumber = data['dailyOrderNumber']?.toString() ?? order.id.substring(0, 6).toUpperCase();
     final double subtotal = (data['subtotal'] as num? ?? 0.0).toDouble();
     final double deliveryFee = (data['deliveryFee'] as num? ?? 0.0).toDouble();
     final double totalAmount = (data['totalAmount'] as num? ?? 0.0).toDouble();
 
-    // Check for auto-assignment status
     final bool isAutoAssigning = data.containsKey('autoAssignStarted');
     final bool needsManualAssignment = status == 'needs_rider_assignment';
 
@@ -958,7 +875,6 @@ class _OrderCard extends StatelessWidget {
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
-          // Add highlight glow for selected order
           if (isHighlighted)
             BoxShadow(
               color: Colors.blue.withOpacity(0.3),
@@ -967,34 +883,21 @@ class _OrderCard extends StatelessWidget {
               offset: const Offset(0, 0),
             ),
         ],
-        // Add border for highlighted order
-        border: isHighlighted
-            ? Border.all(color: Colors.blue, width: 2)
-            : null,
+        border: isHighlighted ? Border.all(color: Colors.blue, width: 2) : null,
       ),
       child: Theme(
-        data: Theme.of(context).copyWith(
-          dividerColor: Colors.transparent,
-        ),
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
           title: Row(
             children: [
-              // Add selection indicator for highlighted order
               if (isHighlighted)
                 Container(
                   margin: const EdgeInsets.only(right: 8),
                   padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(
-                    color: Colors.blue,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.arrow_forward,
-                    color: Colors.white,
-                    size: 12,
-                  ),
+                  decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle),
+                  child: const Icon(Icons.arrow_forward, color: Colors.white, size: 12),
                 ),
               Container(
                 padding: const EdgeInsets.all(8),
@@ -1004,26 +907,14 @@ class _OrderCard extends StatelessWidget {
                 ),
                 child: Stack(
                   children: [
-                    Icon(
-                      Icons.receipt_long_outlined,
-                      color: _getStatusColor(status),
-                      size: 20,
-                    ),
+                    Icon(Icons.receipt_long_outlined, color: _getStatusColor(status), size: 20),
                     if (isAutoAssigning)
                       Positioned(
-                        right: -2,
-                        top: -2,
+                        right: -2, top: -2,
                         child: Container(
                           padding: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            color: Colors.blue,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Icon(
-                            Icons.autorenew,
-                            color: Colors.white,
-                            size: 8,
-                          ),
+                          decoration: BoxDecoration(color: Colors.blue, borderRadius: BorderRadius.circular(6)),
+                          child: const Icon(Icons.autorenew, color: Colors.white, size: 8),
                         ),
                       ),
                   ],
@@ -1034,79 +925,35 @@ class _OrderCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Order #$orderNumber',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: isHighlighted
-                            ? Colors.blue.shade800
-                            : Colors.black87,
-                      ),
-                    ),
+                    Text('Order #$orderNumber', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isHighlighted ? Colors.blue.shade800 : Colors.black87)),
                     const SizedBox(height: 4),
-                    Text(
-                      timestamp != null
-                          ? DateFormat('MMM dd, yyyy hh:mm a').format(timestamp)
-                          : 'No date',
-                      style: TextStyle(
-                          color: isHighlighted
-                              ? Colors.blue.shade600
-                              : Colors.grey[600],
-                          fontSize: 12),
-                    ),
+                    Text(timestamp != null ? DateFormat('MMM dd, yyyy hh:mm a').format(timestamp) : 'No date', style: TextStyle(color: isHighlighted ? Colors.blue.shade600 : Colors.grey[600], fontSize: 12)),
                     if (isAutoAssigning) ...[
                       const SizedBox(height: 4),
-                      const Text(
-                        'Auto-assigning rider...',
-                        style: TextStyle(
-                          color: Colors.blue,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
+                      const Text('Auto-assigning rider...', style: TextStyle(color: Colors.blue, fontSize: 11, fontWeight: FontWeight.w500)),
                     ],
                     if (needsManualAssignment) ...[
                       const SizedBox(height: 4),
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.orange.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                              color: Colors.orange.withOpacity(0.3)),
+                          border: Border.all(color: Colors.orange.withOpacity(0.3)),
                         ),
-                        child: const Text(
-                          'Needs manual assignment',
-                          style: TextStyle(
-                            color: Colors.orange,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                        child: const Text('Needs manual assignment', style: TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.w500)),
                       ),
                     ],
-                    // Show "Selected Order" badge for highlighted orders
                     if (isHighlighted) ...[
                       const SizedBox(height: 4),
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.blue.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(6),
-                          border:
-                          Border.all(color: Colors.blue.withOpacity(0.3)),
+                          border: Border.all(color: Colors.blue.withOpacity(0.3)),
                         ),
-                        child: Text(
-                          'Selected Order',
-                          style: TextStyle(
-                            color: Colors.blue.shade700,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                        child: Text('Selected Order', style: TextStyle(color: Colors.blue.shade700, fontSize: 9, fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ],
@@ -1115,43 +962,22 @@ class _OrderCard extends StatelessWidget {
             ],
           ),
           trailing: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width *
-                  0.3, // Limit width to 30% of screen
-            ),
+            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.3),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
                 color: _getStatusColor(status).withOpacity(0.1),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: _getStatusColor(status).withOpacity(0.3),
-                ),
+                border: Border.all(color: _getStatusColor(status).withOpacity(0.3)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _getStatusColor(status),
-                    ),
-                  ),
+                  Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: _getStatusColor(status))),
                   const SizedBox(width: 4),
                   Flexible(
-                    child: Text(
-                      _getStatusDisplayText(status),
-                      style: TextStyle(
-                        color: _getStatusColor(status),
-                        fontWeight: FontWeight.bold,
-                        fontSize: _getStatusFontSize(status),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      maxLines: 1,
-                    ),
+                    child: Text(_getStatusDisplayText(status), style: TextStyle(color: _getStatusColor(status), fontWeight: FontWeight.bold, fontSize: _getStatusFontSize(status), overflow: TextOverflow.ellipsis), maxLines: 1),
                   ),
                 ],
               ),
@@ -1170,43 +996,19 @@ class _OrderCard extends StatelessWidget {
               child: Column(
                 children: [
                   if (orderType == 'delivery') ...[
-                    _buildDetailRow(Icons.person, 'Customer:',
-                        data['customerName'] ?? 'N/A'),
-                    _buildDetailRow(
-                        Icons.phone, 'Phone:', data['customerPhone'] ?? 'N/A'),
-                    _buildDetailRow(
-                      Icons.location_on,
-                      'Address:',
-                      '${data['deliveryAddress']?['street'] ?? ''}, ${data['deliveryAddress']?['city'] ?? ''}',
-                    ),
-                    if (data['riderId']?.isNotEmpty == true)
-                      _buildDetailRow(
-                          Icons.delivery_dining, 'Rider:', data['riderId']),
+                    _buildDetailRow(Icons.person, 'Customer:', data['customerName'] ?? 'N/A'),
+                    _buildDetailRow(Icons.phone, 'Phone:', data['customerPhone'] ?? 'N/A'),
+                    _buildDetailRow(Icons.location_on, 'Address:', '${data['deliveryAddress']?['street'] ?? ''}, ${data['deliveryAddress']?['city'] ?? ''}'),
+                    if (data['riderId']?.isNotEmpty == true) _buildDetailRow(Icons.delivery_dining, 'Rider:', data['riderId']),
                   ],
                   if (orderType == 'pickup') ...[
-                    _buildDetailRow(Icons.store, 'Pickup Branch',
-                        data['branchIds']?.join(', ') ?? 'N/A'), // Fixed to show branchIds
+                    _buildDetailRow(Icons.store, 'Pickup Branch', data['branchIds']?.join(', ') ?? 'N/A'),
                   ],
                   if (orderType == 'takeaway') ...[
-                    _buildDetailRow(
-                      Icons.directions_car,
-                      'Car Plate:',
-                      (data['carPlateNumber']?.toString().isNotEmpty ?? false)
-                          ? data['carPlateNumber']
-                          : 'N/A',
-                    ),
-                    if ((data['specialInstructions']?.toString().isNotEmpty ??
-                        false))
-                      _buildDetailRow(Icons.note, 'Instructions:',
-                          data['specialInstructions']),
+                    _buildDetailRow(Icons.directions_car, 'Car Plate:', (data['carPlateNumber']?.toString().isNotEmpty ?? false) ? data['carPlateNumber'] : 'N/A'),
+                    if ((data['specialInstructions']?.toString().isNotEmpty ?? false)) _buildDetailRow(Icons.note, 'Instructions:', data['specialInstructions']),
                   ] else if (orderType == 'dine_in') ...[
-                    _buildDetailRow(
-                      Icons.table_restaurant,
-                      'Table(s):',
-                      data['tableNumber'] != null
-                          ? (data['tableNumber'] as String)
-                          : 'N/A',
-                    ),
+                    _buildDetailRow(Icons.table_restaurant, 'Table(s):', data['tableNumber'] != null ? (data['tableNumber'] as String) : 'N/A'),
                   ],
                 ],
               ),
@@ -1221,9 +1023,7 @@ class _OrderCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.grey[200]!),
               ),
-              child: Column(
-                children: items.map((item) => _buildItemRow(item)).toList(),
-              ),
+              child: Column(children: items.map((item) => _buildItemRow(item)).toList()),
             ),
             const SizedBox(height: 20),
             _buildSectionHeader('Order Summary', Icons.summarize),
@@ -1238,8 +1038,7 @@ class _OrderCard extends StatelessWidget {
               child: Column(
                 children: [
                   _buildSummaryRow('Subtotal', subtotal),
-                  if (deliveryFee > 0)
-                    _buildSummaryRow('Delivery Fee', deliveryFee),
+                  if (deliveryFee > 0) _buildSummaryRow('Delivery Fee', deliveryFee),
                   const Divider(height: 20),
                   _buildSummaryRow('Total Amount', totalAmount, isTotal: true),
                 ],
@@ -1254,160 +1053,21 @@ class _OrderCard extends StatelessWidget {
       ),
     );
   }
-
-  // Helper method to get display text for status
-  String _getStatusDisplayText(String status) {
-    switch (status.toLowerCase()) {
-      case 'needs_rider_assignment':
-        return 'NEEDS ASSIGN';
-      case 'rider_assigned':
-        return 'RIDER ASSIGNED';
-      case 'pickedup':
-        return 'PICKED UP';
-      default:
-        return status.toUpperCase();
-    }
-  }
-
-  // Helper method to get appropriate font size based on status length
-  double _getStatusFontSize(String status) {
-    final displayText = _getStatusDisplayText(status);
-    if (displayText.length > 12) {
-      return 9;
-    } else if (displayText.length > 8) {
-      return 10;
-    } else {
-      return 11;
-    }
-  }
-
-  Widget _buildSectionHeader(String title, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, color: Colors.deepPurple, size: 18),
-        const SizedBox(width: 8),
-        Text(
-          title,
-          style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 15,
-              color: Colors.deepPurple),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDetailRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 16, color: Colors.deepPurple.shade400),
-          const SizedBox(width: 10),
-          Expanded(
-            flex: 2,
-            child: Text(label,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w500)),
-          ),
-          Expanded(
-            flex: 3,
-            child: Text(value,
-                style: const TextStyle(fontSize: 13, color: Colors.black87)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildItemRow(Map<String, dynamic> item) {
-    final String name = item['name'] ?? 'Unnamed Item';
-    final int qty = (item['quantity'] as num? ?? 1).toInt();
-    final double price = (item['price'] as num? ?? 0.0).toDouble();
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            flex: 5,
-            child: Text.rich(
-              TextSpan(
-                text: name,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w500),
-                children: [
-                  TextSpan(
-                    text: ' (x$qty)',
-                    style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.normal,
-                        color: Colors.black54),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              'QAR ${(price * qty).toStringAsFixed(2)}',
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 13, color: Colors.black),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSummaryRow(String label, double amount, {bool isTotal = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: isTotal ? 15 : 13,
-              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-              color: isTotal ? Colors.black : Colors.grey[800],
-            ),
-          ),
-          Text(
-            'QAR ${amount.toStringAsFixed(2)}',
-            style: TextStyle(
-              fontSize: isTotal ? 15 : 13,
-              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-              color: isTotal ? Colors.black : Colors.grey[800],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
-
-
-
-
-// --- ADDED: Import for loading font assets ---
+// -----------------------------------------------------------
+// ✅ HELPER FUNCTIONS & CLASSES FROM ORIGINAL FILE (RESTORED)
+// -----------------------------------------------------------
 
 Future<void> printReceipt(
     BuildContext context, DocumentSnapshot orderDoc) async {
   try {
-    // --- Load Arabic Font ---
     final fontData =
     await rootBundle.load("assets/fonts/NotoSansArabic-Regular.ttf");
     final pw.Font arabicFont = pw.Font.ttf(fontData);
 
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async {
-        // --- 1. Extract Order Data ---
         final Map<String, dynamic> order =
         Map<String, dynamic>.from(orderDoc.data() as Map);
 
@@ -1416,7 +1076,6 @@ Future<void> printReceipt(
           final m = Map<String, dynamic>.from(e as Map);
           final name = (m['name'] ?? 'Item').toString();
 
-          // --- FIX 2: Fallback to empty string, not English name ---
           final nameAr = (m['name_ar'] ?? '').toString();
 
           final qtyRaw = m.containsKey('quantity') ? m['quantity'] : m['qty'];
@@ -1440,7 +1099,6 @@ Future<void> printReceipt(
         final double finalSubtotal =
         subtotal > 0 ? subtotal : calculatedSubtotal;
 
-        // --- NEW: Extract Rider Payment Amount ---
         final double riderPaymentAmount =
             (order['riderPaymentAmount'] as num?)?.toDouble() ?? 0.0;
 
@@ -1486,7 +1144,6 @@ Future<void> printReceipt(
             ? 'عميل مباشر'
             : customerName);
 
-        // --- 2. Fetch Branch Details ---
         final List<dynamic> branchIds = order['branchIds'] ?? [];
         String primaryBranchId =
         branchIds.isNotEmpty ? branchIds.first.toString() : '';
@@ -1528,10 +1185,8 @@ Future<void> printReceipt(
           debugPrint("Error fetching branch details for receipt: $e");
         }
 
-        // --- 3. Build the PDF ---
         final pdf = pw.Document();
 
-        // --- Bilingual Styles ---
         const pw.TextStyle regular = pw.TextStyle(fontSize: 9);
         final pw.TextStyle bold =
         pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
@@ -1561,7 +1216,6 @@ Future<void> printReceipt(
             fontWeight: pw.FontWeight.bold,
             color: PdfColors.black);
 
-        // --- FIX 3: Helper to convert numbers to Arabic ---
         String toArabicNumerals(String number) {
           const en = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'];
           const ar = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩', '.'];
@@ -1571,7 +1225,6 @@ Future<void> printReceipt(
           return number;
         }
 
-        // --- FIX 2: Updated Bilingual Label Helper ---
         pw.Widget buildBilingualLabel(String en, String ar,
             {required pw.TextStyle enStyle,
               required pw.TextStyle arStyle,
@@ -1586,7 +1239,6 @@ Future<void> printReceipt(
           );
         }
 
-        // --- FIX 3: Updated Bilingual Summary Row Helper ---
         pw.Widget buildSummaryRow(String en, String ar, double amount,
             {required pw.TextStyle enLabelStyle,
               required pw.TextStyle arLabelStyle,
@@ -1634,7 +1286,6 @@ Future<void> printReceipt(
           pw.Page(
             pageFormat: PdfPageFormat.roll80,
             build: (_) {
-              // --- FIX 1: Constrain width to force centering/alignment ---
               return pw.Container(
                 width: format.availableWidth,
                 child: pw.Column(
@@ -1748,7 +1399,6 @@ Future<void> printReceipt(
                           ],
                         ),
 
-                        // --- FIX 2 & 3: Bilingual Item Rows ---
                         ...items.map((item) {
                           return pw.TableRow(
                             children: [
@@ -1764,7 +1414,6 @@ Future<void> printReceipt(
                                   child: pw.Text(item['qty'].toString(),
                                       style: regular,
                                       textAlign: pw.TextAlign.center)),
-                              // --- FIX 3: Bilingual Price for item total ---
                               pw.Padding(
                                 padding:
                                 const pw.EdgeInsets.symmetric(vertical: 3),
@@ -1790,7 +1439,6 @@ Future<void> printReceipt(
                     ),
                     pw.SizedBox(height: 10),
 
-                    // --- FIX 3: Bilingual Summary Section ---
                     pw.Row(
                       mainAxisAlignment: pw.MainAxisAlignment.end,
                       children: [
@@ -1798,7 +1446,6 @@ Future<void> printReceipt(
                           child: pw.Column(
                             crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                             children: [
-                              // Subtotal
                               buildSummaryRow(
                                   'Subtotal:', 'المجموع الفرعي:', finalSubtotal,
                                   enLabelStyle: regular,
@@ -1806,7 +1453,6 @@ Future<void> printReceipt(
                                   enValueStyle: bold,
                                   arValueStyle: arBold),
 
-                              // --- ADDED RIDER PAYMENT LINE ---
                               if (rawOrderType.toLowerCase() == 'delivery' &&
                                   riderPaymentAmount > 0)
                                 buildSummaryRow(
@@ -1816,7 +1462,6 @@ Future<void> printReceipt(
                                     enValueStyle: bold,
                                     arValueStyle: arBold,
                                     valueColor: PdfColors.blueGrey),
-                              // -------------------------------
 
                               if (discount > 0)
                                 buildSummaryRow(
@@ -1826,11 +1471,10 @@ Future<void> printReceipt(
                                     enValueStyle: bold,
                                     arValueStyle: arBold,
                                     valueColor: PdfColors.green,
-                                    prefix: '- '), // Added prefix
+                                    prefix: '- '),
 
                               pw.Divider(height: 5, color: PdfColors.grey),
 
-                              // Total
                               buildSummaryRow(
                                   'TOTAL:', 'المجموع الكلي:', totalAmount,
                                   enLabelStyle: total,
@@ -1842,7 +1486,6 @@ Future<void> printReceipt(
                         ),
                       ],
                     ),
-                    // --- END SUMMARY ---
 
                     pw.SizedBox(height: 20),
                     pw.Divider(thickness: 1),
@@ -1879,8 +1522,6 @@ Future<void> printReceipt(
   }
 }
 
-/// A simple static service to pass a selected orderId from one screen
-/// (like Dashboard) to the OrdersScreen.
 class OrderSelectionService {
   static Map<String, dynamic> _selectedOrder = {};
 
@@ -1905,12 +1546,6 @@ class OrderSelectionService {
   }
 }
 
-
-
-// -----------------------------------------------------------------------------
-// Enhanced Rider Selection Dialog
-// -----------------------------------------------------------------------------
-
 class _RiderSelectionDialog extends StatelessWidget {
   final String currentBranchId;
 
@@ -1918,20 +1553,13 @@ class _RiderSelectionDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Build the branch-aware query for available drivers
     Query query = FirebaseFirestore.instance
         .collection('Drivers')
         .where('isAvailable', isEqualTo: true)
         .where('status', isEqualTo: 'online');
 
-    // Filter by branch
-    // This assumes non-super admins will always have a currentBranchId
     if (currentBranchId.isNotEmpty) {
       query = query.where('branchIds', arrayContains: currentBranchId);
-    } else {
-      // Handle super_admin case if they don't have a branchId
-      // This will show all online/available drivers
-      // Or you could build a branch selector for them
     }
 
     return AlertDialog(
@@ -1961,7 +1589,7 @@ class _RiderSelectionDialog extends StatelessWidget {
                   Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
                   const SizedBox(height: 16),
                   Text(
-                    'Error loading riders: ${snapshot.error}', // Show error
+                    'Error loading riders: ${snapshot.error}',
                     style: TextStyle(color: Colors.red),
                     textAlign: TextAlign.center,
                   ),
@@ -1982,7 +1610,7 @@ class _RiderSelectionDialog extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'All riders are currently busy or offline.', // More descriptive
+                    'All riders are currently busy or offline.',
                     style: TextStyle(
                       color: Colors.grey[500],
                       fontSize: 12,
@@ -2003,7 +1631,7 @@ class _RiderSelectionDialog extends StatelessWidget {
                 final String name = data['name'] ?? 'Unnamed Driver';
                 final String phone = data['phone'] ?? 'No phone';
                 final String vehicle =
-                    data['vehicle']?['type'] ?? 'No vehicle'; // Corrected path
+                    data['vehicle']?['type'] ?? 'No vehicle';
 
                 return Card(
                   margin: const EdgeInsets.symmetric(vertical: 4),
@@ -2089,5 +1717,3 @@ class _RiderSelectionDialog extends StatelessWidget {
     );
   }
 }
-
-

@@ -1,6 +1,3 @@
-
-
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart';
@@ -40,7 +37,7 @@ class DashboardScreen extends StatelessWidget {
           children: [
             _buildEnhancedStatCardsGrid(context),
             const SizedBox(height: 32),
-            _buildSectionHeader('Recent Orders', Icons.receipt_long_outlined),
+            _buildSectionHeader('Recent Orders (Today)', Icons.receipt_long_outlined),
             const SizedBox(height: 16),
             _buildEnhancedRecentOrdersSection(context),
           ],
@@ -204,14 +201,11 @@ class DashboardScreen extends StatelessWidget {
   }
 
   void _navigateToOrders(BuildContext context) {
-    // Set the order selection to show all orders
     OrderSelectionService.setSelectedOrder(
-      orderId: null, // No specific order
-      orderType: null, // No specific type
-      status: 'all', // Show all statuses
+      orderId: null,
+      orderType: null,
+      status: 'all',
     );
-
-    // Navigate to orders tab
     onTabChange(2);
   }
 
@@ -246,6 +240,11 @@ class DashboardScreen extends StatelessWidget {
   }
 
   Widget _buildEnhancedRecentOrdersSection(BuildContext context) {
+    // ✅ 1. Get Start of Today for Filtering
+    final DateTime now = DateTime.now();
+    final DateTime startOfDay = DateTime(now.year, now.month, now.day);
+    final Timestamp startOfTodayTimestamp = Timestamp.fromDate(startOfDay);
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -307,6 +306,7 @@ class DashboardScreen extends StatelessWidget {
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: FirebaseFirestore.instance
                   .collection('Orders')
+                  .where('timestamp', isGreaterThanOrEqualTo: startOfTodayTimestamp) // ✅ 2. Filter by Today
                   .orderBy('timestamp', descending: true)
                   .limit(5)
                   .snapshots(),
@@ -322,7 +322,7 @@ class DashboardScreen extends StatelessWidget {
                   );
                 }
                 if (snapshot.hasError) {
-                  return _buildErrorState('Error loading orders');
+                  return _buildErrorState('Error loading orders: ${snapshot.error}');
                 }
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return _buildEmptyState();
@@ -381,7 +381,7 @@ class DashboardScreen extends StatelessWidget {
             Icon(Icons.receipt_long_outlined, size: 48, color: Colors.grey[400]),
             const SizedBox(height: 12),
             Text(
-              'No recent orders',
+              'No orders today',
               style: TextStyle(
                 color: Colors.grey[600],
                 fontSize: 16,
@@ -421,7 +421,7 @@ class _EnhancedStatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 140, // Fixed height to ensure consistent sizing
+      height: 140,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [color.withOpacity(0.8), color],
@@ -765,7 +765,15 @@ class _OrderPopupDialog extends StatefulWidget {
 }
 
 class _OrderPopupDialogState extends State<_OrderPopupDialog> {
+  // ✅ 3. Added Loading State
+  bool _isLoading = false;
+
   Future<void> updateOrderStatus(String orderId, String newStatus) async {
+    // ✅ Set Loading
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
       final Map<String, dynamic> updateData = {
         'status': newStatus,
@@ -833,7 +841,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.of(context).pop(); // Close dialog after successful update
+        Navigator.of(context).pop();
       }
     } catch (e) {
       if (mounted) {
@@ -843,6 +851,13 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
             backgroundColor: Colors.red,
           ),
         );
+      }
+    } finally {
+      // ✅ Stop Loading (only if still mounted and not popped)
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -857,6 +872,11 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     );
 
     if (rider != null && rider.isNotEmpty) {
+      // ✅ Set Loading
+      setState(() {
+        _isLoading = true;
+      });
+
       try {
         final updateMap = {
           'status': 'rider_assigned',
@@ -882,7 +902,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               backgroundColor: Colors.green,
             ),
           );
-          Navigator.of(context).pop(); // Close dialog after assignment
+          Navigator.of(context).pop();
         }
       } catch (e) {
         if (mounted) {
@@ -893,11 +913,29 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
             ),
           );
         }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
     }
   }
 
   Widget _buildActionButtons(String status, String orderType, String orderId) {
+    // ✅ 4. Check Loading State
+    if (_isLoading) {
+      return const Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
+          ),
+        ),
+      );
+    }
+
     final List<Widget> buttons = [];
     final data = widget.order.data() as Map<String, dynamic>? ?? {};
     final bool isAutoAssigning = data.containsKey('autoAssignStarted');
@@ -930,7 +968,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               return;
             }
 
-            // Use your existing printReceipt function
             await printReceipt(context, freshDoc);
           },
           style: OutlinedButton.styleFrom(
@@ -1465,7 +1502,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.grey,
                     padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1523,10 +1560,8 @@ class _RiderSelectionDialog extends StatelessWidget {
               final data = driver.data() as Map<String, dynamic>;
               final driverBranchIds = List<String>.from(data['branchIds'] ?? []);
 
-              // If currentBranchId is null (super admin), show all drivers
               if (currentBranchId == null) return true;
 
-              // Filter drivers that have the current branch ID
               return driverBranchIds.contains(currentBranchId);
             }).toList();
 

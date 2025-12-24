@@ -1,14 +1,13 @@
 import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vibration/vibration.dart';
+// import 'package:wakelock_plus/wakelock_plus.dart';
 
-// ❌ REMOVED: import '../Screens/OrdersScreen.dart'; // No longer needed for navigation
 import '../Screens/MainScreen.dart';
-import '../Screens/OrdersScreen.dart';
 import '../main.dart';
 import 'RiderAssignment.dart';
 
@@ -26,8 +25,9 @@ class OrderNotificationService with ChangeNotifier {
   final service = FlutterBackgroundService();
   GlobalKey<NavigatorState>? _navigatorKey;
 
+  bool _isDialogOpen = false;
+
   OrderNotificationService() {
-    // Load preferences when service is created
     _loadPreferences();
   }
 
@@ -54,519 +54,522 @@ class OrderNotificationService with ChangeNotifier {
 
   void init(UserScopeService scopeService, GlobalKey<NavigatorState> key) {
     _navigatorKey = key;
-    // Listen for messages from the background service
+
     service.on('new_order').listen((payload) {
       if (payload != null) {
+        debugPrint("🔔 FOREGROUND EVENT RECEIVED: $payload");
+
         final orderId = payload['orderId'] as String?;
-        final title = payload['title'] as String?;
-        final body = payload['body'] as String?;
 
         if (orderId != null && scopeService.isLoaded) {
-          // Check if the order belongs to this admin's branch(es)
           final branchIds = (payload['branchIds'] as List?)?.cast<String>() ?? [];
           final bool branchMatch = scopeService.isSuperAdmin ||
               branchIds.any((id) => scopeService.branchIds.contains(id));
 
           if (branchMatch) {
-            _triggerNotification(orderId, title, body);
+            _showRobustOrderDialog(payload, scopeService.userEmail);
           }
         }
       }
     });
   }
 
-  Future<void> _triggerNotification(String orderId, String? title, String? body) async {
-    if (_playSound) {
-      // Re-initialize player to avoid issues
-      final player = AudioPlayer();
-      await player.play(AssetSource('notification.mp3'));
-    }
-    if (_vibrate) {
-      if (await Vibration.hasVibrator() ?? false) {
-        Vibration.vibrate(duration: 500);
-      }
-    }
+  void _showRobustOrderDialog(Map<String, dynamic> orderData, String adminEmail) {
+    final context = _navigatorKey?.currentContext;
 
-    // ✅ **MOVED _navigateToOrder HERE**
-    void _navigateToOrder(String orderId) {
-      final context = _navigatorKey?.currentContext;
-      if (context != null) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => HomeScreen()),
-              (route) => false,
-        );
-        debugPrint("Navigating to order: $orderId");
-      } else {
-        debugPrint("❌ Cannot navigate! Navigator context is null.");
-      }
-    }
+    if (context != null && !_isDialogOpen) {
+      _isDialogOpen = true;
 
-    void showInAppOrderDialog(BuildContext context, String orderId, String? title, String? body) {
       showDialog(
         context: context,
-        builder: (context) => AlertDialog(
-          title: Text(title ?? 'New Order!'),
-          content: Text(body ?? 'You have a new pending order.'),
-          actions: [
-            TextButton(
-              child: const Text('Dismiss'),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-            ElevatedButton(
-              child: const Text('View Order'),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _navigateToOrder(orderId); // ✅ **FIX:** This now calls the method inside this class
-              },
-            ),
-          ],
-        ),
+        barrierDismissible: false,
+        builder: (context) {
+          return NewOrderDialog(
+            orderData: orderData,
+            playSound: _playSound,
+            vibrate: _vibrate,
+            onClose: () {
+              _isDialogOpen = false;
+            },
+            onAccept: () {
+              _navigateToOrder(orderData['orderId']);
+            },
+            // ✅ UPDATED: Now accepts a reason string
+            onReject: (String reason) async {
+              final String orderId = orderData['orderId'];
+              try {
+                debugPrint("⛔ Rejecting order: $orderId | Reason: $reason");
+
+                // 1. Update Firestore with AUDIT DETAILS
+                await FirebaseFirestore.instance
+                    .collection('Orders')
+                    .doc(orderId)
+                    .update({
+                  'status': 'cancelled',
+                  'rejectionReason': reason, // ✅ Save the reason
+                  'rejectedBy': adminEmail,  // ✅ Save who rejected it
+                  'rejectionSource': 'admin_app',
+                  'timestamps.cancelled': FieldValue.serverTimestamp(),
+                });
+
+                // 2. Stop any auto-assignment if running
+                await RiderAssignmentService.cancelAutoAssignment(orderId);
+
+                debugPrint("✅ Order $orderId rejected successfully.");
+              } catch (e) {
+                debugPrint("❌ Error rejecting order: $e");
+              }
+            },
+            onAutoAccept: () {
+              _navigateToOrder(orderData['orderId']);
+            },
+          );
+        },
+      ).then((_) {
+        _isDialogOpen = false;
+      });
+    } else {
+      debugPrint("⚠️ Context null or Dialog already open");
+    }
+  }
+
+  void _navigateToOrder(String orderId) {
+    final context = _navigatorKey?.currentContext;
+    if (context != null) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => HomeScreen()),
+            (route) => false,
       );
     }
-  }}
+  }
+}
 
-//
 // -------------------------------------------------------------------
-// ✅ --- NewOrderDialog: REDESIGNED ---
+// ✅ --- Industry Level Robust NewOrderDialog ---
 // -------------------------------------------------------------------
-//
+
 class NewOrderDialog extends StatefulWidget {
   final Map<String, dynamic> orderData;
+  final bool playSound;
+  final bool vibrate;
   final VoidCallback onAccept;
-  final VoidCallback onReject;
+  final Function(String) onReject; // ✅ Changed to accept Reason
   final VoidCallback onAutoAccept;
+  final VoidCallback onClose;
 
   const NewOrderDialog({
     Key? key,
     required this.orderData,
+    required this.playSound,
+    required this.vibrate,
     required this.onAccept,
     required this.onReject,
     required this.onAutoAccept,
+    required this.onClose,
   }) : super(key: key);
 
   @override
   NewOrderDialogState createState() => NewOrderDialogState();
 }
 
-class NewOrderDialogState extends State<NewOrderDialog> {
+class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObserver {
   Timer? _timer;
-  int _countdown = 30;
-  bool _isExpanded = false;
+  int _countdown = 60;
+  final AudioPlayer _player = AudioPlayer();
+  bool _isAudioPlaying = false;
+  bool _isProcessing = false; // ✅ Added for loading state
 
-  // --- Getters to safely parse data ---
   String get orderId => widget.orderData['orderId']?.toString() ?? 'N/A';
-  String get orderNumber => widget.orderData['dailyOrderNumber']?.toString() ?? orderId.substring(0, 6).toUpperCase();
-  String get customerName => widget.orderData['customerName']?.toString() ?? 'N/A';
-  String get orderType => widget.orderData['Order_type']?.toString() ?? 'Unknown';
+  String get orderNumber => widget.orderData['dailyOrderNumber']?.toString() ?? '---';
+  String get customerName => widget.orderData['customerName']?.toString() ?? 'Guest';
+  String get orderType => widget.orderData['Order_type']?.toString() ?? 'Delivery';
+
   String get address {
-    final addressMap = widget.orderData['deliveryAddress'] as Map<String, dynamic>?;
-    return addressMap?['street']?.toString() ?? 'N/A';
+    try {
+      if (widget.orderData['deliveryAddress'] is Map) {
+        return widget.orderData['deliveryAddress']['street']?.toString() ?? 'No Address';
+      }
+    } catch(e) {}
+    return 'N/A';
   }
+
   List<Map<String, dynamic>> get items {
-    final itemsList = (widget.orderData['items'] as List<dynamic>?) ?? [];
-    return itemsList.map((item) {
-      final itemMap = (item is Map) ? Map<String, dynamic>.from(item) : <String, dynamic>{};
-      final itemName = itemMap['name']?.toString() ?? 'Unknown';
-      final qty = int.tryParse(itemMap['quantity']?.toString() ?? '1') ?? 1;
-      final price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
-      return {'name': itemName, 'qty': qty, 'price': price};
-    }).toList();
+    try {
+      final list = widget.orderData['items'];
+      if (list is List) {
+        return list.map((item) {
+          final itemMap = Map<String, dynamic>.from(item as Map);
+          return {
+            'name': itemMap['name']?.toString() ?? 'Item',
+            'qty': int.tryParse(itemMap['quantity']?.toString() ?? '1') ?? 1,
+            'price': double.tryParse(itemMap['price']?.toString() ?? '0') ?? 0.0,
+          };
+        }).toList();
+      }
+    } catch (e) {
+      debugPrint("Error parsing items: $e");
+    }
+    return [];
   }
 
-  // Getters for expanded details
-  double get subtotal => (widget.orderData['subtotal'] as num?)?.toDouble() ?? 0.0;
-  double get deliveryFee => (widget.orderData['deliveryFee'] as num?)?.toDouble() ?? 0.0;
-  double get totalAmount => (widget.orderData['totalAmount'] as num?)?.toDouble() ?? 0.0;
+  double get totalAmount => double.tryParse(widget.orderData['totalAmount']?.toString() ?? '0') ?? 0.0;
   String get specialInstructions => widget.orderData['specialInstructions']?.toString() ?? '';
-  // --- End of Getters ---
-
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     startTimer();
+    _startAlarm();
+  }
+
+  Future<void> _startAlarm() async {
+    if (widget.playSound) {
+      try {
+        await _player.setReleaseMode(ReleaseMode.loop);
+        await _player.play(AssetSource('notification.mp3'));
+        _isAudioPlaying = true;
+      } catch (e) {
+        debugPrint("Audio Error: $e");
+      }
+    }
+
+    if (widget.vibrate) {
+      if (await Vibration.hasVibrator() ?? false) {
+        Vibration.vibrate(pattern: [500, 1000, 500, 1000], repeat: 0);
+      }
+    }
+  }
+
+  Future<void> _stopAlarm() async {
+    try {
+      if (_isAudioPlaying) {
+        await _player.stop();
+        await _player.release();
+        _isAudioPlaying = false;
+      }
+      Vibration.cancel();
+    } catch (e) {
+      debugPrint("Stop Audio Error: $e");
+    }
   }
 
   void startTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_countdown == 0) {
         timer.cancel();
-        if (mounted) {
-          widget.onAutoAccept();
-        }
+        _handleAutoAction();
       } else {
-        if (mounted) {
-          setState(() {
-            _countdown--;
-          });
-        }
+        if (mounted) setState(() => _countdown--);
       }
     });
   }
 
+  void _handleAutoAction() {
+    _stopAlarm();
+    // Logic for auto-action (e.g. stop sound)
+  }
+
   @override
   void dispose() {
+    _stopAlarm();
     _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    widget.onClose();
     super.dispose();
   }
 
-  // --- Redesign Helper Functions ---
+  // ✅ ROBUST REJECTION FLOW
+  Future<void> _handleRejectPress() async {
+    // 1. Stop the alarm immediately so user can think
+    await _stopAlarm();
 
-  IconData _getOrderTypeIcon(String orderType) {
-    switch (orderType.toLowerCase()) {
-      case 'delivery':
-        return Icons.delivery_dining;
-      case 'takeaway':
-        return Icons.directions_car;
-      case 'pickup':
-        return Icons.shopping_bag;
-      case 'dine_in':
-        return Icons.restaurant;
-      default:
-        return Icons.receipt_long;
+    // 2. Show Reason Dialog
+    final String? reason = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return const RejectionReasonDialog();
+      },
+    );
+
+    // 3. If reason selected, proceed
+    if (reason != null && mounted) {
+      setState(() {
+        _isProcessing = true; // Show loading spinner
+      });
+
+      // 4. Perform async rejection
+      await widget.onReject(reason);
+
+      if (mounted) {
+        Navigator.of(context).pop(); // Close the main Order Dialog
+      }
+    } else {
+      // User cancelled rejection dialog
+      // Optional: Restart alarm? For now, we leave it silent but dialog stays open.
     }
   }
 
-  String _formatOrderType(String orderType) {
-    return orderType.replaceAll('_', ' ').toUpperCase();
+  Future<void> _handleAcceptPress() async {
+    await _stopAlarm();
+    widget.onAccept();
+    if(mounted) Navigator.of(context).pop();
   }
 
-  // ✅ NEW: Helper to get a color for the header
-  Color _getOrderTypeColor(String orderType) {
+  Color _getHeaderColor() {
     switch (orderType.toLowerCase()) {
-      case 'delivery':
-        return Colors.blue.shade700;
-      case 'takeaway':
-        return Colors.orange.shade700;
-      case 'pickup':
-        return Colors.green.shade700;
-      case 'dine_in':
-        return Colors.purple.shade700;
-      default:
-        return Colors.grey.shade700;
+      case 'delivery': return Colors.blue.shade800;
+      case 'takeaway': return Colors.orange.shade800;
+      case 'pickup': return Colors.green.shade800;
+      case 'dine_in': return Colors.purple.shade800;
+      default: return Colors.deepPurple;
     }
   }
-
-  Widget _buildInfoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 20, color: Colors.grey[700]),
-          const SizedBox(width: 12),
-          Text(
-            '$label ',
-            style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[800],
-                fontSize: 15),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 15),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSummaryRow(String label, double amount, {bool isTotal = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(fontSize: 14, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal)),
-          Text('QAR ${amount.toStringAsFixed(2)}', style: TextStyle(fontSize: 14, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal)),
-        ],
-      ),
-    );
-  }
-
-  // ✅ NEW: Redesigned item list
-  Widget _buildItemsList() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey[200]!)),
-      child: Column(
-        children: items.map((item) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    '${item['qty']} x ${item['name']}',
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-                  ),
-                ),
-                Text(
-                  'QAR ${(item['price'] * (item['qty'] as int)).toStringAsFixed(2)}',
-                  style: const TextStyle(fontSize: 15, color: Colors.black87),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildExpandedDetails() {
-    return Container(
-      padding: const EdgeInsets.only(top: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Order Summary:',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple[800]),
-          ),
-          const SizedBox(height: 8),
-          _buildSummaryRow('Subtotal', subtotal),
-          if (deliveryFee > 0)
-            _buildSummaryRow('Delivery Fee', deliveryFee),
-          const Divider(height: 16),
-          _buildSummaryRow('Total Amount', totalAmount, isTotal: true),
-
-          if (specialInstructions.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text(
-              'Special Instructions:',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple[800]),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                  color: Colors.yellow[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.yellow[200]!)
-              ),
-              child: Text(
-                specialInstructions,
-                style: const TextStyle(fontSize: 14, fontStyle: FontStyle.italic, color: Colors.black87),
-              ),
-            ),
-          ]
-        ],
-      ),
-    );
-  }
-
-  // ✅ NEW: Professional Dialog Header
-  Widget _buildDialogHeader() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
-      decoration: BoxDecoration(
-        color: _getOrderTypeColor(orderType),
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(_getOrderTypeIcon(orderType), color: Colors.white, size: 28),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              'New ${(_formatOrderType(orderType))} Order',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          Text(
-            '#$orderNumber',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.8),
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ✅ NEW: Professional Actions Footer
-  Widget _buildDialogActions() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.04), // Light grey footer
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(24),
-          bottomRight: Radius.circular(24),
-        ),
-      ),
-      child: Column(
-        children: [
-          // Countdown Timer
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.av_timer, color: Colors.grey[700], size: 18),
-              const SizedBox(width: 8),
-              Text(
-                'Auto-accepting in',
-                style: TextStyle(color: Colors.grey[700], fontSize: 14),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                '$_countdown s',
-                style: TextStyle(
-                  color: Colors.red[700],
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          // Action Buttons
-          Row(
-            children: [
-              // Reject Button
-              Expanded(
-                flex: 1,
-                child: TextButton(
-                  onPressed: () {
-                    _timer?.cancel();
-                    widget.onReject();
-                  },
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.red[700],
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text('Reject', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                ),
-              ),
-              const SizedBox(width: 12),
-              // Accept Button
-              Expanded(
-                flex: 2,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.check, size: 20),
-                  label: const Text('Accept', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  onPressed: () {
-                    _timer?.cancel();
-                    widget.onAccept();
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green[700],
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // View Details Button (Full Width)
-          OutlinedButton.icon(
-            icon: Icon(_isExpanded ? Icons.unfold_less : Icons.unfold_more, size: 20),
-            label: Text(_isExpanded ? 'Hide Details' : 'Show Full Details'),
-            onPressed: () {
-              setState(() {
-                _isExpanded = !_isExpanded;
-              });
-            },
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.blue[700],
-              side: BorderSide(color: Colors.blue[200]!),
-              minimumSize: const Size(double.infinity, 44), // Full width
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
 
   @override
   Widget build(BuildContext context) {
-    // ✅ NEW: Replaced AlertDialog with Dialog and custom layout
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      insetPadding: const EdgeInsets.all(16), // Padding from screen edges
-      child: ConstrainedBox(
-        // Limits the height on small screens to prevent overflow
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.85,
-        ),
+    return WillPopScope(
+      onWillPop: () async => false,
+      child: Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        elevation: 10,
+        backgroundColor: Colors.white,
+        insetPadding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 1. Header (The Highlight)
-            _buildDialogHeader(),
+            // HEADER
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: BoxDecoration(
+                color: _getHeaderColor(),
+                borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
+              ),
+              child: Row(
+                children: [
+                  if (_isProcessing)
+                    const SizedBox(
+                        width: 24, height: 24,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                    )
+                  else
+                    const Icon(Icons.notifications_active, color: Colors.white, size: 28),
 
-            // 2. Scrollable Content
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'NEW ${orderType.toUpperCase()}',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                        ),
+                        Text(
+                          'Order #$orderNumber',
+                          style: const TextStyle(color: Colors.white70, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
+                    child: Text(
+                      '$_countdown s',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  )
+                ],
+              ),
+            ),
+
+            // BODY
             Flexible(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+                padding: const EdgeInsets.all(20),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildInfoRow(
-                        Icons.person_outline, 'Customer:', customerName),
-                    if (orderType.toLowerCase() == 'delivery')
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: _buildInfoRow(
-                            Icons.location_on_outlined, 'Address:', address),
-                      ),
-                    const Divider(height: 24, thickness: 1),
-                    Text(
-                      'Items:',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                          color: Colors.black87),
+                    Row(
+                      children: [
+                        const Icon(Icons.person, color: Colors.grey, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(customerName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    _buildItemsList(), // Use new item list builder
+                    if (orderType.toLowerCase() == 'delivery') ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.location_on, color: Colors.grey, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(address, style: const TextStyle(fontSize: 14, color: Colors.black87), maxLines: 2)),
+                        ],
+                      ),
+                    ],
 
-                    // Animated switcher for the expanded details
-                    AnimatedSize(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                      child: _isExpanded
-                          ? _buildExpandedDetails()
-                          : const SizedBox(width: double.infinity),
+                    const Divider(height: 24),
+
+                    ...items.map((item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: Colors.grey[200],
+                                borderRadius: BorderRadius.circular(4)
+                            ),
+                            child: Text('${item['qty']}x', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(item['name'], style: const TextStyle(fontSize: 15))),
+                          Text('QAR ${item['price']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    )).toList(),
+
+                    if (specialInstructions.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(color: Colors.yellow[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.yellow[200]!)),
+                        child: Text("Note: $specialInstructions", style: const TextStyle(color: Colors.brown, fontStyle: FontStyle.italic)),
+                      )
+                    ],
+
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text("Total Amount", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        Text("QAR ${totalAmount.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
+                      ],
                     ),
                   ],
                 ),
               ),
             ),
 
-            // 3. Actions Footer
-            _buildDialogActions(),
+            // ACTIONS
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isProcessing ? null : _handleRejectPress, // ✅ Call new handler
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: const BorderSide(color: Colors.red),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text("REJECT"),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      onPressed: _isProcessing ? null : _handleAcceptPress,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 5,
+                      ),
+                      child: const Text("ACCEPT ORDER", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+// -------------------------------------------------------------------
+// ✅ --- New Widget: Rejection Reason Picker ---
+// -------------------------------------------------------------------
+
+class RejectionReasonDialog extends StatefulWidget {
+  const RejectionReasonDialog({Key? key}) : super(key: key);
+
+  @override
+  State<RejectionReasonDialog> createState() => _RejectionReasonDialogState();
+}
+
+class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
+  String? _selectedReason;
+  final TextEditingController _otherReasonController = TextEditingController();
+
+  final List<String> _reasons = [
+    'Items Out of Stock',
+    'Kitchen Too Busy',
+    'Closing Soon / Closed',
+    'Invalid Address',
+    'Cannot Fulfill Special Request',
+    'Other'
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Reason for Rejection'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ..._reasons.map((reason) => RadioListTile<String>(
+              title: Text(reason),
+              value: reason,
+              groupValue: _selectedReason,
+              onChanged: (value) {
+                setState(() {
+                  _selectedReason = value;
+                });
+              },
+              contentPadding: EdgeInsets.zero,
+              activeColor: Colors.red,
+            )),
+            if (_selectedReason == 'Other')
+              TextField(
+                controller: _otherReasonController,
+                decoration: const InputDecoration(
+                  labelText: 'Please specify reason',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 2,
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(null),
+          child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+        ),
+        ElevatedButton(
+          onPressed: _selectedReason == null ? null : () {
+            String finalReason = _selectedReason!;
+            if (finalReason == 'Other') {
+              finalReason = _otherReasonController.text.trim();
+              if (finalReason.isEmpty) return; // Don't allow empty "Other"
+            }
+            Navigator.of(context).pop(finalReason);
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red,
+          ),
+          child: const Text('Confirm Rejection', style: TextStyle(color: Colors.white)),
+        ),
+      ],
     );
   }
 }
