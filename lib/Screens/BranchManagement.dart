@@ -968,7 +968,9 @@ class _BranchCard extends StatelessWidget {
 
                 _buildDetailSection('Address', [
                   _buildDetailRow(Icons.location_city_outlined, 'City', address['city'] ?? 'Not provided'),
+                  _buildDetailRow(Icons.location_city_outlined, 'City (Arabic)', address['city_ar'] ?? 'Not provided'), // Added Arabic
                   _buildDetailRow(Icons.location_on_outlined, 'Street', address['street'] ?? 'Not provided'),
+                  _buildDetailRow(Icons.location_on_outlined, 'Street (Arabic)', address['street_ar'] ?? 'Not provided'), // Added Arabic
                 ]),
 
                 const SizedBox(height: 16),
@@ -1111,6 +1113,9 @@ class _BranchCard extends StatelessWidget {
   }
 
   Widget _buildDetailRow(IconData icon, String label, String value, {Color? color}) {
+    // This helper function also needs to be updated to show Arabic in detail view if it was passed.
+    // However, since the branch address fetching logic is outside this file, we can leave this as-is
+    // since the Arabic fields are now added to the DB and will be available for the receipt (OrdersScreen.dart).
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -1151,6 +1156,7 @@ class _BranchDialogState extends State<BranchDialog> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameCtrl, _emailCtrl, _phoneCtrl, _estimatedTimeCtrl, _logoUrlCtrl, _deliveryFeeCtrl;
   late TextEditingController _cityCtrl, _streetCtrl, _latCtrl, _lngCtrl;
+  late TextEditingController _cityArCtrl, _streetArCtrl; // <-- ADDED ARABIC CONTROLLERS
   late TextEditingController _freeDeliveryRangeCtrl, _noDeliveryRangeCtrl;
   late List<String> _offerCarousel;
   bool _isOpen = true;
@@ -1183,6 +1189,10 @@ class _BranchDialogState extends State<BranchDialog> {
     final address = data['address'] as Map<String, dynamic>? ?? {};
     _cityCtrl = TextEditingController(text: address['city'] ?? '');
     _streetCtrl = TextEditingController(text: address['street'] ?? '');
+
+    // <-- INITIALIZE NEW ARABIC CONTROLLERS
+    _cityArCtrl = TextEditingController(text: address['city_ar'] ?? '');
+    _streetArCtrl = TextEditingController(text: address['street_ar'] ?? '');
 
     final geo = address['geolocation'] as GeoPoint?;
 
@@ -1265,6 +1275,11 @@ class _BranchDialogState extends State<BranchDialog> {
         setState(() {
           _streetCtrl.text = address['road'] ?? data['display_name'] ?? '';
           _cityCtrl.text = address['city'] ?? address['town'] ?? address['village'] ?? '';
+
+          // NOTE: Nominatim doesn't provide automatic Arabic reverse geocoding here,
+          // so these fields will need to be manually entered by the user or
+          // an additional call to a translation service would be needed.
+          // We leave them empty on auto-update.
         });
       }
     } catch (e) {
@@ -1321,6 +1336,11 @@ class _BranchDialogState extends State<BranchDialog> {
     _streetCtrl.dispose();
     _latCtrl.dispose();
     _lngCtrl.dispose();
+
+    // <-- DISPOSE NEW ARABIC CONTROLLERS
+    _cityArCtrl.dispose();
+    _streetArCtrl.dispose();
+
     searchController.dispose();
     super.dispose();
   }
@@ -1363,6 +1383,8 @@ class _BranchDialogState extends State<BranchDialog> {
         'address': {
           'city': _cityCtrl.text.trim(),
           'street': _streetCtrl.text.trim(),
+          'city_ar': _cityArCtrl.text.trim(), // <-- SAVING ARABIC CITY
+          'street_ar': _streetArCtrl.text.trim(), // <-- SAVING ARABIC STREET
           'geolocation': GeoPoint(double.tryParse(_latCtrl.text) ?? 0, double.tryParse(_lngCtrl.text) ?? 0),
         },
         'offer_carousel': _offerCarousel,
@@ -1410,9 +1432,9 @@ class _BranchDialogState extends State<BranchDialog> {
 
       final Uint8List imageBytes = await image.readAsBytes();
       final Uint8List webpBytes = await FlutterImageCompress.compressWithList(imageBytes, minHeight: 1080, minWidth: 1080, quality: 80, format: CompressFormat.webp);
-      String fileName = 'promo_${DateTime.now().millisecondsSinceEpoch}.webp';
+      String fileName = 'promo_ ${DateTime.now().millisecondsSinceEpoch}.webp';
 
-      Reference storageRef = FirebaseStorage.instance.ref().child('promotions/$fileName');
+      Reference storageRef = FirebaseStorage.instance.ref().child('promotions/ $fileName');
       UploadTask uploadTask = storageRef.putData(webpBytes);
       TaskSnapshot taskSnapshot = await uploadTask;
       String downloadUrl = await taskSnapshot.ref.getDownloadURL();
@@ -1628,7 +1650,18 @@ class _BranchDialogState extends State<BranchDialog> {
                                 TextFormField(
                                   controller: _cityCtrl,
                                   decoration: InputDecoration(
-                                    labelText: 'City',
+                                    labelText: 'City (English)',
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
+                                    prefixIcon: const Icon(Icons.location_city_outlined, color: Colors.deepPurple),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                TextFormField(
+                                  controller: _cityArCtrl, // <-- ADDED ARABIC CITY FIELD
+                                  textDirection: TextDirection.rtl,
+                                  textAlign: TextAlign.right,
+                                  decoration: InputDecoration(
+                                    labelText: 'City (Arabic)',
                                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
                                     prefixIcon: const Icon(Icons.location_city_outlined, color: Colors.deepPurple),
                                   ),
@@ -1637,7 +1670,18 @@ class _BranchDialogState extends State<BranchDialog> {
                                 TextFormField(
                                   controller: _streetCtrl,
                                   decoration: InputDecoration(
-                                    labelText: 'Street',
+                                    labelText: 'Street (English)',
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
+                                    prefixIcon: const Icon(Icons.location_on_outlined, color: Colors.deepPurple),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                TextFormField(
+                                  controller: _streetArCtrl, // <-- ADDED ARABIC STREET FIELD
+                                  textDirection: TextDirection.rtl,
+                                  textAlign: TextAlign.right,
+                                  decoration: InputDecoration(
+                                    labelText: 'Street (Arabic)',
                                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
                                     prefixIcon: const Icon(Icons.location_on_outlined, color: Colors.deepPurple),
                                   ),
@@ -1676,6 +1720,10 @@ class _BranchDialogState extends State<BranchDialog> {
                                                 selectedGeoPoint = GeoPoint(point.latitude, point.longitude);
                                                 _latCtrl.text = point.latitude.toString();
                                                 _lngCtrl.text = point.longitude.toString();
+
+                                                // Clear Arabic fields on map interaction, as reverse geocoding only provides English.
+                                                _cityArCtrl.clear();
+                                                _streetArCtrl.clear();
                                               });
                                               reverseGeocode(point);
                                             },

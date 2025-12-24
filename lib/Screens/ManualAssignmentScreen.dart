@@ -5,155 +5,305 @@ import 'package:provider/provider.dart';
 import '../Widgets/RiderAssignment.dart';
 import '../main.dart'; // Assuming UserScopeService is here
 
+/// A dedicated screen for manually assigning riders to orders that
+/// failed auto-assignment (status 'needs_rider_assignment').
 class ManualAssignmentScreen extends StatefulWidget {
-  const ManualAssignmentScreen({Key? key}) : super(key: key);
+  const ManualAssignmentScreen({super.key});
 
   @override
   State<ManualAssignmentScreen> createState() => _ManualAssignmentScreenState();
 }
 
 class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
+  /// Opens the rider selection dialog and assigns the chosen rider.
+  Future<void> _promptAssignRider(
+      BuildContext context, String orderId, String currentBranchId) async {
+    if (!mounted) return;
 
-  Future<void> _assignRider(String orderId) async {
-    final scope = Provider.of<UserScopeService>(context, listen: false);
-
-    final String? riderId = await showDialog<String>(
+    final riderId = await showDialog<String>(
       context: context,
-      builder: (ctx) => _RiderSelectionDialog(branchId: scope.branchId),
+      // Use the beautiful, professional, and fixed dialog
+      builder: (context) =>
+          RiderSelectionDialog(currentBranchId: currentBranchId),
     );
 
-    if (riderId != null && mounted) {
-      try {
-        final db = FirebaseFirestore.instance;
-        final batch = db.batch();
-
-        // Update Order
-        batch.update(db.collection('Orders').doc(orderId), {
-          'riderId': riderId,
-          'status': 'rider_assigned',
-          'timestamps.riderAssigned': FieldValue.serverTimestamp(),
-          'autoAssignStarted': FieldValue.delete(),
-          'assignmentNotes': 'Manually assigned from Manual Screen',
-        });
-
-        // Update Driver
-        batch.update(db.collection('Drivers').doc(riderId), {
-          'assignedOrderId': orderId,
-          'isAvailable': false,
-        });
-
-        await batch.commit();
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Rider assigned successfully!'), backgroundColor: Colors.green),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
+    if (riderId != null && riderId.isNotEmpty) {
+      if (!mounted) return;
+      // Use the static method from RiderAssignmentService
+      await RiderAssignmentService.manualAssignRider(
+        orderId: orderId,
+        riderId: riderId,
+        context: context, // Pass the context for SnackBars
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final scope = Provider.of<UserScopeService>(context);
+    final userScope = context.read<UserScopeService>();
 
+    // --- Add date filter for "current day" ---
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+    final endOfToday = startOfToday.add(const Duration(days: 1));
+
+    // Base query for orders needing assignment
     Query query = FirebaseFirestore.instance
         .collection('Orders')
-        .where('status', isEqualTo: 'needs_rider_assignment');
+        .where('status', isEqualTo: 'needs_rider_assignment')
+    // --- FIX: Query on 'timestamp' instead of 'needsAssignmentAt' ---
+        .where('timestamp', isGreaterThanOrEqualTo: startOfToday)
+        .where('timestamp', isLessThan: endOfToday);
 
-    if (!scope.isSuperAdmin) {
-      query = query.where('branchIds', arrayContains: scope.branchId);
+    // Filter by branch for non-super admins
+    if (!userScope.isSuperAdmin) {
+      query = query.where('branchIds', arrayContains: userScope.branchId);
     }
 
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: const Text("Manual Assignment"),
+        elevation: 1,
+        shadowColor: Colors.deepPurple.withOpacity(0.1),
         backgroundColor: Colors.white,
-        foregroundColor: Colors.deepPurple,
-        elevation: 0,
+        centerTitle: true,
+        title: const Text(
+          'Manual Rider Assignment',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Colors.deepPurple,
+            fontSize: 22,
+          ),
+        ),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: query.orderBy('timestamp', descending: true).snapshots(),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        // --- FIX: Removed the .orderBy() to avoid needing a composite index ---
+        // We will sort the results manually in the builder.
+        stream: query.snapshots()
+        as Stream<QuerySnapshot<Map<String, dynamic>>>,
         builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(child: Text("Error: ${snapshot.error}"));
-          }
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
+                ));
           }
 
-          final docs = snapshot.data!.docs;
-          if (docs.isEmpty) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.error_outline,
+                        size: 48, color: Colors.red[300]),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'An Error Occurred',
+                      style:
+                      TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${snapshot.error}',
+                      style: TextStyle(color: Colors.red[700]),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'This might be due to a missing Firestore index. Please check your debug console for a link to create it.',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.check_circle, size: 64, color: Colors.green.withOpacity(0.5)),
+                  Icon(Icons.check_circle_outline,
+                      size: 64, color: Colors.green[400]),
                   const SizedBox(height: 16),
-                  const Text("No pending manual assignments", style: TextStyle(color: Colors.grey, fontSize: 16)),
+                  Text(
+                    'All Caught Up!',
+                    style: TextStyle(
+                      color: Colors.grey[800],
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "No orders need manual assignment for today.",
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14,
+                    ),
+                  ),
                 ],
               ),
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
+          final docs = snapshot.data!.docs;
+
+          // --- FIX: Sort the documents in-memory ---
+          // This avoids the complex Firestore index requirement
+          // by sorting after the data is fetched.
+          try {
+            docs.sort((a, b) {
+              final aData = a.data();
+              final bData = b.data();
+
+              // --- FIX: Sort by 'timestamp' ---
+              final aTimestamp =
+              (aData['timestamp'] as Timestamp?)?.toDate();
+              final bTimestamp =
+              (bData['timestamp'] as Timestamp?)?.toDate();
+
+              // Handle nulls
+              if (aTimestamp == null && bTimestamp == null) return 0;
+              if (aTimestamp == null) return 1; // Put nulls at the end
+              if (bTimestamp == null) return -1; // Keep non-nulls at the start
+
+              // Sort descending (newest first)
+              return bTimestamp.compareTo(aTimestamp);
+            });
+          } catch (e) {
+            // Handle potential sort error (e.g., bad data)
+            debugPrint("Error sorting documents: $e");
+          }
+          // --- End of FIX ---
+
+          return ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
             itemCount: docs.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 16),
             itemBuilder: (context, index) {
-              final data = docs[index].data() as Map<String, dynamic>;
-              final orderId = docs[index].id;
+              final orderDoc = docs[index];
+              final data = orderDoc.data();
+              final orderNumber = data['dailyOrderNumber']?.toString() ??
+                  orderDoc.id.substring(0, 6).toUpperCase();
               final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
+              final reason = data['assignmentNotes'] ?? 'No reason provided';
+              final customerName = data['customerName'] ?? 'N/A';
+              final totalAmount =
+                  (data['totalAmount'] as num?)?.toDouble() ?? 0.0;
 
               return Card(
-                elevation: 3,
-                margin: const EdgeInsets.only(bottom: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 2,
+                shadowColor: Colors.deepPurple.withOpacity(0.05),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(16.0),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start, // Fixed typo here
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            "Order #${data['dailyOrderNumber'] ?? '---'}",
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            'Order #$orderNumber',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 17,
+                              color: Colors.deepPurple,
+                            ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                                color: Colors.red.shade100,
-                                borderRadius: BorderRadius.circular(8)
+                              color: Colors.orange.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: Colors.orange.withOpacity(0.5)),
                             ),
-                            child: const Text("Needs Assignment", style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold)),
-                          )
+                            child: const Text(
+                              'NEEDS ASSIGN',
+                              style: TextStyle(
+                                color: Colors.orange,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      Text("Customer: ${data['customerName'] ?? 'N/A'}"),
-                      Text("Time: ${timestamp != null ? DateFormat('hh:mm a').format(timestamp) : '--:--'}"),
-                      if(data['assignmentNotes'] != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8.0),
-                          child: Text("Note: ${data['assignmentNotes']}", style: const TextStyle(color: Colors.red, fontSize: 12, fontStyle: FontStyle.italic)),
-                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        timestamp != null
+                            ? DateFormat('MMM dd, yyyy hh:mm a')
+                            .format(timestamp)
+                            : 'No date',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      ),
                       const Divider(height: 24),
+                      _buildDetailRow(Icons.person_outline, 'Customer:',
+                          customerName,
+                          valueColor: Colors.black87),
+                      _buildDetailRow(Icons.account_balance_wallet_outlined,
+                          'Total:', 'QAR ${totalAmount.toStringAsFixed(2)}',
+                          valueColor: Colors.green.shade700),
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(12),
+                          border:
+                          Border.all(color: Colors.red.withOpacity(0.1)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'REASON FOR MANUAL ASSIGNMENT:',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                                color: Colors.red,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              reason,
+                              style: const TextStyle(
+                                  fontSize: 13, color: Colors.black87),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
-                          icon: const Icon(Icons.person_add),
-                          label: const Text("Assign Rider Now"),
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.deepPurple,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12)
+                          icon: const Icon(Icons.delivery_dining, size: 18),
+                          label: const Text('Assign Rider Manually'),
+                          onPressed: () => _promptAssignRider(
+                            context,
+                            orderDoc.id,
+                            userScope.branchId,
                           ),
-                          onPressed: () => _assignRider(orderId),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.deepPurple,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
                         ),
-                      )
+                      ),
                     ],
                   ),
                 ),
@@ -164,169 +314,235 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
       ),
     );
   }
+
+  Widget _buildDetailRow(IconData icon, String label, String value,
+      {Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: Colors.deepPurple.shade300),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style:
+            TextStyle(fontSize: 13, color: Colors.grey[700], height: 1.4),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: valueColor ?? Colors.black87,
+                  height: 1.4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-// ✅ FIXED: REPLACED ROW WITH WRAP TO FIX OVERFLOW
-class _RiderSelectionDialog extends StatelessWidget {
-  final String branchId;
-  const _RiderSelectionDialog({required this.branchId});
+// -----------------------------------------------------------------------------
+// Professional Rider Selection Dialog
+// -----------------------------------------------------------------------------
+
+class RiderSelectionDialog extends StatelessWidget {
+  final String currentBranchId;
+
+  const RiderSelectionDialog({super.key, required this.currentBranchId});
 
   @override
   Widget build(BuildContext context) {
-    Query query = FirebaseFirestore.instance.collection('Drivers')
+    // Build the branch-aware query for available drivers
+    Query query = FirebaseFirestore.instance
+        .collection('Drivers')
         .where('isAvailable', isEqualTo: true)
         .where('status', isEqualTo: 'online');
 
-    if (branchId.isNotEmpty) {
-      query = query.where('branchIds', arrayContains: branchId);
+    // Filter by branch
+    if (currentBranchId.isNotEmpty) {
+      query = query.where('branchIds', arrayContains: currentBranchId);
     }
 
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      elevation: 10,
-      child: Container(
-        constraints: const BoxConstraints(maxHeight: 500, maxWidth: 400),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ✅ FIXED HEADER ROW
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.deepPurple.withOpacity(0.1),
+    return AlertDialog(
+      // --- FIX: Add shape for professional look ---
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(0, 16, 0, 16),
+      actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+      title: const Row(
+        children: [
+          Icon(Icons.delivery_dining_outlined, color: Colors.deepPurple),
+          SizedBox(width: 10),
+          Text(
+            'Select Available Rider',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+      content:
+      // --- FIX: Add fixed height container to prevent overflow ---
+      Container(
+        width: double.maxFinite,
+        height: 300, // Set a fixed height for the list
+        child: StreamBuilder<QuerySnapshot>(
+          stream: query.snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
+                ),
+              );
+            }
+            if (snapshot.hasError) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.error_outline,
+                        size: 48, color: Colors.red[300]),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Error loading riders: ${snapshot.error}',
+                      style: const TextStyle(color: Colors.red, fontSize: 13),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              );
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.person_off_outlined,
+                        size: 48, color: Colors.grey[400]),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'No available riders found',
+                      style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'All riders are currently busy or offline.',
+                      style: TextStyle(
+                        color: Colors.grey[500],
+                        fontSize: 12,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            final drivers = snapshot.data!.docs;
+            // Use ListView instead of ListView.builder for smaller lists
+            // to avoid potential layout issues with constraints.
+            return ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              // shrinkWrap: true, // Not needed with fixed height
+              children: drivers.map((driverDoc) {
+                final data = driverDoc.data() as Map<String, dynamic>;
+                final String name = data['name'] ?? 'Unnamed Driver';
+                // --- FIX: Handle int or String for phone ---
+                final String phone = data['phone']?.toString() ?? 'No phone';
+                final String vehicle =
+                    data['vehicle']?['type'] ?? 'No vehicle';
+
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 5),
+                  elevation: 1,
+                  shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Colors.grey[200]!),
                   ),
-                  child: const Icon(Icons.delivery_dining, color: Colors.deepPurple, size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: const Text(
-                    "Select Delivery Rider",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, color: Colors.grey),
-                  onPressed: () => Navigator.pop(context),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                )
-              ],
-            ),
-            const SizedBox(height: 4),
-            const Divider(),
-            const SizedBox(height: 8),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: query.snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red)));
-                  }
-                  if (!snapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.data!.docs.isEmpty) {
-                    return Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                  child: ListTile(
+                    contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.deepPurple.withOpacity(0.1),
+                      child: const Icon(
+                        Icons.person,
+                        color: Colors.deepPurple,
+                      ),
+                    ),
+                    title: Text(
+                      name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment:
+                      CrossAxisAlignment.start, // Fixed typo here
                       children: [
-                        Icon(Icons.person_off_outlined, size: 48, color: Colors.grey.shade300),
-                        const SizedBox(height: 16),
-                        const Text("No riders available online", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
-                      ],
-                    );
-                  }
-
-                  return ListView.separated(
-                    itemCount: snapshot.data!.docs.length,
-                    separatorBuilder: (context, index) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final driver = snapshot.data!.docs[index];
-                      final data = driver.data() as Map<String, dynamic>;
-                      // Safe parsing
-                      final name = data['name']?.toString() ?? 'Unknown Driver';
-                      final phone = data['phone']?.toString() ?? 'No Phone';
-                      final vehicle = data['vehicle']?['type']?.toString() ?? 'Bike';
-
-                      return Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => Navigator.of(context).pop(driver.id),
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey.shade200),
-                              borderRadius: BorderRadius.circular(12),
-                              color: Colors.grey.shade50,
-                            ),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  backgroundColor: Colors.deepPurple.shade100,
-                                  child: Text(
-                                    name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                    style: const TextStyle(color: Colors.deepPurple, fontWeight: FontWeight.bold),
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                      const SizedBox(height: 4),
-                                      // ✅ FIXED: Using Wrap instead of Row
-                                      Wrap(
-                                        spacing: 12,
-                                        runSpacing: 4,
-                                        children: [
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(Icons.phone, size: 12, color: Colors.grey.shade600),
-                                              const SizedBox(width: 4),
-                                              Text(phone, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                                            ],
-                                          ),
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(Icons.directions_bike, size: 12, color: Colors.grey.shade600),
-                                              const SizedBox(width: 4),
-                                              Text(vehicle, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.green.shade50,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Icon(Icons.check, color: Colors.green.shade600, size: 18),
-                                )
-                              ],
-                            ),
+                        Text(
+                          phone,
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.grey.shade700),
+                        ),
+                        Text(
+                          vehicle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
                           ),
                         ),
-                      );
+                      ],
+                    ),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text(
+                        'Available',
+                        style: TextStyle(
+                          color: Colors.green,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.of(context).pop(driverDoc.id);
                     },
-                  );
-                },
-              ),
-            ),
-          ],
+                  ),
+                );
+              }).toList(),
+            );
+          },
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text(
+            'Cancel',
+            style: TextStyle(color: Colors.grey),
+          ),
+        ),
+      ],
     );
   }
 }

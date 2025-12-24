@@ -8,9 +8,6 @@ import 'package:provider/provider.dart';
 import 'BranchManagement.dart';
 import '../main.dart';
 
-
-
-
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
 
@@ -264,7 +261,10 @@ class _CategoriesTabState extends State<_CategoriesTab> {
         final filteredDocs = docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           final name = (data['name'] ?? '').toString().toLowerCase();
-          return name.contains(widget.searchQuery);
+          // Also search by Arabic name if search query is not empty
+          final nameAr = (data['name_ar'] ?? '').toString().toLowerCase();
+          return name.contains(widget.searchQuery) ||
+              nameAr.contains(widget.searchQuery);
         }).toList();
 
         if (filteredDocs.isEmpty && widget.searchQuery.isNotEmpty) {
@@ -393,6 +393,7 @@ class _CategoryCard extends StatelessWidget {
     final isActive = data['isActive'] ?? false;
     final imageUrl = data['imageUrl'] as String? ?? '';
     final name = data['name'] ?? 'Unnamed Category';
+    final nameAr = data['name_ar'] as String? ?? '';
     final sortOrder = data['sortOrder'] ?? '0';
     final branchIds = List<String>.from(data['branchIds'] ?? []);
     final branchIdsText = branchIds.isNotEmpty ? branchIds.join(', ') : 'Not assigned';
@@ -415,6 +416,7 @@ class _CategoryCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Header Row
               Row(
@@ -449,15 +451,32 @@ class _CategoryCard extends StatelessWidget {
                         Row(
                           children: [
                             Expanded(
-                              child: Text(
-                                name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                  color: Colors.black87,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18,
+                                      color: Colors.black87,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (nameAr.isNotEmpty)
+                                    Text(
+                                      nameAr,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 16,
+                                        color: Colors.black54,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textDirection: TextDirection.rtl,
+                                    ),
+                                ],
                               ),
                             ),
                             // Status Switch
@@ -669,21 +688,44 @@ class _CategoryCard extends StatelessWidget {
                       bottom: 16,
                       left: 20,
                       right: 20,
-                      child: Text(
-                        data['name'] ?? 'Category Details',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          shadows: [
-                            Shadow(
-                              color: Colors.black54,
-                              blurRadius: 8,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            data['name'] ?? 'Category Details',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black54,
+                                  blurRadius: 8,
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (data['name_ar'] != null && data['name_ar'].isNotEmpty)
+                            Text(
+                              data['name_ar'],
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w500,
+                                shadows: [
+                                  Shadow(
+                                    color: Colors.black54,
+                                    blurRadius: 8,
+                                  ),
+                                ],
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              textDirection: TextDirection.rtl,
+                            ),
+                        ],
                       ),
                     ),
                   ],
@@ -1059,7 +1101,10 @@ class _MenuItemsTabState extends State<_MenuItemsTab> {
         final filteredDocs = docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           final name = (data['name'] ?? '').toString().toLowerCase();
-          return name.contains(widget.searchQuery);
+          // Also search by Arabic name if search query is not empty
+          final nameAr = (data['name_ar'] ?? '').toString().toLowerCase();
+          return name.contains(widget.searchQuery) ||
+              nameAr.contains(widget.searchQuery);
         }).toList();
 
         if (filteredDocs.isEmpty && widget.searchQuery.isNotEmpty) {
@@ -1189,6 +1234,7 @@ class _MenuItemCard extends StatelessWidget {
     final isPopular = data['isPopular'] ?? false;
     final imageUrl = data['imageUrl'] as String?;
     final name = data['name'] ?? 'Unnamed Item';
+    final nameAr = data['name_ar'] as String? ?? '';
     final description = data['description'] ?? 'No description';
     final price = (data['price'] as num?)?.toDouble() ?? 0.0;
     final discountedPrice = (data['discountedPrice'] as num?)?.toDouble();
@@ -1261,15 +1307,32 @@ class _MenuItemCard extends StatelessWidget {
                         Row(
                           children: [
                             Expanded(
-                              child: Text(
-                                name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                  color: Colors.black87,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18,
+                                      color: Colors.black87,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (nameAr.isNotEmpty)
+                                    Text(
+                                      nameAr,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 16,
+                                        color: Colors.black54,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textDirection: TextDirection.rtl,
+                                    ),
+                                ],
                               ),
                             ),
                             // Popular indicator
@@ -1731,6 +1794,18 @@ class _MenuItemCard extends StatelessWidget {
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                   ),
+                                  if (data['name_ar'] != null && data['name_ar'].isNotEmpty)
+                                    Text(
+                                      data['name_ar'],
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      textDirection: TextDirection.rtl,
+                                    ),
                                   const SizedBox(height: 4),
                                   Text(
                                     'QAR ${(data['price'] as num? ?? 0.0).toStringAsFixed(2)}',
@@ -2102,6 +2177,7 @@ class _CategoryDialog extends StatefulWidget {
 class _CategoryDialogState extends State<_CategoryDialog> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
+  late TextEditingController _nameArController; // ADDED
   late TextEditingController _imageUrlController;
   late TextEditingController _sortOrderController;
   late bool _isActive;
@@ -2116,6 +2192,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
     final data = widget.doc?.data() as Map<String, dynamic>? ?? {};
 
     _nameController = TextEditingController(text: data['name'] ?? '');
+    _nameArController = TextEditingController(text: data['name_ar'] ?? ''); // ADDED
     _imageUrlController = TextEditingController(text: data['imageUrl'] ?? '');
     _sortOrderController = TextEditingController(text: (data['sortOrder'] ?? 0).toString());
     _isActive = data['isActive'] ?? true;
@@ -2132,6 +2209,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
     final db = FirebaseFirestore.instance;
 
     final String name = _nameController.text.trim();
+    final String nameAr = _nameArController.text.trim(); // ADDED
     List<String> branchIdsToSave;
 
     if (userScope.isSuperAdmin) {
@@ -2153,6 +2231,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
 
     final data = {
       'name': name,
+      'name_ar': nameAr, // ADDED
       'imageUrl': _imageUrlController.text.trim(),
       'isActive': _isActive,
       'branchIds': branchIdsToSave,
@@ -2402,6 +2481,21 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                     ),
                     const SizedBox(height: 12),
 
+                    // --- ADDED ARABIC NAME FIELD ---
+                    TextFormField(
+                      controller: _nameArController,
+                      decoration: const InputDecoration(
+                        labelText: 'Category Name (Arabic)',
+                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: Colors.white,
+                      ),
+                      textDirection: TextDirection.rtl, // This hints the OS to use an RTL keyboard
+                      keyboardType: TextInputType.text,
+                    ),
+                    const SizedBox(height: 12),
+                    // --- END OF ADDED FIELD ---
+
                     TextFormField(
                       controller: _sortOrderController,
                       decoration: const InputDecoration(
@@ -2599,6 +2693,7 @@ class _MenuItemDialog extends StatefulWidget {
 class _MenuItemDialogState extends State<_MenuItemDialog> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
+  late TextEditingController _nameArController; // Was declared but not initialized
   late TextEditingController _descController;
   late TextEditingController _priceController;
   late TextEditingController _imageUrlController;
@@ -2639,6 +2734,9 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
     final data = widget.doc?.data() as Map<String, dynamic>? ?? {};
 
     _nameController = TextEditingController(text: data['name'] ?? '');
+    // --- THIS LINE WAS MISSING ---
+    _nameArController = TextEditingController(text: data['name_ar'] ?? '');
+    // --- END OF FIX ---
     _descController = TextEditingController(text: data['description'] ?? '');
     _priceController = TextEditingController(text: (data['price'] as num?)?.toString() ?? '');
     _imageUrlController = TextEditingController(text: data['imageUrl'] ?? '');
@@ -2731,6 +2829,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
     final double? discountedPrice = double.tryParse(_discountedPriceController.text);
     final data = {
       'name': _nameController.text.trim(),
+      'name_ar': _nameArController.text.trim(), // ADDED
       'description': _descController.text.trim(),
       'price': double.tryParse(_priceController.text) ?? 0.0,
       'discountedPrice': (discountedPrice != null && discountedPrice > 0) ? discountedPrice : null,
@@ -2963,7 +3062,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
               children: [
                 const Icon(Icons.label_outline, size: 20, color: Colors.deepPurple),
                 const SizedBox(width: 8),
-                 Text(
+                Text(
                   'Variant ${index + 1}',
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
@@ -3138,6 +3237,21 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                       validator: (val) => val!.isEmpty ? 'Name is required' : null,
                     ),
                     const SizedBox(height: 12),
+
+                    // --- ADDED ARABIC NAME FIELD ---
+                    TextFormField(
+                      controller: _nameArController,
+                      decoration: const InputDecoration(
+                        labelText: 'Item Name (Arabic)',
+                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: Colors.white,
+                      ),
+                      textDirection: TextDirection.rtl, // This hints the OS to use an RTL keyboard
+                      keyboardType: TextInputType.text,
+                    ),
+                    const SizedBox(height: 12),
+                    // --- END OF ADDED FIELD ---
 
                     TextFormField(
                       controller: _descController,
@@ -3557,6 +3671,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
     );
   }
 }
+
 class _CategoryDropdown extends StatelessWidget {
   final String? selectedId;
   final UserScopeService userScope;
@@ -3612,6 +3727,3 @@ class _CategoryDropdown extends StatelessWidget {
     );
   }
 }
-
-
-

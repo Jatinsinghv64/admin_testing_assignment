@@ -393,23 +393,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildInfoRow(
               Icons.store, 'Branch:', userScope.branchId ?? 'N/A'),
           const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.logout, color: Colors.red),
-              label: const Text(
-                'Sign Out',
-                style: TextStyle(color: Colors.red),
-              ),
-              onPressed: () async {
-                await authService.signOut();
-                // AuthWrapper will handle navigation and scope clearing
-              },
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Colors.red),
-              ),
-            ),
-          ),
+          // SizedBox(
+          //   width: double.infinity,
+          //   child: OutlinedButton.icon(
+          //     icon: const Icon(Icons.logout, color: Colors.red),
+          //     label: const Text(
+          //       'Sign Out',
+          //       style: TextStyle(color: Colors.red),
+          //     ),
+          //     onPressed: () async {
+          //       await authService.signOut();
+          //       // AuthWrapper will handle navigation and scope clearing
+          //     },
+          //     style: OutlinedButton.styleFrom(
+          //       side: const BorderSide(color: Colors.red),
+          //     ),
+          //   ),
+          // ),
         ],
       ),
     );

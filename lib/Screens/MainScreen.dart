@@ -86,7 +86,7 @@ class _HomeScreenState extends State<HomeScreen> {
         AppTab.orders: AppScreen(
           tab: AppTab.orders,
           permissionKey: Permissions.canManageOrders,
-          screen:  OrdersScreen(),
+          screen: const OrdersScreen(),
           navItem: const BottomNavigationBarItem(
             icon: Icon(Icons.receipt_long_outlined),
             activeIcon: Icon(Icons.receipt_long),
