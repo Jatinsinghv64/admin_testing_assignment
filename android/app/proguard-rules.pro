@@ -30,7 +30,13 @@
 -keep class io.flutter.plugins.vibration.** { *; }
 
 # ✅ --- FIX FOR R8 ERROR ---
-# These are required by Flutter's Play Store integration
+# 1. Tell R8 to ignore warnings if these classes are missing
+-dontwarn com.google.android.play.core.splitcompat.**
+-dontwarn com.google.android.play.core.splitinstall.**
+-dontwarn com.google.android.play.core.tasks.**
+-dontwarn com.google.android.play.core.**
+
+# 2. Keep them if they actually exist (safe to leave included)
 -keep class com.google.android.play.core.splitcompat.** { *; }
 -keep class com.google.android.play.core.splitinstall.** { *; }
 -keep class com.google.android.play.core.tasks.** { *; }

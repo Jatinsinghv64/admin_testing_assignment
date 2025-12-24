@@ -740,7 +740,8 @@ class _OrderCard extends StatelessWidget {
       );
     }
 
-    if (status == 'pending' || status == 'preparing') {
+    // ✅ MODIFIED: Allow Cancel for ANY active status (Not delivered, Not cancelled)
+    if (status != 'cancelled' && status != 'delivered') {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.cancel, size: 16),

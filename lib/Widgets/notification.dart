@@ -92,9 +92,9 @@ class OrderNotificationService with ChangeNotifier {
               _isDialogOpen = false;
             },
             onAccept: () {
+              // Manual accept just navigates (user accepts on screen)
               _navigateToOrder(orderData['orderId']);
             },
-            // ✅ UPDATED: Now accepts a reason string
             onReject: (String reason) async {
               final String orderId = orderData['orderId'];
               try {
@@ -106,8 +106,8 @@ class OrderNotificationService with ChangeNotifier {
                     .doc(orderId)
                     .update({
                   'status': 'cancelled',
-                  'rejectionReason': reason, // ✅ Save the reason
-                  'rejectedBy': adminEmail,  // ✅ Save who rejected it
+                  'rejectionReason': reason,
+                  'rejectedBy': adminEmail,
                   'rejectionSource': 'admin_app',
                   'timestamps.cancelled': FieldValue.serverTimestamp(),
                 });
@@ -120,8 +120,24 @@ class OrderNotificationService with ChangeNotifier {
                 debugPrint("❌ Error rejecting order: $e");
               }
             },
-            onAutoAccept: () {
-              _navigateToOrder(orderData['orderId']);
+            // ✅ UPDATED: Auto-Accept now updates status THEN navigates
+            onAutoAccept: () async {
+              final String orderId = orderData['orderId'];
+              try {
+                debugPrint("⏳ Auto-accepting order: $orderId");
+                await FirebaseFirestore.instance
+                    .collection('Orders')
+                    .doc(orderId)
+                    .update({
+                  'status': 'preparing', // Automatically move to preparing
+                });
+                // Navigate to the order after updating
+                _navigateToOrder(orderId);
+              } catch (e) {
+                debugPrint("❌ Error auto-accepting order: $e");
+                // Navigate anyway so user can see what happened
+                _navigateToOrder(orderId);
+              }
             },
           );
         },
@@ -153,7 +169,7 @@ class NewOrderDialog extends StatefulWidget {
   final bool playSound;
   final bool vibrate;
   final VoidCallback onAccept;
-  final Function(String) onReject; // ✅ Changed to accept Reason
+  final Function(String) onReject;
   final VoidCallback onAutoAccept;
   final VoidCallback onClose;
 
@@ -177,7 +193,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   int _countdown = 60;
   final AudioPlayer _player = AudioPlayer();
   bool _isAudioPlaying = false;
-  bool _isProcessing = false; // ✅ Added for loading state
+  bool _isProcessing = false;
 
   String get orderId => widget.orderData['orderId']?.toString() ?? 'N/A';
   String get orderNumber => widget.orderData['dailyOrderNumber']?.toString() ?? '---';
@@ -219,8 +235,41 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Calculate countdown from order timestamp
+    _initializeCountdown();
+
     startTimer();
     _startAlarm();
+  }
+
+  void _initializeCountdown() {
+    try {
+      dynamic timestamp = widget.orderData['timestamp'];
+      DateTime? orderTime;
+
+      if (timestamp is Timestamp) {
+        orderTime = timestamp.toDate();
+      } else if (timestamp is String) {
+        orderTime = DateTime.tryParse(timestamp);
+      } else if (timestamp is int) {
+        orderTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      } else if (timestamp is Map && timestamp.containsKey('seconds')) {
+        final seconds = timestamp['seconds'];
+        if (seconds is int) {
+          orderTime = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+        }
+      }
+
+      if (orderTime != null) {
+        final now = DateTime.now();
+        final elapsedSeconds = now.difference(orderTime).inSeconds;
+        final remaining = 60 - elapsedSeconds;
+        _countdown = remaining > 0 ? remaining : 0;
+      }
+    } catch (e) {
+      debugPrint("Error initializing countdown: $e");
+    }
   }
 
   Future<void> _startAlarm() async {
@@ -256,7 +305,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
 
   void startTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_countdown == 0) {
+      if (_countdown <= 0) {
         timer.cancel();
         _handleAutoAction();
       } else {
@@ -265,9 +314,11 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     });
   }
 
+  // ✅ UPDATED: Calls the auto-accept callback
   void _handleAutoAction() {
     _stopAlarm();
-    // Logic for auto-action (e.g. stop sound)
+    widget.onAutoAccept();
+    if(mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -279,12 +330,9 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     super.dispose();
   }
 
-  // ✅ ROBUST REJECTION FLOW
   Future<void> _handleRejectPress() async {
-    // 1. Stop the alarm immediately so user can think
     await _stopAlarm();
 
-    // 2. Show Reason Dialog
     final String? reason = await showDialog<String>(
       context: context,
       builder: (BuildContext context) {
@@ -292,21 +340,16 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
       },
     );
 
-    // 3. If reason selected, proceed
     if (reason != null && mounted) {
       setState(() {
-        _isProcessing = true; // Show loading spinner
+        _isProcessing = true;
       });
 
-      // 4. Perform async rejection
       await widget.onReject(reason);
 
       if (mounted) {
-        Navigator.of(context).pop(); // Close the main Order Dialog
+        Navigator.of(context).pop();
       }
-    } else {
-      // User cancelled rejection dialog
-      // Optional: Restart alarm? For now, we leave it silent but dialog stays open.
     }
   }
 
@@ -460,7 +503,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _isProcessing ? null : _handleRejectPress, // ✅ Call new handler
+                      onPressed: _isProcessing ? null : _handleRejectPress,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red,
                         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -493,10 +536,6 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     );
   }
 }
-
-// -------------------------------------------------------------------
-// ✅ --- New Widget: Rejection Reason Picker ---
-// -------------------------------------------------------------------
 
 class RejectionReasonDialog extends StatefulWidget {
   const RejectionReasonDialog({Key? key}) : super(key: key);
@@ -560,7 +599,7 @@ class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
             String finalReason = _selectedReason!;
             if (finalReason == 'Other') {
               finalReason = _otherReasonController.text.trim();
-              if (finalReason.isEmpty) return; // Don't allow empty "Other"
+              if (finalReason.isEmpty) return;
             }
             Navigator.of(context).pop(finalReason);
           },
