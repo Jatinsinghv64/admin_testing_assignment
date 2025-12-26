@@ -2,26 +2,22 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:vibration/vibration.dart';
+
 import '../Widgets/AccessDeniedWidget.dart';
 import '../Widgets/Authorization.dart';
 import '../Widgets/Permissions.dart';
+import '../Widgets/RestaurantStatusService.dart';
+import '../Widgets/notification.dart';
 import '../main.dart';
 import 'AnalyticsScreen.dart';
 import 'BranchManagement.dart';
 import 'CouponsScreen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
-
-// ❌ **REMOVED (already imported from main.dart):**
-// import '../Widgets/RestaurantStatusService.dart';
-// import '../Widgets/notification.dart';
-
-// ✅ **ADDED (these seem to be missing from your paste but are in the context):**
-import 'package:audioplayers/audioplayers.dart';
-import 'package:vibration/vibration.dart';
-import '../Widgets/RestaurantStatusService.dart';
-import '../Widgets/notification.dart';
-
+import 'OrderHistory.dart';
+import 'OrderHistoryScreen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -31,11 +27,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  // ❌ REMOVED: bool _notificationsEnabled = true;
   bool _darkModeEnabled = false;
   String _selectedLanguage = 'English';
-  // ❌ REMOVED: bool _inventoryAlerts = true;
-  // ❌ REMOVED: bool _systemUpdates = false;
 
   late OrderNotificationService _notificationService;
   late RestaurantStatusService _restaurantStatus;
@@ -44,7 +37,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadPreferences();
-    // ✅ **ADDED:**
     _notificationService = context.read<OrderNotificationService>();
     _restaurantStatus = context.read<RestaurantStatusService>();
   }
@@ -52,11 +44,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      // ❌ REMOVED: _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
       _darkModeEnabled = prefs.getBool('dark_mode_enabled') ?? false;
       _selectedLanguage = prefs.getString('selected_language') ?? 'English';
-      // ❌ REMOVED: _inventoryAlerts = prefs.getBool('inventory_alerts') ?? true;
-      // ❌ REMOVED: _systemUpdates = prefs.getBool('system_updates') ?? false;
     });
   }
 
@@ -72,10 +61,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
-    final authService = context.read<AuthService>(); // ✅ **ADDED**
+    final authService = context.read<AuthService>();
 
     // Permission check for entire screen
-    // ✅ **MODIFIED:** (Based on your pasted code, 'canManageSettings' is the permission)
     if (!userScope.can(Permissions.canManageSettings)) {
       return const Scaffold(
         body: AccessDeniedWidget(permission: 'manage settings'),
@@ -102,17 +90,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ **MERGED:** Restaurant Status Card
+            // Restaurant Status Card
             _buildRestaurantStatusCard(_restaurantStatus, userScope),
             const SizedBox(height: 16),
 
-            // ✅ **MERGED:** User Profile Card
+            // User Profile Card
             _buildUserProfileCard(userScope, authService),
             const SizedBox(height: 16),
 
             // Administration Section
             buildSectionHeader('Administration', Icons.admin_panel_settings),
             const SizedBox(height: 16),
+
+            // --- ADDED: Order History (View All Orders) ---
+            if (userScope.isSuperAdmin || userScope.role == 'branchadmin') ...[
+              buildSettingsCard(
+                icon: Icons.history_edu_rounded,
+                title: 'Order History',
+                subtitle: 'View all past orders with pagination',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const OrderHistoryScreen(),
+                    ),
+                  );
+                },
+                iconColor: Colors.blue,
+                cardColor: Colors.blue.withOpacity(0.05),
+              ),
+              const SizedBox(height: 12),
+            ],
+            // ----------------------------------------------
+
             if (userScope.isSuperAdmin && userScope.can(Permissions.canManageStaff))
               buildSettingsCard(
                 icon: Icons.people_alt,
@@ -146,7 +155,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             if (userScope.can(Permissions.canManageCoupons))
               const SizedBox(height: 12),
 
-            // ✅ **FIX:** Only show Branch Management to Super Admins
             if (userScope.isSuperAdmin)
               buildSettingsCard(
                   icon: Icons.business_outlined,
@@ -158,7 +166,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   )
               ),
-            if (userScope.isSuperAdmin) // Also hide the SizedBox
+            if (userScope.isSuperAdmin)
               const SizedBox(height: 12),
 
             if (userScope.isSuperAdmin)
@@ -291,7 +299,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     fontSize: 16,
                   ),
                 ),
-                onPressed: () => _showLogoutDialog(context, authService), // ✅ **PASSED authService**
+                onPressed: () => _showLogoutDialog(context, authService),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.redAccent,
                   padding: const EdgeInsets.symmetric(vertical: 18),
@@ -309,11 +317,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // ✅ **MERGED:** From context file
   Widget _buildRestaurantStatusCard(
       RestaurantStatusService status, UserScopeService scope) {
     if (scope.isSuperAdmin) {
-      // Super admins don't have a single branch, so they can't toggle status.
+      // Super admins don't have a single branch, so they can't toggle status via this simple switch.
       return const SizedBox.shrink();
     }
 
@@ -324,10 +331,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Row(
             children: [
               Icon(
-                status.isOpen // ✅ **FIXED:** Changed from isRestaurantOpen
+                status.isOpen
                     ? Icons.storefront
                     : Icons.no_food_rounded,
-                color: status.isOpen ? Colors.green : Colors.red, // ✅ **FIXED:** Changed from isRestaurantOpen
+                color: status.isOpen ? Colors.green : Colors.red,
               ),
               const SizedBox(width: 12),
               const Text(
@@ -340,9 +347,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const Spacer(),
               Switch(
-                value: status.isOpen, // ✅ **FIXED:** Changed from isRestaurantOpen
+                value: status.isOpen,
                 onChanged: (value) async {
-                  await status.toggleRestaurantStatus(value); // ✅ **FIXED:** Renamed method
+                  await status.toggleRestaurantStatus(value);
                 },
                 activeColor: Colors.green,
                 inactiveThumbColor: Colors.red,
@@ -351,7 +358,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            status.isOpen // ✅ **FIXED:** Changed from isRestaurantOpen
+            status.isOpen
                 ? 'Your restaurant is OPEN and accepting new orders.'
                 : 'Your restaurant is CLOSED. You will not receive new orders.',
             style: TextStyle(
@@ -364,7 +371,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // ✅ **MERGED:** From context file
   Widget _buildUserProfileCard(
       UserScopeService userScope, AuthService authService) {
     return _SettingsCard(
@@ -393,85 +399,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildInfoRow(
               Icons.store, 'Branch:', userScope.branchId ?? 'N/A'),
           const SizedBox(height: 20),
-          // SizedBox(
-          //   width: double.infinity,
-          //   child: OutlinedButton.icon(
-          //     icon: const Icon(Icons.logout, color: Colors.red),
-          //     label: const Text(
-          //       'Sign Out',
-          //       style: TextStyle(color: Colors.red),
-          //     ),
-          //     onPressed: () async {
-          //       await authService.signOut();
-          //       // AuthWrapper will handle navigation and scope clearing
-          //     },
-          //     style: OutlinedButton.styleFrom(
-          //       side: const BorderSide(color: Colors.red),
-          //     ),
-          //   ),
-          // ),
         ],
       ),
     );
   }
 
-  // ✅ **MERGED:** From context file (replaces _showNotificationSettings)
-  Widget _buildNotificationCard(OrderNotificationService service) {
-    return _SettingsCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.notifications, color: Colors.deepPurple),
-              const SizedBox(width: 12),
-              Text(
-                'Notifications',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.deepPurple,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            title: const Text('Play Sound'),
-            subtitle: const Text('Play a sound for new orders'),
-            value: service.playSound,
-            onChanged: (value) => service.setPlaySound(value),
-            secondary: const Icon(Icons.music_note),
-          ),
-          SwitchListTile(
-            title: const Text('Vibrate'),
-            subtitle: const Text('Vibrate for new orders'),
-            value: service.vibrate,
-            onChanged: (value) => service.setVibrate(value),
-            secondary: const Icon(Icons.vibration),
-          ),
-          ListTile(
-            title: const Text('Test Notification'),
-            subtitle: const Text('Play sound and vibrate'),
-            leading: const Icon(Icons.play_arrow_rounded),
-            onTap: () async {
-              if (service.playSound) {
-                final player = AudioPlayer();
-                await player.play(AssetSource('notification.mp3'));
-              }
-              if (service.vibrate) {
-                if (await Vibration.hasVibrator() ?? false) {
-                  Vibration.vibrate();
-                }
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ✅ **MERGED:** From context file
   Widget _buildInfoRow(IconData icon, String label, String value) {
     return Row(
       children: [
@@ -500,7 +432,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // ✅ **MERGED:** From context file
   Widget _SettingsCard({required Widget child}) {
     return Card(
       elevation: 0,
@@ -514,7 +445,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
-
 
   Widget buildSectionHeader(String title, IconData icon) {
     return Row(
@@ -616,7 +546,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // Functional Methods (keeping all your existing logic)
   void _showSnackBar(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -626,71 +555,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showBranchSettings(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Branch Settings'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _BranchSettingItem(
-                title: 'Branch Information',
-                onTap: () => _editBranchInfo(context),
-              ),
-              _BranchSettingItem(
-                title: 'Operating Hours',
-                onTap: () => _editOperatingHours(context),
-              ),
-              _BranchSettingItem(
-                title: 'Delivery Settings',
-                onTap: () => _editDeliverySettings(context),
-              ),
-              _BranchSettingItem(
-                title: 'Payment Methods',
-                onTap: () => _editPaymentMethods(context),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showBusinessAnalytics(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          appBar: AppBar(title: const Text('Business Analytics')),
-          body: const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.analytics, size: 64, color: Colors.deepPurple),
-                SizedBox(height: 16),
-                Text(
-                  'Advanced Analytics',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                SizedBox(height: 8),
-                Text('Sales reports, customer insights, and performance metrics'),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   void _showNotificationSettings(BuildContext context) {
-    // ✅ **MODIFIED:** This now reads from and writes to the service.
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -703,47 +568,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _NotificationSettingItem(
                   title: 'Play Sound on Order',
                   subtitle: 'Play a sound for new orders',
-                  value: _notificationService.playSound, // ✅ CHANGED
+                  value: _notificationService.playSound,
                   onChanged: (value) {
-                    _notificationService.setPlaySound(value); // ✅ CHANGED
-                    setState(() {}); // Update the dialog UI
+                    _notificationService.setPlaySound(value);
+                    setState(() {});
                   },
                 ),
                 _NotificationSettingItem(
                   title: 'Vibrate on Order',
                   subtitle: 'Vibrate for new orders',
-                  value: _notificationService.vibrate, // ✅ CHANGED
+                  value: _notificationService.vibrate,
                   onChanged: (value) {
-                    _notificationService.setVibrate(value); // ✅ CHANGED
-                    setState(() {}); // Update the dialog UI
+                    _notificationService.setVibrate(value);
+                    setState(() {});
                   },
                 ),
-                // You can add these to the service later if needed
-                // _NotificationSettingItem(
-                //   title: 'Inventory Alerts',
-                //   subtitle: 'Low stock notifications',
-                //   value: _inventoryAlerts,
-                //   onChanged: (value) {
-                //     setState(() => _inventoryAlerts = value);
-                //     _savePreference('inventory_alerts', value);
-                //   },
-                // ),
-                // _NotificationSettingItem(
-                //   title: 'System Updates',
-                //   subtitle: 'App and system update notifications',
-                //   value: _systemUpdates,
-                //   onChanged: (value) {
-                //     setState(() => _systemUpdates = value);
-                //     _savePreference('system_updates', value);
-                //   },
-                // ),
               ],
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Done'), // ✅ CHANGED
+              child: const Text('Done'),
             ),
           ],
         ),
@@ -811,105 +657,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _createDataBackup(BuildContext context) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 16),
-            Text('Creating backup...'),
-          ],
-        ),
-      ),
-    );
-    await Future.delayed(const Duration(seconds: 2));
-    if (mounted) {
-      Navigator.pop(context);
-      _showSnackBar(context, 'Data backup created successfully');
-    }
-  }
-
-  Future<void> _restoreData(BuildContext context) async {
-    final result = await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Restore Data'),
-        content: const Text('This will replace all current data with the backup. Continue?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Restore'),
-          ),
-        ],
-      ),
-    );
-    if (result == true && mounted) {
-      _showSnackBar(context, 'Data restored successfully');
-    }
-  }
-
-  Future<void> _exportReports(BuildContext context) async {
-    final format = await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Export Format'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.table_chart),
-              title: const Text('CSV Format'),
-              onTap: () => Navigator.pop(context, 'CSV'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.picture_as_pdf),
-              title: const Text('PDF Format'),
-              onTap: () => Navigator.pop(context, 'PDF'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (format != null && mounted) {
-      _showSnackBar(context, 'Exporting reports as $format...');
-    }
-  }
-
-  Future<void> _clearAppCache(BuildContext context) async {
-    final result = await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Clear Cache'),
-        content: const Text('This will clear all cached data. This action cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-            child: const Text('Clear Cache'),
-          ),
-        ],
-      ),
-    );
-    if (result == true && mounted) {
-      _showSnackBar(context, 'Cache cleared successfully');
-    }
-  }
-
   Future<void> _contactSupport(BuildContext context) async {
     const email = 'support@yourapp.com';
     const subject = 'Support Request - Admin App';
-    const body = 'Hello Support Team,\\n\\nI need assistance with:';
+    const body = 'Hello Support Team,\n\nI need assistance with:';
     final uri = Uri.parse('mailto:$email?subject=$subject&body=$body');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri);
@@ -921,7 +672,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _reportBug(BuildContext context) async {
     const email = 'bugs@yourapp.com';
     const subject = 'Bug Report - Admin App';
-    const body = 'Bug Description:\\nSteps to reproduce:\\nExpected behavior:\\nActual behavior:';
+    const body = 'Bug Description:\nSteps to reproduce:\nExpected behavior:\nActual behavior:';
     final uri = Uri.parse('mailto:$email?subject=$subject&body=$body');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri);
@@ -1019,7 +770,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-    void _showLogoutDialog(BuildContext context, AuthService authService) { // ✅ **ADDED authService**
+  void _showLogoutDialog(BuildContext context, AuthService authService) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1033,7 +784,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(context);
-              // ✅ **MODIFIED:** (UserScopeService is already in context)
               context.read<UserScopeService>().clearScope();
               await authService.signOut();
             },
@@ -1054,23 +804,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case 'French': return 'FR';
       default: return 'US';
     }
-  }
-
-  // Branch setting methods
-  void _editBranchInfo(BuildContext context) {
-    _showSnackBar(context, 'Edit Branch Information');
-  }
-
-  void _editOperatingHours(BuildContext context) {
-    _showSnackBar(context, 'Edit Operating Hours');
-  }
-
-  void _editDeliverySettings(BuildContext context) {
-    _showSnackBar(context, 'Edit Delivery Settings');
-  }
-
-  void _editPaymentMethods(BuildContext context) {
-    _showSnackBar(context, 'Edit Payment Methods');
   }
 }
 
@@ -1363,8 +1096,8 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
 
   Future<void> _reloadCurrentUserScope() async {
     final userScope = context.read<UserScopeService>();
-    final authService = context.read<AuthService>(); // ✅ **THE FIX IS HERE**
-    final currentUser = authService.currentUser; // ✅ **THE FIX IS HERE**
+    final authService = context.read<AuthService>();
+    final currentUser = authService.currentUser;
 
     if (currentUser != null) {
       showDialog(
@@ -1382,7 +1115,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       );
 
       await userScope.clearScope();
-      await userScope.loadUserScope(currentUser, authService); // ✅ **THE FIX IS HERE**
+      await userScope.loadUserScope(currentUser, authService);
 
       if (mounted) {
         Navigator.of(context).pop();
