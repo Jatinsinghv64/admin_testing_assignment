@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
@@ -7,15 +6,13 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; // ✅ ADDED
-import 'package:flutter_local_notifications/flutter_local_notifications.dart'; // ✅ ADDED
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'Screens/ConnectionUtils.dart';
 import 'Screens/LoginScreen.dart';
 import 'Screens/MainScreen.dart';
 import 'Widgets/Authorization.dart';
-import 'Widgets/BackgroundOrderService.dart';
 import 'Widgets/RestaurantStatusService.dart';
 import 'Widgets/notification.dart';
 import 'Widgets/FCM_Service.dart';
@@ -25,26 +22,22 @@ import 'Screens/OfflineScreen.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 // ---------------------------------------------------------------------------
-// ✅ NEW: BACKGROUND HANDLER (Must be top-level, outside class)
+// ✅ TOP-LEVEL BACKGROUND HANDLER (For Terminated/Background State)
 // ---------------------------------------------------------------------------
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // 1. Initialize Firebase (Required for background handlers)
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  debugPrint("🌙 BACKGROUND FCM DATA: ${message.data}");
 
   final data = message.data;
   final String? orderId = data['orderId'];
 
-  // If orderId exists, we use it for Deduplication
   if (orderId != null) {
-    final int notificationId = orderId.hashCode; // 🎯 Match BackgroundOrderService ID
+    // ✅ Stable ID Generator (Prevents duplicates)
+    final int notificationId = getStableId(orderId);
 
     final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
-    // 🎯 Match Channel ID from BackgroundOrderService ('high_importance_channel')
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'high_importance_channel',
       'New Order Notifications',
@@ -52,8 +45,6 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       importance: Importance.max,
       priority: Priority.high,
       color: Colors.deepPurple,
-      // Ensure 'notification' raw resource exists if you use custom sound
-      // sound: RawResourceAndroidNotificationSound('notification'),
     );
 
     const NotificationDetails platformDetails = NotificationDetails(
@@ -63,12 +54,21 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
     await flutterLocalNotificationsPlugin.show(
       notificationId,
-      data['title'] ?? 'New Order', // Now coming from 'data'
-      data['body'] ?? 'Check your dashboard', // Now coming from 'data'
+      data['title'] ?? 'New Order',
+      data['body'] ?? 'Check your dashboard',
       platformDetails,
-      payload: orderId, // Or jsonEncode(data)
+      payload: orderId,
     );
   }
+}
+
+// ✅ HELPER: Must be top-level for the background handler
+int getStableId(String id) {
+  int hash = 5381;
+  for (int i = 0; i < id.length; i++) {
+    hash = ((hash << 5) + hash) + id.codeUnitAt(i);
+  }
+  return hash & 0x7FFFFFFF;
 }
 
 void main() async {
@@ -78,27 +78,12 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // ✅ REGISTER BACKGROUND HANDLER
+  // ✅ Register Background Handler
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-  // --- START: ROBUST SERVICE LAUNCH ---
-  await BackgroundOrderService.initializeService();
-
-  final service = FlutterBackgroundService();
-  bool isRunning = await service.isRunning();
-
-  if (!isRunning) {
-    debugPrint("🚀 MAIN: Service is not running. Starting it.");
-    await BackgroundOrderService.startService();
-  } else {
-    debugPrint("✅ MAIN: Service is already running. Initialization complete.");
-  }
-  // --- END: ROBUST SERVICE LAUNCH ---
 
   runApp(const MyApp());
 }
 
-// ... (Rest of your MyApp and ScopeLoader classes remain exactly the same) ...
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -106,18 +91,10 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        Provider<AuthService>(
-          create: (_) => AuthService(),
-        ),
-        ChangeNotifierProvider<UserScopeService>(
-          create: (_) => UserScopeService(),
-        ),
-        ChangeNotifierProvider<OrderNotificationService>(
-          create: (_) => OrderNotificationService(),
-        ),
-        ChangeNotifierProvider<RestaurantStatusService>(
-          create: (_) => RestaurantStatusService(),
-        ),
+        Provider<AuthService>(create: (_) => AuthService()),
+        ChangeNotifierProvider<UserScopeService>(create: (_) => UserScopeService()),
+        ChangeNotifierProvider<OrderNotificationService>(create: (_) => OrderNotificationService()),
+        ChangeNotifierProvider<RestaurantStatusService>(create: (_) => RestaurantStatusService()),
         ChangeNotifierProvider(create: (_) => BadgeCountProvider()),
       ],
       child: MaterialApp(
@@ -137,10 +114,10 @@ class MyApp extends StatelessWidget {
               fontWeight: FontWeight.bold,
             ),
           ),
-          bottomNavigationBarTheme: BottomNavigationBarThemeData(
+          bottomNavigationBarTheme: const BottomNavigationBarThemeData(
             backgroundColor: Colors.white,
             selectedItemColor: Colors.deepPurple,
-            unselectedItemColor: Colors.grey[600],
+            unselectedItemColor: Colors.grey,
             elevation: 10,
           ),
           elevatedButtonTheme: ElevatedButtonThemeData(
@@ -187,27 +164,14 @@ class ScopeLoader extends StatefulWidget {
 }
 
 class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
-  final _service = FlutterBackgroundService();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _service.invoke('appInForeground');
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadScope();
     });
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.resumed) {
-      _service.invoke('appInForeground');
-    } else {
-      _service.invoke('appInBackground');
-    }
   }
 
   @override
@@ -228,26 +192,22 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
       if (scopeService.branchId.isNotEmpty) {
         String restaurantName = "Branch ${scopeService.branchId}";
         if (scopeService.userEmail.isNotEmpty) {
-          restaurantName =
-          "Restaurant (${scopeService.userEmail.split('@').first})";
+          restaurantName = "Restaurant (${scopeService.userEmail.split('@').first})";
         }
-        statusService.initialize(scopeService.branchId,
-            restaurantName: restaurantName);
-        await Future.delayed(const Duration(seconds: 1));
+        statusService.initialize(scopeService.branchId, restaurantName: restaurantName);
       }
 
+      // ✅ Initialize Notification Services (FCM Only)
       notificationService.init(scopeService, navigatorKey);
       await FcmService().init(scopeService.userEmail);
 
-      debugPrint(
-          '🎯 SYSTEM READY: User Scope Loaded + Background Service Linked + FCM Initialized');
+      debugPrint('🎯 SYSTEM READY: FCM-Only Mode Active');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final scopeService = context.watch<UserScopeService>();
-
     if (!scopeService.isLoaded) {
       return const Scaffold(
         body: Center(
@@ -266,6 +226,7 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
   }
 }
 
+// ... (UserScopeService class remains unchanged from your original file)
 class UserScopeService with ChangeNotifier {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   StreamSubscription? _scopeSubscription;

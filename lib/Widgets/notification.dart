@@ -1,22 +1,19 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vibration/vibration.dart';
 
 import '../Screens/MainScreen.dart';
-import '../main.dart'; // For UserScopeService reference if needed
-import 'RiderAssignment.dart';
+import '../main.dart'; // Imports UserScopeService
 
 class OrderNotificationService with ChangeNotifier {
   static const String _soundKey = 'notification_sound_enabled';
   static const String _vibrateKey = 'notification_vibrate_enabled';
 
   final AudioPlayer _audioPlayer = AudioPlayer();
-  final service = FlutterBackgroundService();
+
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _isDialogOpen = false;
 
@@ -30,8 +27,6 @@ class OrderNotificationService with ChangeNotifier {
   OrderNotificationService() {
     _loadPreferences();
   }
-
-  // --- Preferences Management (Required for SettingsScreen) ---
 
   Future<void> _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
@@ -54,68 +49,71 @@ class OrderNotificationService with ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Initialization & Listener Logic ---
-
   void init(UserScopeService scopeService, GlobalKey<NavigatorState> key) {
     _navigatorKey = key;
-
-    // Listen to the "invoke" from BackgroundOrderService
-    service.on('new_order').listen((payload) {
-      if (payload != null) {
-        debugPrint("🔔 UI: Received new_order event from Background Service");
-
-        final orderId = payload['orderId'] as String?;
-        if (orderId != null && scopeService.isLoaded) {
-
-          // ✅ CRITICAL FIX: Robust parsing of branchIds
-          // This prevents the "type 'String' is not a subtype of 'List'" crash
-          List<String> incomingBranchIds = [];
-          final rawBranchIds = payload['branchIds'];
-
-          if (rawBranchIds is List) {
-            incomingBranchIds = rawBranchIds.map((e) => e.toString()).toList();
-          } else if (rawBranchIds is String) {
-            // Handle case where it might be a JSON string like "[id1, id2]"
-            try {
-              // Simple strip and split if it looks like a list
-              incomingBranchIds = rawBranchIds
-                  .replaceAll('[', '')
-                  .replaceAll(']', '')
-                  .split(',')
-                  .map((e) => e.trim())
-                  .where((e) => e.isNotEmpty)
-                  .toList();
-            } catch (e) {
-              debugPrint("⚠️ Error parsing string branchIds: $e");
-            }
-          }
-
-          // Check if this order belongs to one of the user's managed branches
-          final bool branchMatch = scopeService.isSuperAdmin ||
-              incomingBranchIds.any((id) => scopeService.branchIds.contains(id));
-
-          if (branchMatch) {
-            _showRobustOrderDialog(payload, scopeService.userEmail);
-          } else {
-            debugPrint("⚠️ Ignoring order from unmanaged branch: $incomingBranchIds");
-          }
-        }
-      }
-    });
   }
 
-  // --- Dialog Logic ---
+  // --------------------------------------------------------------------------
+  // ✅ LOGIC: VERIFY OWNERSHIP & SHOW DIALOG
+  // --------------------------------------------------------------------------
+  Future<void> handleFCMOrder(Map<String, dynamic> payload, UserScopeService scopeService) async {
+    if (!scopeService.isLoaded) return;
+
+    final String? orderId = payload['orderId'];
+    if (orderId == null) return;
+
+    debugPrint("🔔 UI: Handling Order from FCM: $orderId");
+
+    // 1. Resolve Branch ID safely from Payload OR Firestore
+    String? orderBranchId = payload['branchId'];
+
+    if (orderBranchId == null) {
+      debugPrint("⚠️ FCM Missing 'branchId'. Fetching from Firestore to verify...");
+      try {
+        final doc = await FirebaseFirestore.instance.collection('Orders').doc(orderId).get();
+        if (doc.exists) {
+          final data = doc.data();
+          orderBranchId = data?['branchId'];
+
+          // If branchId is still missing, try branchIds array
+          if (orderBranchId == null && data?['branchIds'] is List) {
+            final list = data?['branchIds'] as List;
+            if (list.isNotEmpty) orderBranchId = list.first.toString();
+          }
+        }
+      } catch (e) {
+        debugPrint("❌ Error verifying order ownership: $e");
+      }
+    }
+
+    // 2. Authorization Check
+    if (orderBranchId != null) {
+      if (scopeService.branchIds.contains(orderBranchId)) {
+        // ✅ Authorized: Show Dialog
+        _showRobustOrderDialog(payload, scopeService.userEmail);
+      } else {
+        debugPrint("⛔ ACCESS DENIED: Order belongs to branch $orderBranchId, but user has ${scopeService.branchIds}");
+      }
+    } else {
+      // Fallback: If we still can't find a branch ID, we might default to showing it
+      // if the user is a Super Admin, otherwise we block it for safety.
+      if (scopeService.isSuperAdmin) {
+        _showRobustOrderDialog(payload, scopeService.userEmail);
+      } else {
+        debugPrint("⛔ ACCESS DENIED: Could not determine order branch.");
+      }
+    }
+  }
 
   void _showRobustOrderDialog(Map<String, dynamic> orderData, String adminEmail) {
     final context = _navigatorKey?.currentContext;
 
-    // Only show if we have a context and dialog isn't already open
     if (context != null && !_isDialogOpen) {
       _isDialogOpen = true;
 
       showDialog(
         context: context,
-        barrierDismissible: false, // User must Accept/Reject
+        barrierDismissible: false,
         builder: (context) {
           return NewOrderDialog(
             orderData: orderData,
@@ -124,7 +122,6 @@ class OrderNotificationService with ChangeNotifier {
             onClose: () => _isDialogOpen = false,
             onAccept: () => _navigateToOrder(orderData['orderId']),
             onReject: (reason) async {
-              // Reject Logic: Update Firestore
               await FirebaseFirestore.instance.collection('Orders').doc(orderData['orderId']).update({
                 'status': 'cancelled',
                 'rejectionReason': reason,
@@ -133,8 +130,6 @@ class OrderNotificationService with ChangeNotifier {
               });
             },
             onAutoAccept: () async {
-              // Auto-Accept Logic (Timeout): Update Firestore
-              // Note: You might want to auto-reject instead depending on business logic
               await FirebaseFirestore.instance.collection('Orders').doc(orderData['orderId']).update({
                 'status': 'preparing',
                 'autoAccepted': true,
@@ -150,8 +145,6 @@ class OrderNotificationService with ChangeNotifier {
   void _navigateToOrder(String orderId) {
     final context = _navigatorKey?.currentContext;
     if (context != null) {
-      // Navigate to Home Screen (which usually lists orders)
-      // Ideally, you'd pass the orderId to highlight it or open details
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const HomeScreen()),
             (route) => false,
@@ -159,6 +152,10 @@ class OrderNotificationService with ChangeNotifier {
     }
   }
 }
+
+
+
+
 
 // -------------------------------------------------------------------
 // NewOrderDialog UI (The Popup)
