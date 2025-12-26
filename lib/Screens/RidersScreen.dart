@@ -2288,7 +2288,82 @@ class _DriverOrderHistoryScreen extends StatefulWidget {
 
 class _DriverOrderHistoryScreenState extends State<_DriverOrderHistoryScreen> {
   String _filterStatus = 'all';
-  final List<String> _statusFilters = ['all', 'completed', 'cancelled', 'failed'];
+  // ✅ Updated Statuses to match real data
+  final List<String> _statusFilters = ['all', 'delivered', 'cancelled'];
+
+  // ✅ Pagination State
+  final int _ordersPerPage = 6;
+  List<DocumentSnapshot> _orders = [];
+  bool _isLoading = false;
+  bool _hasMore = true;
+  DocumentSnapshot? _lastDocument;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchOrders();
+  }
+
+  Future<void> _fetchOrders() async {
+    if (_isLoading) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      Query query = FirebaseFirestore.instance.collection('Orders');
+
+      // ✅ FIX 1: Use 'riderId' instead of 'driverId'
+      query = query.where('riderId', isEqualTo: widget.driverId);
+
+      // ✅ FIX 2: Use 'timestamp' instead of 'createdAt'
+      query = query.orderBy('timestamp', descending: true);
+
+      // Filter
+      if (_filterStatus != 'all') {
+        query = query.where('status', isEqualTo: _filterStatus);
+      }
+
+      // ✅ Pagination Logic
+      query = query.limit(_ordersPerPage);
+      if (_lastDocument != null) {
+        query = query.startAfterDocument(_lastDocument!);
+      }
+
+      final snapshot = await query.get();
+
+      setState(() {
+        if (snapshot.docs.isNotEmpty) {
+          _orders.addAll(snapshot.docs);
+          _lastDocument = snapshot.docs.last;
+        }
+
+        // If fewer docs than limit, we reached the end
+        if (snapshot.docs.length < _ordersPerPage) {
+          _hasMore = false;
+        }
+      });
+    } catch (e) {
+      debugPrint("Error fetching history: $e");
+      setState(() => _errorMessage = "Could not load orders. Check indexes.");
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _onFilterChanged(String selected) {
+    if (_filterStatus == selected) return;
+    setState(() {
+      _filterStatus = selected;
+      _orders.clear();
+      _lastDocument = null;
+      _hasMore = true;
+    });
+    _fetchOrders();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2302,18 +2377,11 @@ class _DriverOrderHistoryScreenState extends State<_DriverOrderHistoryScreen> {
           children: [
             const Text(
               'Order History',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.deepPurple,
-                fontSize: 20,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple, fontSize: 20),
             ),
             Text(
               widget.driverName,
-              style: const TextStyle(
-                fontSize: 14,
-                color: Colors.grey,
-              ),
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
             ),
           ],
         ),
@@ -2324,13 +2392,9 @@ class _DriverOrderHistoryScreenState extends State<_DriverOrderHistoryScreen> {
       ),
       body: Column(
         children: [
-          // Status Filter
           _buildStatusFilter(),
           const SizedBox(height: 8),
-          // Order History List
-          Expanded(
-            child: _buildOrderHistoryList(),
-          ),
+          Expanded(child: _buildOrderList()),
         ],
       ),
     );
@@ -2343,28 +2407,22 @@ class _DriverOrderHistoryScreenState extends State<_DriverOrderHistoryScreen> {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: _statusFilters.map((status) {
+            final isSelected = _filterStatus == status;
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: FilterChip(
-                label: Text(
-                  _getStatusLabel(status),
-                  style: TextStyle(
-                    color: _filterStatus == status ? Colors.white : Colors.deepPurple,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                selected: _filterStatus == status,
-                onSelected: (selected) {
-                  setState(() {
-                    _filterStatus = selected ? status : 'all';
-                  });
-                },
+                label: Text(status.toUpperCase()),
+                selected: isSelected,
+                onSelected: (val) => _onFilterChanged(val ? status : 'all'),
                 selectedColor: Colors.deepPurple,
+                labelStyle: TextStyle(
+                  color: isSelected ? Colors.white : Colors.deepPurple,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
                 backgroundColor: Colors.deepPurple.withOpacity(0.1),
                 checkmarkColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               ),
             );
           }).toList(),
@@ -2373,362 +2431,142 @@ class _DriverOrderHistoryScreenState extends State<_DriverOrderHistoryScreen> {
     );
   }
 
-  Widget _buildOrderHistoryList() {
-    Query<Map<String, dynamic>> query = FirebaseFirestore.instance
-        .collection('Orders')
-        .where('driverId', isEqualTo: widget.driverId)
-        .orderBy('createdAt', descending: true);
-
-    // Apply status filter
-    if (_filterStatus != 'all') {
-      query = query.where('status', isEqualTo: _filterStatus);
+  Widget _buildOrderList() {
+    if (_errorMessage != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const SizedBox(height: 10),
+            Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _orders.clear();
+                  _lastDocument = null;
+                  _hasMore = true;
+                });
+                _fetchOrders();
+              },
+              child: const Text("Retry"),
+            )
+          ],
+        ),
+      );
     }
 
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: query.snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.error_outline_rounded,
-                  size: 64,
-                  color: Colors.grey[400],
+    if (_orders.isEmpty && _isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_orders.isEmpty && !_isLoading) {
+      return const Center(
+        child: Text("No orders found.", style: TextStyle(color: Colors.grey, fontSize: 16)),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _orders.length + 1, // +1 for Loader/End message
+      itemBuilder: (context, index) {
+        if (index == _orders.length) {
+          // Bottom Item
+          if (_hasMore) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                child: ElevatedButton(
+                  onPressed: _fetchOrders,
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+                  child: _isLoading
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text("Load More (6 Orders)"),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  'Error loading orders',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  snapshot.error.toString(),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.grey[500],
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          );
+              ),
+            );
+          } else {
+            return const Padding(
+              padding: EdgeInsets.all(20),
+              child: Center(child: Text("No more orders", style: TextStyle(color: Colors.grey))),
+            );
+          }
         }
 
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Loading order history...',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 16,
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.history_rounded,
-                  size: 64,
-                  color: Colors.grey[400],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'No orders found',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _filterStatus == 'all'
-                      ? 'This driver has no order history yet.'
-                      : 'No ${_filterStatus} orders found.',
-                  style: TextStyle(
-                    color: Colors.grey[500],
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        final orders = snapshot.data!.docs;
-
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: orders.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final order = orders[index];
-            return _OrderHistoryCard(order: order);
-          },
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _OrderHistoryCard(order: _orders[index]),
         );
       },
     );
   }
-
-  String _getStatusLabel(String status) {
-    switch (status) {
-      case 'all':
-        return 'All Orders';
-      case 'completed':
-        return 'Completed';
-      case 'cancelled':
-        return 'Cancelled';
-      case 'failed':
-        return 'Failed';
-      default:
-        return status;
-    }
-  }
 }
 
-/// Card widget for displaying order history items
 class _OrderHistoryCard extends StatelessWidget {
-  final DocumentSnapshot<Map<String, dynamic>> order;
+  final DocumentSnapshot order;
 
   const _OrderHistoryCard({required this.order});
 
   @override
   Widget build(BuildContext context) {
-    final data = order.data();
-    if (data == null) return const SizedBox.shrink();
-
+    final data = order.data() as Map<String, dynamic>? ?? {};
     final orderId = order.id;
-    final status = data['status'] as String? ?? 'unknown';
-    final createdAt = data['createdAt'] as Timestamp?;
-    final totalAmount = data['totalAmount'] as num? ?? 0;
-    final customerName = data['customerName'] as String? ?? 'Unknown Customer';
-    final deliveryAddress = data['deliveryAddress'] as String? ?? 'No address';
+    final status = data['status']?.toString() ?? 'unknown';
+    final timestamp = data['timestamp'] as Timestamp?;
+    final totalAmount = double.tryParse(data['totalAmount']?.toString() ?? '0') ?? 0.0;
+
+    // ✅ Fix Delivery Address Crash (Handle Map vs String)
+    String address = 'No address';
+    final addrRaw = data['deliveryAddress'];
+    if (addrRaw is String) {
+      address = addrRaw;
+    } else if (addrRaw is Map) {
+      address = addrRaw['street']?.toString() ?? 'No address';
+    }
+
+    final dateStr = timestamp != null
+        ? "${timestamp.toDate().day}/${timestamp.toDate().month}/${timestamp.toDate().year}"
+        : "N/A";
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(
-          color: Colors.grey.withOpacity(0.1),
-          width: 1,
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(16),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Order #${orderId.substring(0, 6)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: _getStatusColor(status).withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+              child: Text(status.toUpperCase(), style: TextStyle(color: _getStatusColor(status), fontSize: 10, fontWeight: FontWeight.bold)),
+            )
+          ],
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 8),
+            Text('📅 $dateStr', style: const TextStyle(fontSize: 12)),
+            Text('📍 $address', style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 8),
+            Text('QAR ${totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+          ],
         ),
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => _viewOrderDetails(context),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header with Order ID and Status
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Order #${orderId.substring(0, 8).toUpperCase()}',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: _getStatusColor(status).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: _getStatusColor(status).withOpacity(0.3),
-                        ),
-                      ),
-                      child: Text(
-                        _formatStatus(status),
-                        style: TextStyle(
-                          color: _getStatusColor(status),
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // Customer Info
-                _buildInfoRow(
-                  icon: Icons.person_outline_rounded,
-                  label: 'Customer',
-                  value: customerName,
-                ),
-                const SizedBox(height: 8),
-                // Delivery Address
-                _buildInfoRow(
-                  icon: Icons.location_on_outlined,
-                  label: 'Delivery Address',
-                  value: deliveryAddress,
-                ),
-                const SizedBox(height: 8),
-                // Order Date and Amount
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildInfoRow(
-                        icon: Icons.calendar_today_outlined,
-                        label: 'Date',
-                        value: _formatDate(createdAt),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.deepPurple.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '\$${totalAmount.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          color: Colors.deepPurple,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoRow({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(
-          icon,
-          size: 16,
-          color: Colors.grey[600],
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.black87,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 
   Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'completed':
-        return Colors.green;
-      case 'cancelled':
-        return Colors.red;
-      case 'failed':
-        return Colors.orange;
-      case 'pending':
-        return Colors.blue;
-      case 'in_progress':
-        return Colors.purple;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  String _formatStatus(String status) {
-    switch (status.toLowerCase()) {
-      case 'completed':
-        return 'Completed';
-      case 'cancelled':
-        return 'Cancelled';
-      case 'failed':
-        return 'Failed';
-      case 'pending':
-        return 'Pending';
-      case 'in_progress':
-        return 'In Progress';
-      default:
-        return status;
-    }
-  }
-
-  String _formatDate(Timestamp? timestamp) {
-    if (timestamp == null) return 'Unknown date';
-    final date = timestamp.toDate();
-    return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-  }
-
-  void _viewOrderDetails(BuildContext context) {
-    // Navigate to order details screen
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => OrdersScreen(), // You might want to create a dedicated order details screen
-      ),
-    );
+    if (status == 'delivered') return Colors.green;
+    if (status == 'cancelled') return Colors.red;
+    return Colors.grey;
   }
 }
-
 
 
 class DriverInfo {
