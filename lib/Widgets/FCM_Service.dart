@@ -107,26 +107,22 @@ class FcmService {
   Future<void> _showNotification(RemoteMessage message) async {
     final data = message.data;
 
-    // Default Strings
-    String title = message.notification?.title ?? 'New Order';
-    String body = message.notification?.body ?? 'You have a new order';
-
-    if (data.containsKey('title')) title = data['title'];
-    if (data.containsKey('body')) body = data['body'];
+    // ✅ FIX: Prioritize Data fields, fallback to Notification fields (which will be null now)
+    String title = data['title'] ?? message.notification?.title ?? 'New Order';
+    String body = data['body'] ?? message.notification?.body ?? 'You have a new order';
 
     final String? orderId = data['orderId'];
 
     // ✅ DEDUPLICATION MAGIC
     // Uses the same Integer ID as BackgroundOrderService.
-    // If BackgroundService showed it 500ms ago, this updates it (silently) instead of adding a new one.
     final int notificationId = orderId != null
         ? orderId.hashCode
         : DateTime.now().millisecondsSinceEpoch.remainder(100000);
 
     const AndroidNotificationDetails androidPlatformChannelSpecifics =
     AndroidNotificationDetails(
-      'high_importance_channel', // Must match Cloud Function & Manifest
-      'High Importance Notifications',
+      'high_importance_channel', // Must match BackgroundOrderService
+      'New Order Notifications', // Must match BackgroundOrderService
       channelDescription: 'Important order notifications',
       importance: Importance.max,
       priority: Priority.high,
@@ -148,7 +144,6 @@ class FcmService {
       payload: jsonEncode(data),
     );
   }
-
   void _handleNotificationTap(Map<String, dynamic> data) {
     final orderId = data['orderId'];
     if (orderId != null) {

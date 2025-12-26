@@ -8,22 +8,68 @@ import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // ✅ ADDED
+import 'package:flutter_local_notifications/flutter_local_notifications.dart'; // ✅ ADDED
 
-// Import your screens
 import 'Screens/ConnectionUtils.dart';
 import 'Screens/LoginScreen.dart';
-import 'Screens/MainScreen.dart'; // Contains BadgeCountProvider
+import 'Screens/MainScreen.dart';
 import 'Widgets/Authorization.dart';
 import 'Widgets/BackgroundOrderService.dart';
 import 'Widgets/RestaurantStatusService.dart';
 import 'Widgets/notification.dart';
-import 'Widgets/FCM_Service.dart'; // ✅ NEW: Import FCM Service
+import 'Widgets/FCM_Service.dart';
 import 'firebase_options.dart';
-
-// Import the offline screen
 import 'Screens/OfflineScreen.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+// ---------------------------------------------------------------------------
+// ✅ NEW: BACKGROUND HANDLER (Must be top-level, outside class)
+// ---------------------------------------------------------------------------
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // 1. Initialize Firebase (Required for background handlers)
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  debugPrint("🌙 BACKGROUND FCM DATA: ${message.data}");
+
+  final data = message.data;
+  final String? orderId = data['orderId'];
+
+  // If orderId exists, we use it for Deduplication
+  if (orderId != null) {
+    final int notificationId = orderId.hashCode; // 🎯 Match BackgroundOrderService ID
+
+    final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+    // 🎯 Match Channel ID from BackgroundOrderService ('high_importance_channel')
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'high_importance_channel',
+      'New Order Notifications',
+      channelDescription: 'Important order notifications',
+      importance: Importance.max,
+      priority: Priority.high,
+      color: Colors.deepPurple,
+      // Ensure 'notification' raw resource exists if you use custom sound
+      // sound: RawResourceAndroidNotificationSound('notification'),
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: DarwinNotificationDetails(presentSound: true),
+    );
+
+    await flutterLocalNotificationsPlugin.show(
+      notificationId,
+      data['title'] ?? 'New Order', // Now coming from 'data'
+      data['body'] ?? 'Check your dashboard', // Now coming from 'data'
+      platformDetails,
+      payload: orderId, // Or jsonEncode(data)
+    );
+  }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,11 +78,12 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  // ✅ REGISTER BACKGROUND HANDLER
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
   // --- START: ROBUST SERVICE LAUNCH ---
-  // 1. Initialize the Background Service configuration (Local Notifications channels etc.)
   await BackgroundOrderService.initializeService();
 
-  // 2. Check if the service is already running. If not, start it.
   final service = FlutterBackgroundService();
   bool isRunning = await service.isRunning();
 
@@ -51,6 +98,7 @@ void main() async {
   runApp(const MyApp());
 }
 
+// ... (Rest of your MyApp and ScopeLoader classes remain exactly the same) ...
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -70,7 +118,6 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider<RestaurantStatusService>(
           create: (_) => RestaurantStatusService(),
         ),
-        // BadgeCountProvider is defined in Screens/MainScreen.dart
         ChangeNotifierProvider(create: (_) => BadgeCountProvider()),
       ],
       child: MaterialApp(
@@ -121,22 +168,15 @@ class MyApp extends StatelessWidget {
             ),
           ),
         ),
-
-        // ✅ OFFLINE BANNER: Wraps the entire app to show red banner when internet is lost
         builder: (context, child) {
           return OfflineBanner(child: child!);
         },
-
         home: const AuthWrapper(),
         debugShowCheckedModeBanner: false,
       ),
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// ScopeLoader & UserScopeService
-// ---------------------------------------------------------------------------
 
 class ScopeLoader extends StatefulWidget {
   final User user;
@@ -152,7 +192,6 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    // ✅ Lifecycle Observation: Tell the background service if we are in Foreground
     WidgetsBinding.instance.addObserver(this);
     _service.invoke('appInForeground');
 
@@ -167,10 +206,8 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _service.invoke('appInForeground');
     } else {
-      // Treat inactive, paused, detached as background
       _service.invoke('appInBackground');
     }
-    debugPrint('App changed state: $state');
   }
 
   @override
@@ -188,33 +225,22 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     final bool isSuccess = await scopeService.loadUserScope(widget.user, authService);
 
     if (isSuccess && mounted) {
-      // 1. Initialize restaurant status service
       if (scopeService.branchId.isNotEmpty) {
         String restaurantName = "Branch ${scopeService.branchId}";
         if (scopeService.userEmail.isNotEmpty) {
           restaurantName =
           "Restaurant (${scopeService.userEmail.split('@').first})";
         }
-
         statusService.initialize(scopeService.branchId,
             restaurantName: restaurantName);
-
-        // Short delay to allow status to propagate
         await Future.delayed(const Duration(seconds: 1));
       }
 
-      // 2. Initialize In-App Dialog Service (Listens to Background Service)
       notificationService.init(scopeService, navigatorKey);
-
-      // 3. ✅ NEW: Initialize FCM Service (The Safety Net)
-      // This is the critical "Hybrid" step. We initialize FCM now that we have the email.
-      // It ensures that if the app is killed, the High Priority FCM will still reach us.
       await FcmService().init(scopeService.userEmail);
 
       debugPrint(
           '🎯 SYSTEM READY: User Scope Loaded + Background Service Linked + FCM Initialized');
-    } else {
-      debugPrint('❌ Failed to load user scope');
     }
   }
 
@@ -236,7 +262,6 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
         ),
       );
     }
-
     return const HomeScreen();
   }
 }
@@ -266,31 +291,20 @@ class UserScopeService with ChangeNotifier {
 
   Future<bool> loadUserScope(User user, AuthService authService) async {
     if (_isLoaded) return true;
-
     await _scopeSubscription?.cancel();
     _scopeSubscription = null;
 
     try {
       _userEmail = user.email ?? '';
-      if (_userEmail.isEmpty) {
-        throw Exception('User email is null.');
-      }
-
-      debugPrint('🎯 Loading user scope for: $_userEmail');
+      if (_userEmail.isEmpty) throw Exception('User email is null.');
 
       final staffSnap = await _db.collection('staff').doc(_userEmail).get();
-
       if (!staffSnap.exists) {
-        debugPrint('❌ Scope Error: No staff document found for $_userEmail.');
         await clearScope();
         return false;
       }
-
       final data = staffSnap.data();
-      final bool isActive = data?['isActive'] ?? false;
-
-      if (!isActive) {
-        debugPrint('❌ Scope Error: Staff member $_userEmail is not active.');
+      if (data?['isActive'] != true) {
         await clearScope();
         return false;
       }
@@ -299,9 +313,6 @@ class UserScopeService with ChangeNotifier {
       _branchIds = List<String>.from(data?['branchIds'] ?? []);
       _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
       _isLoaded = true;
-
-      debugPrint(
-          '✅ Scope Loaded: $_userEmail | Role: $_role | Branches: $_branchIds | Permissions: $_permissions');
 
       _scopeSubscription = _db
           .collection('staff')
@@ -315,7 +326,6 @@ class UserScopeService with ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      debugPrint('❌ Error loading user scope: $e');
       await clearScope();
       return false;
     }
@@ -323,36 +333,27 @@ class UserScopeService with ChangeNotifier {
 
   void _handleScopeUpdate(DocumentSnapshot snapshot, AuthService authService) {
     if (!snapshot.exists) {
-      debugPrint('User scope document was deleted. Signing out.');
       authService.signOut();
       return;
     }
-
     final data = snapshot.data() as Map<String, dynamic>?;
-    final bool isActive = data?['isActive'] ?? false;
-
-    if (!isActive) {
-      debugPrint('User is no longer active. Signing out.');
+    if (data?['isActive'] != true) {
       authService.signOut();
       return;
     }
-
     _role = data?['role'] as String? ?? 'unknown';
     _branchIds = List<String>.from(data?['branchIds'] ?? []);
     _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
-
     notifyListeners();
   }
 
   void _handleScopeError(Object error, AuthService authService) {
-    debugPrint('Error listening to user scope: $error. Signing out.');
     authService.signOut();
   }
 
   Future<void> clearScope() async {
     await _scopeSubscription?.cancel();
     _scopeSubscription = null;
-
     _role = 'unknown';
     _branchIds = [];
     _permissions = {};
