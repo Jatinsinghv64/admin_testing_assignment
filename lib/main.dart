@@ -17,9 +17,10 @@ import 'Widgets/Authorization.dart';
 import 'Widgets/BackgroundOrderService.dart';
 import 'Widgets/RestaurantStatusService.dart';
 import 'Widgets/notification.dart';
+import 'Widgets/FCM_Service.dart'; // ✅ NEW: Import FCM Service
 import 'firebase_options.dart';
 
-// ✅ IMPORT THE OFFLINE SCREEN
+// Import the offline screen
 import 'Screens/OfflineScreen.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -32,12 +33,11 @@ void main() async {
   );
 
   // --- START: ROBUST SERVICE LAUNCH ---
-  final service = FlutterBackgroundService();
-
-  // ✅ ALWAYS initialize (configure) the service first.
+  // 1. Initialize the Background Service configuration (Local Notifications channels etc.)
   await BackgroundOrderService.initializeService();
 
-  // Now, check if it's running.
+  // 2. Check if the service is already running. If not, start it.
+  final service = FlutterBackgroundService();
   bool isRunning = await service.isRunning();
 
   if (!isRunning) {
@@ -122,9 +122,8 @@ class MyApp extends StatelessWidget {
           ),
         ),
 
-        // ✅ CRITICAL FIX: Wrap the app in OfflineBanner using builder
+        // ✅ OFFLINE BANNER: Wraps the entire app to show red banner when internet is lost
         builder: (context, child) {
-          // This ensures the red offline banner stays on top of ANY screen
           return OfflineBanner(child: child!);
         },
 
@@ -136,7 +135,7 @@ class MyApp extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// ScopeLoader & UserScopeService (Kept as provided)
+// ScopeLoader & UserScopeService
 // ---------------------------------------------------------------------------
 
 class ScopeLoader extends StatefulWidget {
@@ -153,7 +152,7 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    // ✅ Tell the service the app is in the foreground
+    // ✅ Lifecycle Observation: Tell the background service if we are in Foreground
     WidgetsBinding.instance.addObserver(this);
     _service.invoke('appInForeground');
 
@@ -189,7 +188,7 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     final bool isSuccess = await scopeService.loadUserScope(widget.user, authService);
 
     if (isSuccess && mounted) {
-      // Initialize restaurant status service
+      // 1. Initialize restaurant status service
       if (scopeService.branchId.isNotEmpty) {
         String restaurantName = "Branch ${scopeService.branchId}";
         if (scopeService.userEmail.isNotEmpty) {
@@ -200,15 +199,20 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
         statusService.initialize(scopeService.branchId,
             restaurantName: restaurantName);
 
-        // Wait for status to load
-        await Future.delayed(const Duration(seconds: 2));
+        // Short delay to allow status to propagate
+        await Future.delayed(const Duration(seconds: 1));
       }
 
-      // Initialize notification service
+      // 2. Initialize In-App Dialog Service (Listens to Background Service)
       notificationService.init(scopeService, navigatorKey);
 
+      // 3. ✅ NEW: Initialize FCM Service (The Safety Net)
+      // This is the critical "Hybrid" step. We initialize FCM now that we have the email.
+      // It ensures that if the app is killed, the High Priority FCM will still reach us.
+      await FcmService().init(scopeService.userEmail);
+
       debugPrint(
-          '🎯 OrderNotificationService initialized (listening to background service).');
+          '🎯 SYSTEM READY: User Scope Loaded + Background Service Linked + FCM Initialized');
     } else {
       debugPrint('❌ Failed to load user scope');
     }
