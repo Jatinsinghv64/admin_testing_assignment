@@ -26,15 +26,15 @@ class OrdersScreen extends StatefulWidget {
   State<OrdersScreen> createState() => _OrdersScreenState();
 }
 
+// ✅ 1. ADD WidgetsBindingObserver to handle App Minimize/Reopen
 class _OrdersScreenState extends State<OrdersScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   String _selectedStatus = 'all';
   late ScrollController _scrollController;
   final Map<String, GlobalKey> _orderKeys = {};
   bool _shouldScrollToOrder = false;
 
-  // ✅ ADDED: Track which orders are currently being processed (showing loading)
   final Set<String> _processingOrderIds = {};
 
   String? _orderToScrollTo;
@@ -51,9 +51,11 @@ class _OrdersScreenState extends State<OrdersScreen>
   @override
   void initState() {
     super.initState();
+    // ✅ Register observer to refresh list when app reopens
+    WidgetsBinding.instance.addObserver(this);
+
     _scrollController = ScrollController();
 
-    // Check if there's a selected order from dashboard
     final selectedOrder = OrderSelectionService.getSelectedOrder();
     if (selectedOrder['orderId'] != null) {
       _orderToScrollTo = selectedOrder['orderId'];
@@ -99,10 +101,21 @@ class _OrdersScreenState extends State<OrdersScreen>
 
   @override
   void dispose() {
+    // ✅ Remove observer
+    WidgetsBinding.instance.removeObserver(this);
     OrderSelectionService.clearSelectedOrder();
     _tabController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  // ✅ 2. Handle App Resume (Fixes "Ghost Orders" from previous days appearing)
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Force rebuild to recalculate 'Today's Date' in the stream query
+      if (mounted) setState(() {});
+    }
   }
 
   List<String> _getStatusValues() {
@@ -119,12 +132,10 @@ class _OrdersScreenState extends State<OrdersScreen>
     ];
   }
 
-  // ✅ MODIFIED: Added loading state logic
-  Future<void> updateOrderStatus(
-      BuildContext context, String orderId, String newStatus) async {
+  // ✅ 3. REMOVED 'BuildContext context' parameter to fix Crash
+  Future<void> updateOrderStatus(String orderId, String newStatus) async {
     if (!mounted) return;
 
-    // 1. Set loading state
     setState(() {
       _processingOrderIds.add(orderId);
     });
@@ -132,7 +143,6 @@ class _OrdersScreenState extends State<OrdersScreen>
     try {
       final db = FirebaseFirestore.instance;
       final orderRef = db.collection('Orders').doc(orderId);
-
       final WriteBatch batch = db.batch();
 
       final Map<String, dynamic> updateData = {
@@ -183,6 +193,7 @@ class _OrdersScreenState extends State<OrdersScreen>
       batch.update(orderRef, updateData);
       await batch.commit();
 
+      // ✅ 4. Use 'this.context' (Screen Context) instead of dead child context
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -202,7 +213,6 @@ class _OrdersScreenState extends State<OrdersScreen>
         );
       }
     } finally {
-      // 2. Clear loading state
       if (mounted) {
         setState(() {
           _processingOrderIds.remove(orderId);
@@ -460,7 +470,6 @@ class _OrdersScreenState extends State<OrdersScreen>
 
         final docs = snapshot.data!.docs;
 
-        // Auto-scroll logic
         if ((widget.initialOrderId != null || _orderToScrollTo != null) && _shouldScrollToOrder) {
           _orderKeys.clear();
           for (var doc in docs) { _orderKeys[doc.id] = GlobalKey(); }
@@ -499,9 +508,8 @@ class _OrdersScreenState extends State<OrdersScreen>
               key: _orderKeys[orderDoc.id],
               order: orderDoc,
               orderType: orderType,
-              onStatusChange: updateOrderStatus,
+              onStatusChange: updateOrderStatus, // ✅ Passed without context
               isHighlighted: isHighlighted,
-              // ✅ PASS PROCESSING STATE
               isProcessing: _processingOrderIds.contains(orderDoc.id),
             );
           },
@@ -541,9 +549,9 @@ class _OrdersScreenState extends State<OrdersScreen>
 class _OrderCard extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> order;
   final String orderType;
-  final Function(BuildContext, String, String) onStatusChange;
+  // ✅ 5. UPDATED CALLBACK SIGNATURE (No BuildContext)
+  final Function(String, String) onStatusChange;
   final bool isHighlighted;
-  // ✅ ADDED PROCESSING FLAG
   final bool isProcessing;
 
   const _OrderCard({
@@ -552,7 +560,7 @@ class _OrderCard extends StatelessWidget {
     required this.orderType,
     required this.onStatusChange,
     this.isHighlighted = false,
-    this.isProcessing = false, // Default false
+    this.isProcessing = false,
   });
 
   Color _getStatusColor(String status) {
@@ -570,7 +578,6 @@ class _OrderCard extends StatelessWidget {
   }
 
   Widget _buildActionButtons(BuildContext context, String status) {
-    // ✅ CHECK: IF PROCESSING, SHOW SPINNER
     if (isProcessing) {
       return const SizedBox(
         width: double.infinity,
@@ -598,12 +605,13 @@ class _OrderCard extends StatelessWidget {
     const EdgeInsets btnPadding = EdgeInsets.symmetric(horizontal: 14, vertical: 10);
     const Size btnMinSize = Size(0, 40);
 
+    // ✅ 6. UPDATED BUTTON CALLS (Removed 'context' from arguments)
     if (status == 'pending') {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.check, size: 16),
           label: const Text('Accept Order'),
-          onPressed: () => onStatusChange(context, order.id, 'preparing'),
+          onPressed: () => onStatusChange(order.id, 'preparing'),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.green,
             foregroundColor: Colors.white,
@@ -620,7 +628,7 @@ class _OrderCard extends StatelessWidget {
         ElevatedButton.icon(
           icon: const Icon(Icons.done_all, size: 16),
           label: const Text('Mark as Prepared'),
-          onPressed: () => onStatusChange(context, order.id, 'prepared'),
+          onPressed: () => onStatusChange(order.id, 'prepared'),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.blue,
             foregroundColor: Colors.white,
@@ -669,7 +677,7 @@ class _OrderCard extends StatelessWidget {
           ElevatedButton.icon(
             icon: const Icon(Icons.task_alt, size: 16),
             label: const Text('Mark as Delivered'),
-            onPressed: () => onStatusChange(context, order.id, 'delivered'),
+            onPressed: () => onStatusChange(order.id, 'delivered'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -686,7 +694,7 @@ class _OrderCard extends StatelessWidget {
           ElevatedButton.icon(
             icon: const Icon(Icons.task_alt, size: 16),
             label: const Text('Mark as Picked Up'),
-            onPressed: () => onStatusChange(context, order.id, 'delivered'),
+            onPressed: () => onStatusChange(order.id, 'delivered'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -703,7 +711,7 @@ class _OrderCard extends StatelessWidget {
           ElevatedButton.icon(
             icon: const Icon(Icons.task_alt, size: 16),
             label: const Text('Mark as Delivered'),
-            onPressed: () => onStatusChange(context, order.id, 'delivered'),
+            onPressed: () => onStatusChange(order.id, 'delivered'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -740,13 +748,12 @@ class _OrderCard extends StatelessWidget {
       );
     }
 
-    // ✅ MODIFIED: Allow Cancel for ANY active status (Not delivered, Not cancelled)
     if (status != 'cancelled' && status != 'delivered') {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.cancel, size: 16),
           label: const Text('Cancel Order'),
-          onPressed: () => onStatusChange(context, order.id, 'cancelled'),
+          onPressed: () => onStatusChange(order.id, 'cancelled'),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.red,
             foregroundColor: Colors.white,

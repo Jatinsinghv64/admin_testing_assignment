@@ -54,58 +54,21 @@ class OrderNotificationService with ChangeNotifier {
   }
 
   // --------------------------------------------------------------------------
-  // ✅ LOGIC: VERIFY OWNERSHIP & SHOW DIALOG
+  // ✅ LOGIC: OPEN DIALOG IMMEDIATELY (Fetch Data Inside)
   // --------------------------------------------------------------------------
-  Future<void> handleFCMOrder(Map<String, dynamic> payload, UserScopeService scopeService) async {
+  void handleFCMOrder(Map<String, dynamic> payload, UserScopeService scopeService) {
     if (!scopeService.isLoaded) return;
 
     final String? orderId = payload['orderId'];
     if (orderId == null) return;
 
-    debugPrint("🔔 UI: Handling Order from FCM: $orderId");
+    debugPrint("🔔 UI: Immediate Dialog Trigger for Order: $orderId");
 
-    // 1. Resolve Branch ID safely from Payload OR Firestore
-    String? orderBranchId = payload['branchId'];
-
-    if (orderBranchId == null) {
-      debugPrint("⚠️ FCM Missing 'branchId'. Fetching from Firestore to verify...");
-      try {
-        final doc = await FirebaseFirestore.instance.collection('Orders').doc(orderId).get();
-        if (doc.exists) {
-          final data = doc.data();
-          orderBranchId = data?['branchId'];
-
-          // If branchId is still missing, try branchIds array
-          if (orderBranchId == null && data?['branchIds'] is List) {
-            final list = data?['branchIds'] as List;
-            if (list.isNotEmpty) orderBranchId = list.first.toString();
-          }
-        }
-      } catch (e) {
-        debugPrint("❌ Error verifying order ownership: $e");
-      }
-    }
-
-    // 2. Authorization Check
-    if (orderBranchId != null) {
-      if (scopeService.branchIds.contains(orderBranchId)) {
-        // ✅ Authorized: Show Dialog
-        _showRobustOrderDialog(payload, scopeService.userEmail);
-      } else {
-        debugPrint("⛔ ACCESS DENIED: Order belongs to branch $orderBranchId, but user has ${scopeService.branchIds}");
-      }
-    } else {
-      // Fallback: If we still can't find a branch ID, we might default to showing it
-      // if the user is a Super Admin, otherwise we block it for safety.
-      if (scopeService.isSuperAdmin) {
-        _showRobustOrderDialog(payload, scopeService.userEmail);
-      } else {
-        debugPrint("⛔ ACCESS DENIED: Could not determine order branch.");
-      }
-    }
+    // Don't wait for Firestore. Open the UI instantly.
+    _showRobustOrderDialog(orderId, scopeService);
   }
 
-  void _showRobustOrderDialog(Map<String, dynamic> orderData, String adminEmail) {
+  void _showRobustOrderDialog(String orderId, UserScopeService scopeService) {
     final context = _navigatorKey?.currentContext;
 
     if (context != null && !_isDialogOpen) {
@@ -116,25 +79,27 @@ class OrderNotificationService with ChangeNotifier {
         barrierDismissible: false,
         builder: (context) {
           return NewOrderDialog(
-            orderData: orderData,
+            orderId: orderId,
+            scopeService: scopeService,
             playSound: _playSound,
             vibrate: _vibrate,
             onClose: () => _isDialogOpen = false,
-            onAccept: () => _navigateToOrder(orderData['orderId']),
+            onAccept: () => _navigateToOrder(orderId),
             onReject: (reason) async {
-              await FirebaseFirestore.instance.collection('Orders').doc(orderData['orderId']).update({
+              await FirebaseFirestore.instance.collection('Orders').doc(orderId).update({
                 'status': 'cancelled',
                 'rejectionReason': reason,
-                'rejectedBy': adminEmail,
+                'rejectedBy': scopeService.userEmail,
                 'rejectedAt': FieldValue.serverTimestamp(),
               });
             },
             onAutoAccept: () async {
-              await FirebaseFirestore.instance.collection('Orders').doc(orderData['orderId']).update({
+              debugPrint("⏳ Timer expired. Auto-accepting order...");
+              await FirebaseFirestore.instance.collection('Orders').doc(orderId).update({
                 'status': 'preparing',
                 'autoAccepted': true,
               });
-              _navigateToOrder(orderData['orderId']);
+              _navigateToOrder(orderId);
             },
           );
         },
@@ -153,16 +118,13 @@ class OrderNotificationService with ChangeNotifier {
   }
 }
 
-
-
-
-
 // -------------------------------------------------------------------
 // NewOrderDialog UI (The Popup)
 // -------------------------------------------------------------------
 
 class NewOrderDialog extends StatefulWidget {
-  final Map<String, dynamic> orderData;
+  final String orderId;
+  final UserScopeService scopeService;
   final bool playSound;
   final bool vibrate;
   final VoidCallback onAccept;
@@ -172,7 +134,8 @@ class NewOrderDialog extends StatefulWidget {
 
   const NewOrderDialog({
     Key? key,
-    required this.orderData,
+    required this.orderId,
+    required this.scopeService,
     required this.playSound,
     required this.vibrate,
     required this.onAccept,
@@ -186,21 +149,27 @@ class NewOrderDialog extends StatefulWidget {
 }
 
 class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObserver {
+  // Data State
+  Map<String, dynamic>? _orderData;
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  // Timer & Audio
   Timer? _timer;
   int _countdown = 60;
   final AudioPlayer _player = AudioPlayer();
   bool _isAudioPlaying = false;
   bool _isProcessing = false;
 
-  String get orderId => widget.orderData['orderId']?.toString() ?? 'N/A';
-  String get orderNumber => widget.orderData['dailyOrderNumber']?.toString() ?? '---';
-  String get customerName => widget.orderData['customerName']?.toString() ?? 'Guest';
-  String get orderType => widget.orderData['Order_type']?.toString() ?? 'Delivery';
+  // Safe Getters (Only call these if _orderData != null)
+  String get orderNumber => _orderData?['dailyOrderNumber']?.toString() ?? '---';
+  String get customerName => _orderData?['customerName']?.toString() ?? 'Guest';
+  String get orderType => _orderData?['Order_type']?.toString() ?? 'Delivery';
 
   String get address {
     try {
-      if (widget.orderData['deliveryAddress'] is Map) {
-        return widget.orderData['deliveryAddress']['street']?.toString() ?? 'No Address';
+      if (_orderData?['deliveryAddress'] is Map) {
+        return _orderData?['deliveryAddress']['street']?.toString() ?? 'No Address';
       }
     } catch(e) {}
     return 'N/A';
@@ -208,7 +177,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
 
   List<Map<String, dynamic>> get items {
     try {
-      final list = widget.orderData['items'];
+      final list = _orderData?['items'];
       if (list is List) {
         return list.map((item) {
           final itemMap = Map<String, dynamic>.from(item as Map);
@@ -225,24 +194,94 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     return [];
   }
 
-  double get totalAmount => double.tryParse(widget.orderData['totalAmount']?.toString() ?? '0') ?? 0.0;
-  String get specialInstructions => widget.orderData['specialInstructions']?.toString() ?? '';
+  double get totalAmount => double.tryParse(_orderData?['totalAmount']?.toString() ?? '0') ?? 0.0;
+  String get specialInstructions => _orderData?['specialInstructions']?.toString() ?? '';
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Calculate countdown from order timestamp
-    _initializeCountdown();
+    // 1. Fetch Data Immediately
+    _fetchAndVerifyOrder();
+  }
 
-    startTimer();
-    _startAlarm();
+  Future<void> _fetchAndVerifyOrder() async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('Orders').doc(widget.orderId).get();
+
+      if (!doc.exists) {
+        _handleError("Order not found.");
+        return;
+      }
+
+      final data = doc.data();
+      if (data == null) {
+        _handleError("Order data is empty.");
+        return;
+      }
+
+      data['orderId'] = widget.orderId;
+
+      // 2. Authorization Check (Branch Verification)
+      if (!_isUserAuthorized(data)) {
+        debugPrint("⛔ ACCESS DENIED: User cannot view this order.");
+        if (mounted) Navigator.of(context).pop(); // Silently close
+        return;
+      }
+
+      // 3. Data Loaded Successfully
+      if (mounted) {
+        setState(() {
+          _orderData = data;
+          _isLoading = false;
+        });
+
+        // 4. Start Logic
+        _initializeCountdown();
+        startTimer();
+        _startAlarm();
+      }
+
+    } catch (e) {
+      debugPrint("❌ Error fetching order: $e");
+      _handleError("Failed to load order.");
+    }
+  }
+
+  bool _isUserAuthorized(Map<String, dynamic> data) {
+    if (widget.scopeService.isSuperAdmin) return true;
+
+    String? orderBranchId = data['branchId'];
+    if (orderBranchId == null && data['branchIds'] is List) {
+      final list = data['branchIds'] as List;
+      if (list.isNotEmpty) orderBranchId = list.first.toString();
+    }
+
+    if (orderBranchId != null) {
+      return widget.scopeService.branchIds.contains(orderBranchId);
+    }
+
+    return false; // No branch ID found -> Secure default
+  }
+
+  void _handleError(String msg) {
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = msg;
+      });
+      // Optionally auto-close after a delay
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) Navigator.of(context).pop();
+      });
+    }
   }
 
   void _initializeCountdown() {
+    if (_orderData == null) return;
     try {
-      dynamic timestamp = widget.orderData['timestamp'];
+      dynamic timestamp = _orderData!['timestamp'];
       DateTime? orderTime;
 
       if (timestamp is Timestamp) {
@@ -251,11 +290,6 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
         orderTime = DateTime.tryParse(timestamp);
       } else if (timestamp is int) {
         orderTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
-      } else if (timestamp is Map && timestamp.containsKey('seconds')) {
-        final seconds = timestamp['seconds'];
-        if (seconds is int) {
-          orderTime = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
-        }
       }
 
       if (orderTime != null) {
@@ -311,7 +345,6 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     });
   }
 
-  // ✅ UPDATED: Calls the auto-accept callback
   void _handleAutoAction() {
     _stopAlarm();
     widget.onAutoAccept();
@@ -329,24 +362,14 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
 
   Future<void> _handleRejectPress() async {
     await _stopAlarm();
-
     final String? reason = await showDialog<String>(
       context: context,
-      builder: (BuildContext context) {
-        return const RejectionReasonDialog();
-      },
+      builder: (BuildContext context) => const RejectionReasonDialog(),
     );
-
     if (reason != null && mounted) {
-      setState(() {
-        _isProcessing = true;
-      });
-
+      setState(() => _isProcessing = true);
       await widget.onReject(reason);
-
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
+      if (mounted) Navigator.of(context).pop();
     }
   }
 
@@ -357,6 +380,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   }
 
   Color _getHeaderColor() {
+    if (_orderData == null) return Colors.deepPurple;
     switch (orderType.toLowerCase()) {
       case 'delivery': return Colors.blue.shade800;
       case 'takeaway': return Colors.orange.shade800;
@@ -375,7 +399,30 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
         elevation: 10,
         backgroundColor: Colors.white,
         insetPadding: const EdgeInsets.all(16),
-        child: Column(
+        child: _isLoading
+        // -------------------------
+        // 1. LOADING UI (Spinner)
+        // -------------------------
+            ? Container(
+          padding: const EdgeInsets.all(30),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 20),
+              const Text("Loading Order...", style: TextStyle(fontWeight: FontWeight.bold)),
+              if (_errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10.0),
+                  child: Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+                )
+            ],
+          ),
+        )
+        // -------------------------
+        // 2. MAIN ORDER UI
+        // -------------------------
+            : Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             // HEADER
@@ -544,6 +591,7 @@ class RejectionReasonDialog extends StatefulWidget {
 class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
   String? _selectedReason;
   final TextEditingController _otherReasonController = TextEditingController();
+  final FocusNode _otherFocusNode = FocusNode(); // For auto-focusing
 
   final List<String> _reasons = [
     'Items Out of Stock',
@@ -555,57 +603,194 @@ class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
   ];
 
   @override
+  void dispose() {
+    _otherReasonController.dispose();
+    _otherFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _onReasonSelected(String? value) {
+    setState(() {
+      _selectedReason = value;
+    });
+
+    // Auto-focus if "Other" is selected
+    if (value == 'Other') {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) FocusScope.of(context).requestFocus(_otherFocusNode);
+      });
+    } else {
+      _otherFocusNode.unfocus();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Reason for Rejection'),
-      content: SingleChildScrollView(
+    final bool isOther = _selectedReason == 'Other';
+    final bool isValid = _selectedReason != null && (!isOther || _otherReasonController.text.trim().isNotEmpty);
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 5,
+      backgroundColor: Colors.white,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ..._reasons.map((reason) => RadioListTile<String>(
-              title: Text(reason),
-              value: reason,
-              groupValue: _selectedReason,
-              onChanged: (value) {
-                setState(() {
-                  _selectedReason = value;
-                });
-              },
-              contentPadding: EdgeInsets.zero,
-              activeColor: Colors.red,
-            )),
-            if (_selectedReason == 'Other')
-              TextField(
-                controller: _otherReasonController,
-                decoration: const InputDecoration(
-                  labelText: 'Please specify reason',
-                  border: OutlineInputBorder(),
+            // Header
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
                 ),
-                maxLines: 2,
               ),
+              child: Row(
+                children: [
+                  Icon(Icons.report_problem_rounded, color: Colors.red.shade700),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Reject Order',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red.shade900
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Body
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Please select a reason:",
+                      style: TextStyle(fontWeight: FontWeight.w500, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 10),
+
+                    ..._reasons.map((reason) {
+                      final bool isSelected = _selectedReason == reason;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: InkWell(
+                          onTap: () => _onReasonSelected(reason),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                  color: isSelected ? Colors.red : Colors.grey.shade300,
+                                  width: isSelected ? 2 : 1
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                              color: isSelected ? Colors.red.shade50 : Colors.white,
+                            ),
+                            child: RadioListTile<String>(
+                              title: Text(
+                                reason,
+                                style: TextStyle(
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                    color: isSelected ? Colors.red.shade900 : Colors.black87
+                                ),
+                              ),
+                              value: reason,
+                              groupValue: _selectedReason,
+                              onChanged: _onReasonSelected,
+                              activeColor: Colors.red,
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+
+                    // "Other" Text Field with Animation
+                    AnimatedCrossFade(
+                      firstChild: const SizedBox(width: double.infinity, height: 0),
+                      secondChild: Padding(
+                        padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
+                        child: TextField(
+                          controller: _otherReasonController,
+                          focusNode: _otherFocusNode,
+                          onChanged: (_) => setState(() {}), // Rebuild to check validity
+                          decoration: InputDecoration(
+                            labelText: 'Specify reason...',
+                            hintText: 'e.g. Ingredient missing',
+                            filled: true,
+                            fillColor: Colors.grey.shade50,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Colors.red, width: 2),
+                            ),
+                          ),
+                          maxLines: 2,
+                        ),
+                      ),
+                      crossFadeState: isOther ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                      duration: const Duration(milliseconds: 200),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const Divider(height: 1),
+
+            // Actions
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(null),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        foregroundColor: Colors.grey.shade700,
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: isValid ? () {
+                        String finalReason = _selectedReason!;
+                        if (finalReason == 'Other') {
+                          finalReason = _otherReasonController.text.trim();
+                        }
+                        Navigator.of(context).pop(finalReason);
+                      } : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        disabledBackgroundColor: Colors.red.shade100,
+                      ),
+                      child: const Text('Confirm Rejection'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(null),
-          child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-        ),
-        ElevatedButton(
-          onPressed: _selectedReason == null ? null : () {
-            String finalReason = _selectedReason!;
-            if (finalReason == 'Other') {
-              finalReason = _otherReasonController.text.trim();
-              if (finalReason.isEmpty) return;
-            }
-            Navigator.of(context).pop(finalReason);
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.red,
-          ),
-          child: const Text('Confirm Rejection', style: TextStyle(color: Colors.white)),
-        ),
-      ],
     );
   }
 }

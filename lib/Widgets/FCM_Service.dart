@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -41,7 +42,19 @@ class FcmService {
         initializationSettings,
         onDidReceiveNotificationResponse: (NotificationResponse response) {
           if (response.payload != null) {
-            _handleNotificationTap(jsonDecode(response.payload!));
+            try {
+              // The payload might be a JSON string or just the ID depending on how it was sent.
+              // If it's a JSON string from 'showNotification', we decode it.
+              // If it's from the background handler, check if we can pass the data map directly.
+              final decoded = jsonDecode(response.payload!);
+              if (decoded is Map<String, dynamic>) {
+                _handleNotificationTap(decoded);
+              }
+            } catch (e) {
+              // If payload is not JSON, it might just be the orderId string (fallback)
+              // But ideally we want the full data map.
+              debugPrint("Notification Payload Error: $e");
+            }
           }
         },
       );
@@ -143,16 +156,45 @@ class FcmService {
     );
   }
 
+  // ✅ FIX: Wait for Scope & Trigger Dialog
   void _handleNotificationTap(Map<String, dynamic> data) {
     final orderId = data['orderId'];
     if (orderId != null) {
-      debugPrint("🚀 Navigating to Order: $orderId");
+      debugPrint("🚀 Notification Tapped. Navigating to Order: $orderId");
       final context = navigatorKey.currentContext;
       if (context != null) {
+        // 1. Navigate to Home
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const HomeScreen()),
               (route) => false,
         );
+
+        // 2. TRIGGER THE DIALOG
+        final notifService = Provider.of<OrderNotificationService>(context, listen: false);
+        final scopeService = Provider.of<UserScopeService>(context, listen: false);
+
+        // Check if user data is loaded (Critical for Cold Start)
+        if (scopeService.isLoaded) {
+          notifService.handleFCMOrder(data, scopeService);
+        } else {
+          debugPrint("⏳ Scope not loaded yet (Cold Start). Waiting...");
+
+          // Listener to fire once scope loads
+          void listener() {
+            if (scopeService.isLoaded) {
+              debugPrint("✅ Scope loaded. Triggering delayed dialog.");
+              scopeService.removeListener(listener);
+              notifService.handleFCMOrder(data, scopeService);
+            }
+          }
+
+          scopeService.addListener(listener);
+
+          // Safety timeout (remove listener after 15s if nothing happens)
+          Future.delayed(const Duration(seconds: 15), () {
+            scopeService.removeListener(listener);
+          });
+        }
       }
     }
   }

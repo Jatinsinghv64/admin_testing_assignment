@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:permission_handler/permission_handler.dart'; // 1. IMPORT THIS
 
 import 'Screens/ConnectionUtils.dart';
 import 'Screens/LoginScreen.dart';
@@ -22,47 +23,15 @@ import 'Screens/OfflineScreen.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 // ---------------------------------------------------------------------------
-// ✅ TOP-LEVEL BACKGROUND HANDLER (For Terminated/Background State)
+// ✅ TOP-LEVEL BACKGROUND HANDLER
 // ---------------------------------------------------------------------------
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  final data = message.data;
-  final String? orderId = data['orderId'];
-
-  if (orderId != null) {
-    // ✅ Stable ID Generator (Prevents duplicates)
-    final int notificationId = getStableId(orderId);
-
-    final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-    FlutterLocalNotificationsPlugin();
-
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'high_importance_channel',
-      'New Order Notifications',
-      channelDescription: 'Important order notifications',
-      importance: Importance.max,
-      priority: Priority.high,
-      color: Colors.deepPurple,
-    );
-
-    const NotificationDetails platformDetails = NotificationDetails(
-      android: androidDetails,
-      iOS: DarwinNotificationDetails(presentSound: true),
-    );
-
-    await flutterLocalNotificationsPlugin.show(
-      notificationId,
-      data['title'] ?? 'New Order',
-      data['body'] ?? 'Check your dashboard',
-      platformDetails,
-      payload: orderId,
-    );
-  }
+  debugPrint("Handling a background message: ${message.messageId}");
 }
 
-// ✅ HELPER: Must be top-level for the background handler
+// ✅ HELPER: Consistent ID Generator
 int getStableId(String id) {
   int hash = 5381;
   for (int i = 0; i < id.length; i++) {
@@ -78,7 +47,6 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // ✅ Register Background Handler
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   runApp(const MyApp());
@@ -180,6 +148,14 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  // ✅ App Lifecycle Listener to re-check when user returns from Settings
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkNotificationPermissions();
+    }
+  }
+
   Future<void> _loadScope() async {
     final scopeService = context.read<UserScopeService>();
     final notificationService = context.read<OrderNotificationService>();
@@ -197,11 +173,61 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
         statusService.initialize(scopeService.branchId, restaurantName: restaurantName);
       }
 
-      // ✅ Initialize Notification Services (FCM Only)
+      // 1. Initialize FCM
       notificationService.init(scopeService, navigatorKey);
       await FcmService().init(scopeService.userEmail);
 
+      // 2. CHECK PERMISSIONS & SHOW POPUP
+      await _checkNotificationPermissions();
+
       debugPrint('🎯 SYSTEM READY: FCM-Only Mode Active');
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 🔔 PERMISSION CHECKER LOGIC
+  // -------------------------------------------------------------------------
+  Future<void> _checkNotificationPermissions() async {
+    // Check Status from Firebase (or you can use Permission.notification.status)
+    NotificationSettings settings = await FirebaseMessaging.instance.getNotificationSettings();
+
+    if (settings.authorizationStatus == AuthorizationStatus.denied ||
+        settings.authorizationStatus == AuthorizationStatus.provisional) {
+
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false, // Force user to choose
+          builder: (ctx) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.notifications_off, color: Colors.red),
+                SizedBox(width: 10),
+                Text('Notifications Disabled'),
+              ],
+            ),
+            content: const Text(
+              'This app requires notifications to alert you of new incoming orders.\n\nPlease enable them in settings.',
+              style: TextStyle(fontSize: 16),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx), // User can dismiss if they really want
+                child: const Text('Not Now', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  // Open App Settings
+                  await openAppSettings();
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+                child: const Text('Open Settings'),
+              ),
+            ],
+          ),
+        );
+      }
     }
   }
 
@@ -226,7 +252,6 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
   }
 }
 
-// ... (UserScopeService class remains unchanged from your original file)
 class UserScopeService with ChangeNotifier {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   StreamSubscription? _scopeSubscription;
