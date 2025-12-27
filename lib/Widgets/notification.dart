@@ -99,16 +99,21 @@ class OrderNotificationService with ChangeNotifier {
             scopeService: scopeService,
             playSound: _playSound,
             vibrate: _vibrate,
-            // When closing (for any reason), mark dialog as closed and check queue
             onClose: () {
-              // We delay slightly to let the stack settle if needed, but primarily
-              // we just need to flag it free and check for next order.
               _isDialogOpen = false;
               Future.delayed(const Duration(milliseconds: 300), () {
                 _processOrderQueue(scopeService);
               });
             },
-            onAccept: () => _navigateToOrder(orderId),
+            // --- START OF FIX ---
+            onAccept: () async {
+              // Update status to 'preparing' before navigating
+              await FirebaseFirestore.instance.collection('Orders').doc(orderId).update({
+                'status': 'preparing',
+              });
+              _navigateToOrder(orderId);
+            },
+            // --- END OF FIX ---
             onReject: (reason) async {
               await FirebaseFirestore.instance.collection('Orders').doc(orderId).update({
                 'status': 'cancelled',
@@ -128,13 +133,11 @@ class OrderNotificationService with ChangeNotifier {
           );
         },
       ).then((_) {
-        // Double safety: ensure flag is reset when dialog future completes
         _isDialogOpen = false;
         _processOrderQueue(scopeService);
       });
     }
   }
-
   void _navigateToOrder(String orderId) {
     final context = _navigatorKey?.currentContext;
     if (context != null) {
