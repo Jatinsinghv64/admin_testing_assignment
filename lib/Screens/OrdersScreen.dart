@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
@@ -31,9 +32,14 @@ class _OrdersScreenState extends State<OrdersScreen>
   late TabController _tabController;
   String _selectedStatus = 'all';
   late ScrollController _scrollController;
-  final Map<String, GlobalKey> _orderKeys = {};
-  bool _shouldScrollToOrder = false;
 
+  // Optimization: Cache font to prevent reloading on every print
+  static ByteData? _cachedArabicFont;
+
+  // Optimization: Cache branch data to prevent refetching on every print
+  static final Map<String, Map<String, dynamic>> _branchCache = {};
+
+  bool _shouldHighlightOrder = false;
   final Set<String> _processingOrderIds = {};
 
   String? _orderToScrollTo;
@@ -51,15 +57,15 @@ class _OrdersScreenState extends State<OrdersScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
     _scrollController = ScrollController();
+    _loadFont(); // Preload font
 
     final selectedOrder = OrderSelectionService.getSelectedOrder();
     if (selectedOrder['orderId'] != null) {
       _orderToScrollTo = selectedOrder['orderId'];
       _orderToScrollType = selectedOrder['orderType'];
       _orderToScrollStatus = selectedOrder['status'];
-      _shouldScrollToOrder = true;
+      _shouldHighlightOrder = true;
 
       if (_orderToScrollStatus != null &&
           _getStatusValues().contains(_orderToScrollStatus)) {
@@ -87,14 +93,24 @@ class _OrdersScreenState extends State<OrdersScreen>
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
         setState(() {
-          _shouldScrollToOrder =
+          _shouldHighlightOrder =
               widget.initialOrderId != null || _orderToScrollTo != null;
         });
       }
     });
 
-    _shouldScrollToOrder =
+    _shouldHighlightOrder =
         widget.initialOrderId != null || _orderToScrollTo != null;
+  }
+
+  Future<void> _loadFont() async {
+    if (_cachedArabicFont == null) {
+      try {
+        _cachedArabicFont = await rootBundle.load("assets/fonts/NotoSansArabic-Regular.ttf");
+      } catch (e) {
+        debugPrint("Error pre-loading font: $e");
+      }
+    }
   }
 
   @override
@@ -135,67 +151,84 @@ class _OrdersScreenState extends State<OrdersScreen>
       _processingOrderIds.add(orderId);
     });
 
+    final db = FirebaseFirestore.instance;
+    final orderRef = db.collection('Orders').doc(orderId);
+
     try {
-      final db = FirebaseFirestore.instance;
-      final orderRef = db.collection('Orders').doc(orderId);
-      final WriteBatch batch = db.batch();
+      if (newStatus == 'cancelled') {
+        // ✅ CRITICAL FIX: Use Transaction for Cancellation to prevent race conditions
+        await db.runTransaction((transaction) async {
+          final snapshot = await transaction.get(orderRef);
+          if (!snapshot.exists) throw Exception("Order does not exist!");
 
-      final Map<String, dynamic> updateData = {
-        'status': newStatus,
-      };
+          final data = snapshot.data() as Map<String, dynamic>;
+          if (data['status'] == 'delivered') {
+            throw Exception("Cannot cancel an order that is already delivered!");
+          }
 
-      if (newStatus == 'prepared') {
-        updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
-      } else if (newStatus == 'delivered') {
-        updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
+          // 1. Prepare Order Updates
+          final Map<String, dynamic> updates = {
+            'status': 'cancelled',
+            'timestamps.cancelled': FieldValue.serverTimestamp(),
+            'riderId': FieldValue.delete(), // Remove rider link
+          };
 
-        final orderDoc = await orderRef.get();
-        final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-        final String orderType =
-            (data['Order_type'] as String?)?.toLowerCase() ?? '';
-        final String? riderId =
-        data.containsKey('riderId') ? data['riderId'] as String? : null;
+          if (reason != null) updates['cancellationReason'] = reason;
+          if (mounted) {
+            updates['cancelledBy'] = context.read<UserScopeService>().userEmail;
+          }
 
-        if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
-          final driverRef = db.collection('Drivers').doc(riderId);
-          batch.update(driverRef, {
-            'assignedOrderId': '',
-            'isAvailable': true,
-          });
-        }
-      } else if (newStatus == 'cancelled') {
-        updateData['timestamps.cancelled'] = FieldValue.serverTimestamp();
+          transaction.update(orderRef, updates);
 
-        if (reason != null) {
-          updateData['cancellationReason'] = reason;
-        }
-        if (mounted) {
-          final userEmail = context.read<UserScopeService>().userEmail;
-          updateData['cancelledBy'] = userEmail;
-        }
+          // 2. Handle Rider Cleanup
+          // Check for riderId in the SNAPSHOT (latest data)
+          final String? riderId = data['riderId'];
+          if (riderId != null && riderId.isNotEmpty) {
+            final driverRef = db.collection('Drivers').doc(riderId);
+            transaction.update(driverRef, {
+              'assignedOrderId': '',
+              'isAvailable': true,
+            });
+          }
+        });
 
+        // Cleanup assignment docs separately (safe to fail)
         await RiderAssignmentService.cancelAutoAssignment(orderId);
 
-        final orderDoc = await orderRef.get();
-        final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-        final String? riderId = data['riderId'] as String?;
+      } else {
+        // ✅ Standard Batch Update for other statuses
+        final WriteBatch batch = db.batch();
+        final Map<String, dynamic> updateData = {
+          'status': newStatus,
+        };
 
-        if (riderId != null && riderId.isNotEmpty) {
-          final driverRef = db.collection('Drivers').doc(riderId);
-          batch.update(driverRef, {
-            'assignedOrderId': '',
-            'isAvailable': true,
-          });
-          updateData['riderId'] = FieldValue.delete();
+        if (newStatus == 'prepared') {
+          updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
+        } else if (newStatus == 'delivered') {
+          updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
+
+          // Free up rider
+          final orderDoc = await orderRef.get();
+          final data = orderDoc.data() as Map<String, dynamic>? ?? {};
+          final String orderType = (data['Order_type'] as String?)?.toLowerCase() ?? '';
+          final String? riderId = data['riderId'] as String?;
+
+          if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
+            final driverRef = db.collection('Drivers').doc(riderId);
+            batch.update(driverRef, {
+              'assignedOrderId': '',
+              'isAvailable': true,
+            });
+          }
+        } else if (newStatus == 'pickedUp') {
+          updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
+        } else if (newStatus == 'rider_assigned') {
+          updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
         }
-      } else if (newStatus == 'pickedUp') {
-        updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
-      } else if (newStatus == 'rider_assigned') {
-        updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
-      }
 
-      batch.update(orderRef, updateData);
-      await batch.commit();
+        batch.update(orderRef, updateData);
+        await batch.commit();
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -210,7 +243,7 @@ class _OrdersScreenState extends State<OrdersScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to update order status: $e'),
+            content: Text('Failed to update: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -358,8 +391,6 @@ class _OrdersScreenState extends State<OrdersScreen>
     Color chipColor;
     switch (value) {
       case 'pending':
-        chipColor = Colors.orange;
-        break;
       case 'needs_rider_assignment':
         chipColor = Colors.orange;
         break;
@@ -415,7 +446,7 @@ class _OrdersScreenState extends State<OrdersScreen>
         onSelected: (selected) {
           setState(() {
             _selectedStatus = selected ? value : 'all';
-            _shouldScrollToOrder =
+            _shouldHighlightOrder =
                 widget.initialOrderId != null || _orderToScrollTo != null;
           });
         },
@@ -476,33 +507,6 @@ class _OrdersScreenState extends State<OrdersScreen>
 
         final docs = snapshot.data!.docs;
 
-        if ((widget.initialOrderId != null || _orderToScrollTo != null) &&
-            _shouldScrollToOrder) {
-          _orderKeys.clear();
-          for (var doc in docs) {
-            _orderKeys[doc.id] = GlobalKey();
-          }
-
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            final targetId = widget.initialOrderId ?? _orderToScrollTo;
-            if (_shouldScrollToOrder && targetId != null) {
-              final key = _orderKeys[targetId];
-              if (key != null && key.currentContext != null) {
-                Scrollable.ensureVisible(
-                  key.currentContext!,
-                  duration: const Duration(milliseconds: 500),
-                  curve: Curves.easeInOut,
-                  alignment: 0.1,
-                );
-                setState(() {
-                  _shouldScrollToOrder = false;
-                  _orderToScrollTo = null;
-                });
-              }
-            }
-          });
-        }
-
         return ListView.separated(
           controller: _scrollController,
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -510,11 +514,12 @@ class _OrdersScreenState extends State<OrdersScreen>
           separatorBuilder: (_, __) => const SizedBox(height: 16),
           itemBuilder: (context, index) {
             final orderDoc = docs[index];
-            final isHighlighted = orderDoc.id == widget.initialOrderId ||
-                orderDoc.id == _orderToScrollTo;
+            final isHighlighted = _shouldHighlightOrder &&
+                (orderDoc.id == widget.initialOrderId || orderDoc.id == _orderToScrollTo);
 
             return _OrderCard(
-              key: _orderKeys[orderDoc.id],
+              // ✅ CRITICAL FIX: Use ValueKey to maintain state during list updates
+              key: ValueKey(orderDoc.id),
               order: orderDoc,
               orderType: orderType,
               onStatusChange: updateOrderStatus,
@@ -576,7 +581,6 @@ class _OrderCard extends StatefulWidget {
 }
 
 class _OrderCardState extends State<_OrderCard> {
-  // Local state to handle loading during manual assignment within the card
   bool _isAssigning = false;
 
   Color _getStatusColor(String status) {
@@ -613,12 +617,10 @@ class _OrderCardState extends State<_OrderCard> {
     }
   }
 
-  // ✅ New method for safe Manual Assignment
   Future<void> _assignRiderManually(BuildContext context) async {
     final userScope = context.read<UserScopeService>();
     final currentBranchId = userScope.branchId;
 
-    // 1. Select Rider
     final riderId = await showDialog<String>(
       context: context,
       builder: (context) =>
@@ -628,8 +630,6 @@ class _OrderCardState extends State<_OrderCard> {
     if (riderId != null && riderId.isNotEmpty) {
       setState(() => _isAssigning = true);
 
-      // 2. Use Service for Atomic Transaction
-      // This will automatically cancel any auto-assignment if running
       final bool success = await RiderAssignmentService.manualAssignRider(
         orderId: widget.order.id,
         riderId: riderId,
@@ -638,15 +638,11 @@ class _OrderCardState extends State<_OrderCard> {
 
       if (mounted) {
         setState(() => _isAssigning = false);
-        if (!success) {
-          // Error snackbar is handled by the service, but we can add logic here if needed
-        }
       }
     }
   }
 
   Widget _buildActionButtons(BuildContext context, String status) {
-    // Show spinner if external update processing OR local assignment is happening
     if (widget.isProcessing || _isAssigning) {
       return const SizedBox(
         width: double.infinity,
@@ -726,18 +722,7 @@ class _OrderCardState extends State<_OrderCard> {
           label: const Text('Reprint Receipt'),
           onPressed: () async {
             final rootCtx = navigatorKey.currentState?.context ?? context;
-            final freshDoc = await widget.order.reference.get();
-            final freshData = freshDoc.data() as Map? ?? {};
-            final s = (freshData['status'] as String?)?.toLowerCase() ?? '';
-            if (s == 'cancelled') {
-              ScaffoldMessenger.of(rootCtx).showSnackBar(
-                const SnackBar(
-                    content: Text('Cannot reprint a cancelled order.'),
-                    backgroundColor: Colors.red),
-              );
-              return;
-            }
-            await printReceipt(rootCtx, freshDoc);
+            await printReceipt(rootCtx, widget.order);
           },
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.deepPurple,
@@ -751,36 +736,15 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
-    // --- ORDER TYPE SPECIFIC LOGIC ---
     final orderTypeLower = widget.orderType.toLowerCase();
 
-    if (orderTypeLower == 'pickup') {
+    if (orderTypeLower == 'pickup' || orderTypeLower == 'takeaway' || orderTypeLower == 'dine_in') {
       if (status == 'prepared') {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.task_alt, size: 16),
-            label: const Text('Mark as Delivered'),
-            onPressed: () =>
-                widget.onStatusChange(widget.order.id, 'delivered'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green.shade700,
-              foregroundColor: Colors.white,
-              padding: btnPadding,
-              minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        );
-      }
-    } else if (orderTypeLower == 'takeaway' || orderTypeLower == 'dine_in') {
-      if (status == 'prepared') {
-        buttons.add(
-          ElevatedButton.icon(
-            icon: const Icon(Icons.task_alt, size: 16),
-            label: const Text('Mark as Picked Up'),
-            onPressed: () =>
-                widget.onStatusChange(widget.order.id, 'delivered'),
+            label: const Text('Mark as Completed'),
+            onPressed: () => widget.onStatusChange(widget.order.id, 'delivered'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -793,17 +757,17 @@ class _OrderCardState extends State<_OrderCard> {
         );
       }
     } else if (orderTypeLower == 'delivery') {
-      // ✅ Assign Rider Button (For Prepared or Manual Needed)
-      if ((status == 'prepared' || needsManualAssignment) && !isAutoAssigning) {
+      // ✅ IMPROVEMENT: Allow assigning when preparing too, just in case
+      final bool canAssign = (status == 'prepared' || status == 'preparing' || needsManualAssignment);
+
+      if (canAssign && !isAutoAssigning) {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.delivery_dining, size: 16),
-            label: Text(
-                needsManualAssignment ? 'Assign Manually' : 'Assign Rider'),
+            label: Text(needsManualAssignment ? 'Assign Manually' : 'Assign Rider'),
             onPressed: () => _assignRiderManually(context),
             style: ElevatedButton.styleFrom(
-              backgroundColor:
-              needsManualAssignment ? Colors.orange : Colors.blue,
+              backgroundColor: needsManualAssignment ? Colors.orange : Colors.blue,
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
@@ -819,8 +783,7 @@ class _OrderCardState extends State<_OrderCard> {
           ElevatedButton.icon(
             icon: const Icon(Icons.task_alt, size: 16),
             label: const Text('Mark as Delivered'),
-            onPressed: () =>
-                widget.onStatusChange(widget.order.id, 'delivered'),
+            onPressed: () => widget.onStatusChange(widget.order.id, 'delivered'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -834,18 +797,15 @@ class _OrderCardState extends State<_OrderCard> {
       }
     }
 
-    // --- AUTO-ASSIGN & STOP BUTTON ---
     if (isAutoAssigning) {
       buttons.add(
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Indicator
             ConstrainedBox(
               constraints: const BoxConstraints(minHeight: 40),
               child: Container(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: Colors.blue.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
@@ -871,7 +831,6 @@ class _OrderCardState extends State<_OrderCard> {
               ),
             ),
             const SizedBox(width: 8),
-            // ✅ STOP / OVERRIDE BUTTON
             ElevatedButton.icon(
               icon: const Icon(Icons.stop_circle_outlined, size: 16),
               label: const Text('Override'),
@@ -919,17 +878,13 @@ class _OrderCardState extends State<_OrderCard> {
     );
   }
 
-  // Helper methods
+  // Helper methods for UI building (unchanged logic, just keeping structure)
   String _getStatusDisplayText(String status) {
     switch (status.toLowerCase()) {
-      case 'needs_rider_assignment':
-        return 'NEEDS ASSIGN';
-      case 'rider_assigned':
-        return 'RIDER ASSIGNED';
-      case 'pickedup':
-        return 'PICKED UP';
-      default:
-        return status.toUpperCase();
+      case 'needs_rider_assignment': return 'NEEDS ASSIGN';
+      case 'rider_assigned': return 'RIDER ASSIGNED';
+      case 'pickedup': return 'PICKED UP';
+      default: return status.toUpperCase();
     }
   }
 
@@ -946,10 +901,7 @@ class _OrderCardState extends State<_OrderCard> {
         Icon(icon, color: Colors.deepPurple, size: 18),
         const SizedBox(width: 8),
         Text(title,
-            style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-                color: Colors.deepPurple)),
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.deepPurple)),
       ],
     );
   }
@@ -962,16 +914,8 @@ class _OrderCardState extends State<_OrderCard> {
         children: [
           Icon(icon, size: 16, color: Colors.deepPurple.shade400),
           const SizedBox(width: 10),
-          Expanded(
-              flex: 2,
-              child: Text(label,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w500))),
-          Expanded(
-              flex: 3,
-              child: Text(value,
-                  style:
-                  const TextStyle(fontSize: 13, color: Colors.black87))),
+          Expanded(flex: 2, child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+          Expanded(flex: 3, child: Text(value, style: const TextStyle(fontSize: 13, color: Colors.black87))),
         ],
       ),
     );
@@ -991,22 +935,14 @@ class _OrderCardState extends State<_OrderCard> {
             flex: 5,
             child: Text.rich(TextSpan(
                 text: name,
-                style:
-                const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
                 children: [
-                  TextSpan(
-                      text: ' (x$qty)',
-                      style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.normal,
-                          color: Colors.black54)),
+                  TextSpan(text: ' (x$qty)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.normal, color: Colors.black54)),
                 ])),
           ),
           Expanded(
             flex: 2,
-            child: Text('QAR ${(price * qty).toStringAsFixed(2)}',
-                textAlign: TextAlign.right,
-                style: const TextStyle(fontSize: 13, color: Colors.black)),
+            child: Text('QAR ${(price * qty).toStringAsFixed(2)}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 13, color: Colors.black)),
           ),
         ],
       ),
@@ -1019,16 +955,8 @@ class _OrderCardState extends State<_OrderCard> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: TextStyle(
-                  fontSize: isTotal ? 15 : 13,
-                  fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-                  color: isTotal ? Colors.black : Colors.grey[800])),
-          Text('QAR ${amount.toStringAsFixed(2)}',
-              style: TextStyle(
-                  fontSize: isTotal ? 15 : 13,
-                  fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-                  color: isTotal ? Colors.black : Colors.grey[800])),
+          Text(label, style: TextStyle(fontSize: isTotal ? 15 : 13, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal, color: isTotal ? Colors.black : Colors.grey[800])),
+          Text('QAR ${amount.toStringAsFixed(2)}', style: TextStyle(fontSize: isTotal ? 15 : 13, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal, color: isTotal ? Colors.black : Colors.grey[800])),
         ],
       ),
     );
@@ -1040,8 +968,7 @@ class _OrderCardState extends State<_OrderCard> {
     final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
     final status = data['status']?.toString() ?? 'pending';
     final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
-    final orderNumber = data['dailyOrderNumber']?.toString() ??
-        widget.order.id.substring(0, 6).toUpperCase();
+    final orderNumber = data['dailyOrderNumber']?.toString() ?? widget.order.id.substring(0, 6).toUpperCase();
     final double subtotal = (data['subtotal'] as num? ?? 0.0).toDouble();
     final double deliveryFee = (data['deliveryFee'] as num? ?? 0.0).toDouble();
     final double totalAmount = (data['totalAmount'] as num? ?? 0.0).toDouble();
@@ -1162,24 +1089,6 @@ class _OrderCardState extends State<_OrderCard> {
                                 fontWeight: FontWeight.w500)),
                       ),
                     ],
-                    if (widget.isHighlighted) ...[
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(6),
-                          border:
-                          Border.all(color: Colors.blue.withOpacity(0.3)),
-                        ),
-                        child: Text('Selected Order',
-                            style: TextStyle(
-                                color: Colors.blue.shade700,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold)),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -1233,40 +1142,21 @@ class _OrderCardState extends State<_OrderCard> {
               child: Column(
                 children: [
                   if (widget.orderType == 'delivery') ...[
-                    _buildDetailRow(Icons.person, 'Customer:',
-                        data['customerName'] ?? 'N/A'),
-                    _buildDetailRow(
-                        Icons.phone, 'Phone:', data['customerPhone'] ?? 'N/A'),
-                    _buildDetailRow(Icons.location_on, 'Address:',
-                        '${data['deliveryAddress']?['street'] ?? ''}, ${data['deliveryAddress']?['city'] ?? ''}'),
+                    _buildDetailRow(Icons.person, 'Customer:', data['customerName'] ?? 'N/A'),
+                    _buildDetailRow(Icons.phone, 'Phone:', data['customerPhone'] ?? 'N/A'),
+                    _buildDetailRow(Icons.location_on, 'Address:', '${data['deliveryAddress']?['street'] ?? ''}, ${data['deliveryAddress']?['city'] ?? ''}'),
                     if (data['riderId']?.isNotEmpty == true)
-                      _buildDetailRow(
-                          Icons.delivery_dining, 'Rider:', data['riderId']),
+                      _buildDetailRow(Icons.delivery_dining, 'Rider:', data['riderId']),
                   ],
                   if (widget.orderType == 'pickup') ...[
-                    _buildDetailRow(Icons.store, 'Pickup Branch',
-                        data['branchIds']?.join(', ') ?? 'N/A'),
+                    _buildDetailRow(Icons.store, 'Pickup Branch', data['branchIds']?.join(', ') ?? 'N/A'),
                   ],
                   if (widget.orderType == 'takeaway') ...[
-                    _buildDetailRow(
-                        Icons.directions_car,
-                        'Car Plate:',
-                        (data['carPlateNumber']?.toString().isNotEmpty ?? false)
-                            ? data['carPlateNumber']
-                            : 'N/A'),
-                    if ((data['specialInstructions']
-                        ?.toString()
-                        .isNotEmpty ??
-                        false))
-                      _buildDetailRow(Icons.note, 'Instructions:',
-                          data['specialInstructions']),
+                    _buildDetailRow(Icons.directions_car, 'Car Plate:', (data['carPlateNumber']?.toString().isNotEmpty ?? false) ? data['carPlateNumber'] : 'N/A'),
+                    if ((data['specialInstructions']?.toString().isNotEmpty ?? false))
+                      _buildDetailRow(Icons.note, 'Instructions:', data['specialInstructions']),
                   ] else if (widget.orderType == 'dine_in') ...[
-                    _buildDetailRow(
-                        Icons.table_restaurant,
-                        'Table(s):',
-                        data['tableNumber'] != null
-                            ? (data['tableNumber'] as String)
-                            : 'N/A'),
+                    _buildDetailRow(Icons.table_restaurant, 'Table(s):', data['tableNumber'] != null ? (data['tableNumber'] as String) : 'N/A'),
                   ],
                 ],
               ),
@@ -1538,8 +1428,9 @@ class _CancellationReasonDialogState extends State<CancellationReasonDialog> {
 Future<void> printReceipt(
     BuildContext context, DocumentSnapshot orderDoc) async {
   try {
-    final fontData =
-    await rootBundle.load("assets/fonts/NotoSansArabic-Regular.ttf");
+    // ✅ CRITICAL OPTIMIZATION: Use pre-loaded font
+    final fontData = _OrdersScreenState._cachedArabicFont ??
+        await rootBundle.load("assets/fonts/NotoSansArabic-Regular.ttf");
     final pw.Font arabicFont = pw.Font.ttf(fontData);
 
     await Printing.layoutPdf(
@@ -1551,9 +1442,7 @@ Future<void> printReceipt(
         final List<Map<String, dynamic>> items = rawItems.map((e) {
           final m = Map<String, dynamic>.from(e as Map);
           final name = (m['name'] ?? 'Item').toString();
-
           final nameAr = (m['name_ar'] ?? '').toString();
-
           final qtyRaw = m.containsKey('quantity') ? m['quantity'] : m['qty'];
           final qty = int.tryParse(qtyRaw?.toString() ?? '1') ?? 1;
           final priceRaw = m['price'] ?? m['unitPrice'] ?? m['amount'];
@@ -1561,22 +1450,15 @@ Future<void> printReceipt(
             num n => n.toDouble(),
             _ => double.tryParse(priceRaw?.toString() ?? '0') ?? 0.0,
           };
-
           return {'name': name, 'name_ar': nameAr, 'qty': qty, 'price': price};
         }).toList();
 
         final double subtotal = (order['subtotal'] as num?)?.toDouble() ?? 0.0;
-        final double discount =
-            (order['discountAmount'] as num?)?.toDouble() ?? 0.0;
-        final double totalAmount =
-            (order['totalAmount'] as num?)?.toDouble() ?? 0.0;
-        final double calculatedSubtotal =
-        items.fold(0, (sum, item) => sum + (item['price'] * item['qty']));
-        final double finalSubtotal =
-        subtotal > 0 ? subtotal : calculatedSubtotal;
-
-        final double riderPaymentAmount =
-            (order['riderPaymentAmount'] as num?)?.toDouble() ?? 0.0;
+        final double discount = (order['discountAmount'] as num?)?.toDouble() ?? 0.0;
+        final double totalAmount = (order['totalAmount'] as num?)?.toDouble() ?? 0.0;
+        final double calculatedSubtotal = items.fold(0, (sum, item) => sum + (item['price'] * item['qty']));
+        final double finalSubtotal = subtotal > 0 ? subtotal : calculatedSubtotal;
+        final double riderPaymentAmount = (order['riderPaymentAmount'] as num?)?.toDouble() ?? 0.0;
 
         final DateTime? orderDate = (order['timestamp'] as Timestamp?)?.toDate();
         final String formattedDate = orderDate != null
@@ -1586,13 +1468,11 @@ Future<void> printReceipt(
             ? DateFormat('hh:mm a').format(orderDate)
             : "N/A";
 
-        final String rawOrderType =
-        (order['Order_type'] ?? order['Ordertype'] ?? 'Unknown').toString();
+        final String rawOrderType = (order['Order_type'] ?? order['Ordertype'] ?? 'Unknown').toString();
         final String displayOrderType = rawOrderType
             .replaceAll('_', ' ')
             .split(' ')
-            .map(
-                (w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+            .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
             .join(' ');
 
         final Map<String, String> orderTypeTranslations = {
@@ -1601,30 +1481,24 @@ Future<void> printReceipt(
           'Pickup': 'يستلم',
           'Dine-in': 'تناول الطعام في الداخل',
         };
-        final String displayOrderTypeAr =
-            orderTypeTranslations[displayOrderType] ?? displayOrderType;
+        final String displayOrderTypeAr = orderTypeTranslations[displayOrderType] ?? displayOrderType;
 
         final String dailyOrderNumber = order['dailyOrderNumber']?.toString() ??
             orderDoc.id.substring(0, 6).toUpperCase();
 
-        final String customerName =
-        (order['customerName'] ?? 'Walk-in Customer').toString();
+        final String customerName = (order['customerName'] ?? 'Walk-in Customer').toString();
         final String carPlate = (order['carPlateNumber'] ?? '').toString();
-        final String customerDisplay =
-        rawOrderType.toLowerCase() == 'takeaway' && carPlate.isNotEmpty
+        final String customerDisplay = rawOrderType.toLowerCase() == 'takeaway' && carPlate.isNotEmpty
             ? 'Car Plate: $carPlate'
             : customerName;
-        final String customerDisplayAr =
-        rawOrderType.toLowerCase() == 'takeaway' && carPlate.isNotEmpty
+        final String customerDisplayAr = rawOrderType.toLowerCase() == 'takeaway' && carPlate.isNotEmpty
             ? 'لوحة السيارة: $carPlate'
-            : (customerName == 'Walk-in Customer'
-            ? 'عميل مباشر'
-            : customerName);
+            : (customerName == 'Walk-in Customer' ? 'عميل مباشر' : customerName);
 
         final List<dynamic> branchIds = order['branchIds'] ?? [];
-        String primaryBranchId =
-        branchIds.isNotEmpty ? branchIds.first.toString() : '';
+        String primaryBranchId = branchIds.isNotEmpty ? branchIds.first.toString() : '';
 
+        // ✅ CRITICAL OPTIMIZATION: Cache branch data
         String branchName = "Restaurant Name";
         String branchNameAr = "اسم المطعم";
         String branchPhone = "";
@@ -1634,17 +1508,29 @@ Future<void> printReceipt(
 
         try {
           if (primaryBranchId.isNotEmpty) {
-            final branchSnap = await FirebaseFirestore.instance
-                .collection('Branch')
-                .doc(primaryBranchId)
-                .get();
-            if (branchSnap.exists) {
-              final branchData = branchSnap.data()!;
+            Map<String, dynamic>? branchData;
+
+            // Check cache
+            if (_OrdersScreenState._branchCache.containsKey(primaryBranchId)) {
+              branchData = _OrdersScreenState._branchCache[primaryBranchId];
+            } else {
+              // Fetch and cache
+              final branchSnap = await FirebaseFirestore.instance
+                  .collection('Branch')
+                  .doc(primaryBranchId)
+                  .get();
+              if (branchSnap.exists) {
+                branchData = branchSnap.data();
+                _OrdersScreenState._branchCache[primaryBranchId] = branchData!;
+              }
+            }
+
+            if (branchData != null) {
               branchName = branchData['name'] ?? "Restaurant Name";
               branchNameAr = branchData['name_ar'] ?? branchName;
               branchPhone = branchData['phone'] ?? "";
-              final addressMap =
-                  branchData['address'] as Map<String, dynamic>? ?? {};
+              final addressMap = branchData['address'] as Map<String, dynamic>? ?? {};
+
               final street = addressMap['street'] ?? '';
               final city = addressMap['city'] ?? '';
               branchAddress = (street.isNotEmpty && city.isNotEmpty)
@@ -1665,33 +1551,15 @@ Future<void> printReceipt(
         final pdf = pw.Document();
 
         const pw.TextStyle regular = pw.TextStyle(fontSize: 9);
-        final pw.TextStyle bold =
-        pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
-        final pw.TextStyle small =
-        pw.TextStyle(fontSize: 8, color: PdfColors.grey600);
-        final pw.TextStyle heading = pw.TextStyle(
-            fontSize: 16,
-            fontWeight: pw.FontWeight.bold,
-            color: PdfColors.black);
-        final pw.TextStyle total = pw.TextStyle(
-            fontSize: 12,
-            fontWeight: pw.FontWeight.bold,
-            color: PdfColors.black);
+        final pw.TextStyle bold = pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
+        final pw.TextStyle small = pw.TextStyle(fontSize: 8, color: PdfColors.grey600);
+        final pw.TextStyle heading = pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.black);
+        final pw.TextStyle total = pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.black);
 
-        final pw.TextStyle arRegular =
-        pw.TextStyle(font: arabicFont, fontSize: 9);
-        final pw.TextStyle arBold = pw.TextStyle(
-            font: arabicFont, fontSize: 9, fontWeight: pw.FontWeight.bold);
-        final pw.TextStyle arHeading = pw.TextStyle(
-            font: arabicFont,
-            fontSize: 16,
-            fontWeight: pw.FontWeight.bold,
-            color: PdfColors.black);
-        final pw.TextStyle arTotal = pw.TextStyle(
-            font: arabicFont,
-            fontSize: 12,
-            fontWeight: pw.FontWeight.bold,
-            color: PdfColors.black);
+        final pw.TextStyle arRegular = pw.TextStyle(font: arabicFont, fontSize: 9);
+        final pw.TextStyle arBold = pw.TextStyle(font: arabicFont, fontSize: 9, fontWeight: pw.FontWeight.bold);
+        final pw.TextStyle arHeading = pw.TextStyle(font: arabicFont, fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.black);
+        final pw.TextStyle arTotal = pw.TextStyle(font: arabicFont, fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.black);
 
         String toArabicNumerals(String number) {
           const en = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'];
@@ -2038,7 +1906,7 @@ class _RiderSelectionDialog extends StatelessWidget {
             child: Text(
               'Select Available Rider',
               style: TextStyle(
-                fontSize: 16, // Reduced font size to prevent overflow
+                fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -2104,7 +1972,6 @@ class _RiderSelectionDialog extends StatelessWidget {
                 final driverDoc = drivers[index];
                 final data = driverDoc.data() as Map<String, dynamic>;
                 final String name = data['name'] ?? 'Unnamed Driver';
-                // Fix: Safely convert phone to String to prevent "int not a subtype of String" error
                 final String phone = data['phone']?.toString() ?? 'No phone';
                 final String vehicle = data['vehicle']?['type'] ?? 'No vehicle';
 

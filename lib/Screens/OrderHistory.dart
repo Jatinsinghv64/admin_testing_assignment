@@ -26,13 +26,11 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   @override
   void initState() {
     super.initState();
-    // Use addPostFrameCallback to ensure context is available for Provider
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchOrders();
     });
   }
 
-  // Reset pagination and fetch orders with the current filters
   void _resetAndFetchOrders() {
     setState(() {
       _orders = [];
@@ -52,16 +50,12 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
     try {
       final userScope = Provider.of<UserScopeService>(context, listen: false);
-
       Query query = FirebaseFirestore.instance.collection('Orders');
 
-      // --- Security & Role Filtering ---
-      // If NOT Super Admin, filter strictly by the user's branchId
       if (!userScope.isSuperAdmin) {
         if (userScope.branchId != null) {
           query = query.where('branchIds', arrayContains: userScope.branchId);
         } else {
-          // If a branch admin has no branch ID, they shouldn't see any orders
           setState(() {
             _isLoading = false;
             _hasMore = false;
@@ -70,25 +64,20 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         }
       }
 
-      // --- Status Filtering ---
-      // Only show completed history (Delivered or Cancelled)
       query = query
           .where('status', whereIn: ['delivered', 'cancelled'])
           .orderBy('timestamp', descending: true);
 
-      // --- Date Filtering ---
       if (_startDate != null) {
         query = query.where('timestamp', isGreaterThanOrEqualTo: _startDate);
       }
 
       if (_endDate != null) {
-        // Adjust end date to include the whole day (23:59:59)
         final inclusiveEndDate =
         DateTime(_endDate!.year, _endDate!.month, _endDate!.day, 23, 59, 59);
         query = query.where('timestamp', isLessThanOrEqualTo: inclusiveEndDate);
       }
 
-      // --- Pagination ---
       query = query.limit(_ordersPerPage);
 
       if (_lastDocument != null) {
@@ -223,16 +212,9 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             children: [
               const Icon(Icons.error_outline, color: Colors.red, size: 48),
               const SizedBox(height: 16),
-              Text(
-                _errorMessage,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.red),
-              ),
+              Text(_errorMessage, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
               const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _resetAndFetchOrders,
-                child: const Text('Retry'),
-              ),
+              ElevatedButton(onPressed: _resetAndFetchOrders, child: const Text('Retry')),
             ],
           ),
         ),
@@ -250,10 +232,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           children: [
             Icon(Icons.history, size: 80, color: Colors.grey[300]),
             const SizedBox(height: 16),
-            Text(
-              'No completed orders found',
-              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-            ),
+            Text('No completed orders found', style: TextStyle(fontSize: 18, color: Colors.grey[600])),
           ],
         ),
       );
@@ -264,37 +243,27 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       itemCount: _orders.length + (_hasMore ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == _orders.length) {
-          // Bottom loading indicator or button
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 20),
             child: Center(
               child: _isLoading
                   ? const CircularProgressIndicator()
-                  : ElevatedButton(
-                onPressed: _fetchOrders,
-                child: const Text('Load More'),
-              ),
+                  : ElevatedButton(onPressed: _fetchOrders, child: const Text('Load More')),
             ),
           );
         }
 
         final orderDoc = _orders[index];
-        final data = orderDoc.data() as Map<String, dynamic>;
-
-        return _OrderHistoryItem(data: data, orderId: orderDoc.id);
+        return _OrderHistoryItem(orderDoc: orderDoc);
       },
     );
   }
 }
 
 class _OrderHistoryItem extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final String orderId;
+  final DocumentSnapshot orderDoc;
 
-  const _OrderHistoryItem({
-    required this.data,
-    required this.orderId,
-  });
+  const _OrderHistoryItem({required this.orderDoc});
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
@@ -304,10 +273,18 @@ class _OrderHistoryItem extends StatelessWidget {
     }
   }
 
+  void _showDetails(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => OrderDetailsDialog(orderDoc: orderDoc),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final data = orderDoc.data() as Map<String, dynamic>;
     final status = data['status']?.toString() ?? 'Unknown';
-    final orderNumber = data['dailyOrderNumber']?.toString() ?? orderId.substring(0, 6).toUpperCase();
+    final orderNumber = data['dailyOrderNumber']?.toString() ?? orderDoc.id.substring(0, 6).toUpperCase();
     final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
     final totalAmount = (data['totalAmount'] as num?)?.toDouble() ?? 0.0;
     final customerName = data['customerName']?.toString() ?? 'Guest';
@@ -317,119 +294,308 @@ class _OrderHistoryItem extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Order #$orderNumber',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _getStatusColor(status).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _getStatusColor(status).withOpacity(0.5)),
-                  ),
-                  child: Text(
-                    status.toUpperCase(),
-                    style: TextStyle(
-                      color: _getStatusColor(status),
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(Icons.calendar_today, size: 14, color: Colors.grey[600]),
-                const SizedBox(width: 4),
-                Text(
-                  timestamp != null
-                      ? DateFormat('MMM d, yyyy • h:mm a').format(timestamp)
-                      : 'No Date',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                ),
-              ],
-            ),
-            const Divider(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Customer',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      customerName,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                    ),
-                  ],
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      'Total',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'QAR ${totalAmount.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.deepPurple,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _showDetails(context),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(
-                    orderType.toLowerCase() == 'delivery'
-                        ? Icons.delivery_dining
-                        : Icons.storefront,
-                    size: 16,
-                    color: Colors.grey[700],
-                  ),
-                  const SizedBox(width: 8),
                   Text(
-                    orderType,
-                    style: TextStyle(
-                      color: Colors.grey[800],
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
+                    'Order #$orderNumber',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _getStatusColor(status).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _getStatusColor(status).withOpacity(0.5)),
+                    ),
+                    child: Text(
+                      status.toUpperCase(),
+                      style: TextStyle(
+                        color: _getStatusColor(status),
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.calendar_today, size: 14, color: Colors.grey[600]),
+                  const SizedBox(width: 4),
+                  Text(
+                    timestamp != null
+                        ? DateFormat('MMM d, yyyy • h:mm a').format(timestamp)
+                        : 'No Date',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                  ),
+                ],
+              ),
+              const Divider(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Customer', style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                      const SizedBox(height: 2),
+                      Text(customerName, style: const TextStyle(fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('Total', style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                      const SizedBox(height: 2),
+                      Text(
+                        'QAR ${totalAmount.toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Show quick rejection reason if cancelled
+              if (status.toLowerCase() == 'cancelled' && data['rejectionReason'] != null)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade100),
+                  ),
+                  child: Text(
+                    'Cancelled: ${data['rejectionReason']}',
+                    style: TextStyle(color: Colors.red.shade800, fontSize: 12, fontStyle: FontStyle.italic),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      orderType.toLowerCase() == 'delivery' ? Icons.delivery_dining : Icons.storefront,
+                      size: 16,
+                      color: Colors.grey[700],
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      orderType,
+                      style: TextStyle(color: Colors.grey[800], fontSize: 13, fontWeight: FontWeight.w500),
+                    ),
+                    const Spacer(),
+                    const Text('Tap for details', style: TextStyle(color: Colors.blue, fontSize: 12)),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.arrow_forward_ios, size: 10, color: Colors.blue),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ✅ NEW: Detailed Order Popup for History
+class OrderDetailsDialog extends StatelessWidget {
+  final DocumentSnapshot orderDoc;
+
+  const OrderDetailsDialog({super.key, required this.orderDoc});
+
+  @override
+  Widget build(BuildContext context) {
+    final data = orderDoc.data() as Map<String, dynamic>;
+    final status = data['status']?.toString() ?? 'unknown';
+    final orderNumber = data['dailyOrderNumber']?.toString() ?? '---';
+    final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
+    final double subtotal = (data['subtotal'] as num?)?.toDouble() ?? 0.0;
+    final double deliveryFee = (data['deliveryFee'] as num?)?.toDouble() ?? 0.0;
+    final double totalAmount = (data['totalAmount'] as num?)?.toDouble() ?? 0.0;
+
+    // Cancellation Details
+    final String? rejectionReason = data['rejectionReason'];
+    final String? rejectedBy = data['rejectedBy'];
+    final Timestamp? rejectedAt = data['rejectedAt'];
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Order #$orderNumber',
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.deepPurple),
+                      ),
+                      Text(
+                        DateFormat('MMM d, yyyy • h:mm a').format((data['timestamp'] as Timestamp).toDate()),
+                        style: const TextStyle(color: Colors.grey, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+              ],
             ),
+            const Divider(height: 30),
+
+            // 🛑 CANCELLATION INFO (Only if cancelled)
+            if (status.toLowerCase() == 'cancelled') ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.cancel, color: Colors.red.shade700, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'ORDER CANCELLED',
+                          style: TextStyle(
+                            color: Colors.red.shade900,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (rejectionReason != null)
+                      Text('Reason: $rejectionReason', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    if (rejectedBy != null)
+                      Text('Cancelled by: $rejectedBy', style: const TextStyle(fontSize: 12)),
+                    if (rejectedAt != null)
+                      Text(
+                        'Time: ${DateFormat('h:mm a').format(rejectedAt.toDate())}',
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+
+            // Customer Details
+            _buildSectionTitle('Customer Details', Icons.person),
+            const SizedBox(height: 8),
+            _buildDetailRow('Name', data['customerName'] ?? 'N/A'),
+            _buildDetailRow('Phone', data['customerPhone'] ?? 'N/A'),
+            if (data['Order_type'] == 'delivery')
+              _buildDetailRow('Address', '${data['deliveryAddress']?['street'] ?? ''}, ${data['deliveryAddress']?['city'] ?? ''}'),
+
+            const SizedBox(height: 20),
+
+            // Items
+            _buildSectionTitle('Items', Icons.restaurant_menu),
+            const SizedBox(height: 8),
+            ...items.map((item) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(4)),
+                    child: Text('${item['quantity']}x', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(item['name'] ?? 'Item')),
+                  Text('QAR ${((item['price'] ?? 0) * (item['quantity'] ?? 1)).toStringAsFixed(2)}'),
+                ],
+              ),
+            )),
+
+            const SizedBox(height: 20),
+            const Divider(),
+
+            // Payment Summary
+            _buildSummaryRow('Subtotal', subtotal),
+            if (deliveryFee > 0) _buildSummaryRow('Delivery Fee', deliveryFee),
+            const SizedBox(height: 8),
+            _buildSummaryRow('Total', totalAmount, isBold: true, color: Colors.deepPurple),
+
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close Details'),
+              ),
+            )
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: Colors.grey[600]),
+        const SizedBox(width: 8),
+        Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey[800])),
+      ],
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 80, child: Text('$label:', style: TextStyle(color: Colors.grey[600], fontSize: 13))),
+          Expanded(child: Text(value, style: const TextStyle(fontSize: 14))),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryRow(String label, double amount, {bool isBold = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, fontSize: isBold ? 16 : 14)),
+          Text('QAR ${amount.toStringAsFixed(2)}', style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, fontSize: isBold ? 16 : 14, color: color)),
+        ],
       ),
     );
   }
