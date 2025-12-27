@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection'; // Added for Queue
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,9 @@ class OrderNotificationService with ChangeNotifier {
   static const String _vibrateKey = 'notification_vibrate_enabled';
 
   final AudioPlayer _audioPlayer = AudioPlayer();
+
+  // ✅ ROBUSTNESS: Queue to handle high volume of incoming orders without dropping them
+  final Queue<String> _orderQueue = Queue<String>();
 
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _isDialogOpen = false;
@@ -54,7 +58,7 @@ class OrderNotificationService with ChangeNotifier {
   }
 
   // --------------------------------------------------------------------------
-  // ✅ LOGIC: OPEN DIALOG IMMEDIATELY (Fetch Data Inside)
+  // ✅ LOGIC: QUEUE & PROCESS DIALOGS
   // --------------------------------------------------------------------------
   void handleFCMOrder(Map<String, dynamic> payload, UserScopeService scopeService) {
     if (!scopeService.isLoaded) return;
@@ -62,16 +66,28 @@ class OrderNotificationService with ChangeNotifier {
     final String? orderId = payload['orderId'];
     if (orderId == null) return;
 
-    debugPrint("🔔 UI: Immediate Dialog Trigger for Order: $orderId");
+    debugPrint("🔔 UI: Received Order Notification: $orderId");
 
-    // Don't wait for Firestore. Open the UI instantly.
-    _showRobustOrderDialog(orderId, scopeService);
+    // Add to queue instead of showing immediately
+    _orderQueue.add(orderId);
+
+    // Attempt to process the queue
+    _processOrderQueue(scopeService);
+  }
+
+  void _processOrderQueue(UserScopeService scopeService) {
+    // If a dialog is currently open or queue is empty, do nothing.
+    // The queue will be checked again when the current dialog closes.
+    if (_isDialogOpen || _orderQueue.isEmpty) return;
+
+    final String nextOrderId = _orderQueue.removeFirst();
+    _showRobustOrderDialog(nextOrderId, scopeService);
   }
 
   void _showRobustOrderDialog(String orderId, UserScopeService scopeService) {
     final context = _navigatorKey?.currentContext;
 
-    if (context != null && !_isDialogOpen) {
+    if (context != null) {
       _isDialogOpen = true;
 
       showDialog(
@@ -83,7 +99,15 @@ class OrderNotificationService with ChangeNotifier {
             scopeService: scopeService,
             playSound: _playSound,
             vibrate: _vibrate,
-            onClose: () => _isDialogOpen = false,
+            // When closing (for any reason), mark dialog as closed and check queue
+            onClose: () {
+              // We delay slightly to let the stack settle if needed, but primarily
+              // we just need to flag it free and check for next order.
+              _isDialogOpen = false;
+              Future.delayed(const Duration(milliseconds: 300), () {
+                _processOrderQueue(scopeService);
+              });
+            },
             onAccept: () => _navigateToOrder(orderId),
             onReject: (reason) async {
               await FirebaseFirestore.instance.collection('Orders').doc(orderId).update({
@@ -103,13 +127,19 @@ class OrderNotificationService with ChangeNotifier {
             },
           );
         },
-      ).then((_) => _isDialogOpen = false);
+      ).then((_) {
+        // Double safety: ensure flag is reset when dialog future completes
+        _isDialogOpen = false;
+        _processOrderQueue(scopeService);
+      });
     }
   }
 
   void _navigateToOrder(String orderId) {
     final context = _navigatorKey?.currentContext;
     if (context != null) {
+      // This wipes the history. The dialog is removed by this action.
+      // Therefore, the dialog's `then` block will fire, triggering the next queue item.
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const HomeScreen()),
             (route) => false,
@@ -161,7 +191,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   bool _isAudioPlaying = false;
   bool _isProcessing = false;
 
-  // Safe Getters (Only call these if _orderData != null)
+  // Safe Getters
   String get orderNumber => _orderData?['dailyOrderNumber']?.toString() ?? '---';
   String get customerName => _orderData?['customerName']?.toString() ?? 'Guest';
   String get orderType => _orderData?['Order_type']?.toString() ?? 'Delivery';
@@ -201,8 +231,6 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
-    // 1. Fetch Data Immediately
     _fetchAndVerifyOrder();
   }
 
@@ -223,21 +251,18 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
 
       data['orderId'] = widget.orderId;
 
-      // 2. Authorization Check (Branch Verification)
       if (!_isUserAuthorized(data)) {
         debugPrint("⛔ ACCESS DENIED: User cannot view this order.");
-        if (mounted) Navigator.of(context).pop(); // Silently close
+        if (mounted) Navigator.of(context).pop();
         return;
       }
 
-      // 3. Data Loaded Successfully
       if (mounted) {
         setState(() {
           _orderData = data;
           _isLoading = false;
         });
 
-        // 4. Start Logic
         _initializeCountdown();
         startTimer();
         _startAlarm();
@@ -262,7 +287,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
       return widget.scopeService.branchIds.contains(orderBranchId);
     }
 
-    return false; // No branch ID found -> Secure default
+    return false;
   }
 
   void _handleError(String msg) {
@@ -271,7 +296,6 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
         _isLoading = false;
         _errorMessage = msg;
       });
-      // Optionally auto-close after a delay
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted) Navigator.of(context).pop();
       });
@@ -345,10 +369,11 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     });
   }
 
+  // ✅ FIX: No Navigator.pop() here because onAutoAccept triggers pushAndRemoveUntil
   void _handleAutoAction() {
     _stopAlarm();
     widget.onAutoAccept();
-    if(mounted) Navigator.of(context).pop();
+    // Navigator.of(context).pop(); <-- REMOVED
   }
 
   @override
@@ -356,6 +381,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     _stopAlarm();
     _timer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
+    // Call onClose so the Service knows this dialog is done (and can show the next one)
     widget.onClose();
     super.dispose();
   }
@@ -369,14 +395,15 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     if (reason != null && mounted) {
       setState(() => _isProcessing = true);
       await widget.onReject(reason);
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) Navigator.of(context).pop(); // Keeps pop because reject does NOT navigate away
     }
   }
 
+  // ✅ FIX: No Navigator.pop() here because onAccept triggers pushAndRemoveUntil
   Future<void> _handleAcceptPress() async {
     await _stopAlarm();
     widget.onAccept();
-    if(mounted) Navigator.of(context).pop();
+    // Navigator.of(context).pop(); <-- REMOVED
   }
 
   Color _getHeaderColor() {
@@ -400,9 +427,6 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
         backgroundColor: Colors.white,
         insetPadding: const EdgeInsets.all(16),
         child: _isLoading
-        // -------------------------
-        // 1. LOADING UI (Spinner)
-        // -------------------------
             ? Container(
           padding: const EdgeInsets.all(30),
           child: Column(
@@ -419,9 +443,6 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
             ],
           ),
         )
-        // -------------------------
-        // 2. MAIN ORDER UI
-        // -------------------------
             : Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -591,7 +612,7 @@ class RejectionReasonDialog extends StatefulWidget {
 class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
   String? _selectedReason;
   final TextEditingController _otherReasonController = TextEditingController();
-  final FocusNode _otherFocusNode = FocusNode(); // For auto-focusing
+  final FocusNode _otherFocusNode = FocusNode();
 
   final List<String> _reasons = [
     'Items Out of Stock',
@@ -614,7 +635,6 @@ class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
       _selectedReason = value;
     });
 
-    // Auto-focus if "Other" is selected
     if (value == 'Other') {
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted) FocusScope.of(context).requestFocus(_otherFocusNode);
@@ -639,7 +659,6 @@ class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Header
             Container(
               padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
               decoration: BoxDecoration(
@@ -664,8 +683,6 @@ class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
                 ],
               ),
             ),
-
-            // Body
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -716,7 +733,6 @@ class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
                       );
                     }).toList(),
 
-                    // "Other" Text Field with Animation
                     AnimatedCrossFade(
                       firstChild: const SizedBox(width: double.infinity, height: 0),
                       secondChild: Padding(
@@ -724,7 +740,7 @@ class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
                         child: TextField(
                           controller: _otherReasonController,
                           focusNode: _otherFocusNode,
-                          onChanged: (_) => setState(() {}), // Rebuild to check validity
+                          onChanged: (_) => setState(() {}),
                           decoration: InputDecoration(
                             labelText: 'Specify reason...',
                             hintText: 'e.g. Ingredient missing',
@@ -746,10 +762,7 @@ class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
                 ),
               ),
             ),
-
             const Divider(height: 1),
-
-            // Actions
             Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
