@@ -132,8 +132,8 @@ class _OrdersScreenState extends State<OrdersScreen>
     ];
   }
 
-  // ✅ 3. REMOVED 'BuildContext context' parameter to fix Crash
-  Future<void> updateOrderStatus(String orderId, String newStatus) async {
+  // ✅ 3. UPDATED: Accepts optional 'reason' for cancellation
+  Future<void> updateOrderStatus(String orderId, String newStatus, {String? reason}) async {
     if (!mounted) return;
 
     setState(() {
@@ -170,6 +170,16 @@ class _OrdersScreenState extends State<OrdersScreen>
         }
       } else if (newStatus == 'cancelled') {
         updateData['timestamps.cancelled'] = FieldValue.serverTimestamp();
+
+        // Save the cancellation reason and who cancelled it
+        if (reason != null) {
+          updateData['cancellationReason'] = reason;
+        }
+        if (mounted) {
+          final userEmail = context.read<UserScopeService>().userEmail;
+          updateData['cancelledBy'] = userEmail;
+        }
+
         await RiderAssignmentService.cancelAutoAssignment(orderId);
 
         final orderDoc = await orderRef.get();
@@ -508,7 +518,7 @@ class _OrdersScreenState extends State<OrdersScreen>
               key: _orderKeys[orderDoc.id],
               order: orderDoc,
               orderType: orderType,
-              onStatusChange: updateOrderStatus, // ✅ Passed without context
+              onStatusChange: updateOrderStatus, // ✅ Passed with updated signature
               isHighlighted: isHighlighted,
               isProcessing: _processingOrderIds.contains(orderDoc.id),
             );
@@ -549,8 +559,8 @@ class _OrdersScreenState extends State<OrdersScreen>
 class _OrderCard extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> order;
   final String orderType;
-  // ✅ 5. UPDATED CALLBACK SIGNATURE (No BuildContext)
-  final Function(String, String) onStatusChange;
+  // ✅ 5. UPDATED CALLBACK SIGNATURE (Added optional reason)
+  final Function(String, String, {String? reason}) onStatusChange;
   final bool isHighlighted;
   final bool isProcessing;
 
@@ -574,6 +584,19 @@ class _OrderCard extends StatelessWidget {
       case 'cancelled': return Colors.red;
       case 'needs_rider_assignment': return Colors.orange;
       default: return Colors.grey;
+    }
+  }
+
+  // ✅ New method to show the cancellation dialog
+  Future<void> _handleCancelPress(BuildContext context) async {
+    final String? reason = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => const CancellationReasonDialog(),
+    );
+
+    if (reason != null && reason.isNotEmpty) {
+      // ✅ Call update status with the reason
+      onStatusChange(order.id, 'cancelled', reason: reason);
     }
   }
 
@@ -605,7 +628,7 @@ class _OrderCard extends StatelessWidget {
     const EdgeInsets btnPadding = EdgeInsets.symmetric(horizontal: 14, vertical: 10);
     const Size btnMinSize = Size(0, 40);
 
-    // ✅ 6. UPDATED BUTTON CALLS (Removed 'context' from arguments)
+    // ✅ 6. UPDATED BUTTON CALLS
     if (status == 'pending') {
       buttons.add(
         ElevatedButton.icon(
@@ -753,7 +776,7 @@ class _OrderCard extends StatelessWidget {
         ElevatedButton.icon(
           icon: const Icon(Icons.cancel, size: 16),
           label: const Text('Cancel Order'),
-          onPressed: () => onStatusChange(order.id, 'cancelled'),
+          onPressed: () => _handleCancelPress(context), // ✅ Show dialog first
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.red,
             foregroundColor: Colors.white,
@@ -1064,7 +1087,224 @@ class _OrderCard extends StatelessWidget {
 }
 
 // -----------------------------------------------------------
-// ✅ HELPER FUNCTIONS & CLASSES FROM ORIGINAL FILE (RESTORED)
+// ✅ NEW CANCELLATION REASON DIALOG
+// -----------------------------------------------------------
+
+class CancellationReasonDialog extends StatefulWidget {
+  const CancellationReasonDialog({super.key});
+
+  @override
+  State<CancellationReasonDialog> createState() => _CancellationReasonDialogState();
+}
+
+class _CancellationReasonDialogState extends State<CancellationReasonDialog> {
+  String? _selectedReason;
+  final TextEditingController _otherReasonController = TextEditingController();
+  final FocusNode _otherFocusNode = FocusNode();
+
+  final List<String> _reasons = [
+    'Customer Request',
+    'Out of Stock',
+    'Kitchen Busy / Closed',
+    'Duplicate Order',
+    'Other'
+  ];
+
+  @override
+  void dispose() {
+    _otherReasonController.dispose();
+    _otherFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _onReasonSelected(String? value) {
+    setState(() {
+      _selectedReason = value;
+    });
+
+    if (value == 'Other') {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) FocusScope.of(context).requestFocus(_otherFocusNode);
+      });
+    } else {
+      _otherFocusNode.unfocus();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isOther = _selectedReason == 'Other';
+    final bool isValid = _selectedReason != null &&
+        (!isOther || _otherReasonController.text.trim().isNotEmpty);
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 5,
+      backgroundColor: Colors.white,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Colors.red.shade700),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Cancel Order?',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red.shade900
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Body
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Please select a reason for cancellation:",
+                      style: TextStyle(fontWeight: FontWeight.w500, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 10),
+
+                    ..._reasons.map((reason) {
+                      final bool isSelected = _selectedReason == reason;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: InkWell(
+                          onTap: () => _onReasonSelected(reason),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                  color: isSelected ? Colors.red : Colors.grey.shade300,
+                                  width: isSelected ? 2 : 1
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                              color: isSelected ? Colors.red.shade50 : Colors.white,
+                            ),
+                            child: RadioListTile<String>(
+                              title: Text(
+                                reason,
+                                style: TextStyle(
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                    color: isSelected ? Colors.red.shade900 : Colors.black87
+                                ),
+                              ),
+                              value: reason,
+                              groupValue: _selectedReason,
+                              onChanged: _onReasonSelected,
+                              activeColor: Colors.red,
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+
+                    // "Other" Text Field with Animation
+                    AnimatedCrossFade(
+                      firstChild: const SizedBox(width: double.infinity, height: 0),
+                      secondChild: Padding(
+                        padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
+                        child: TextField(
+                          controller: _otherReasonController,
+                          focusNode: _otherFocusNode,
+                          onChanged: (_) => setState(() {}),
+                          decoration: InputDecoration(
+                            labelText: 'Specify reason...',
+                            hintText: 'e.g. Customer changed mind',
+                            filled: true,
+                            fillColor: Colors.grey.shade50,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Colors.red, width: 2),
+                            ),
+                          ),
+                          maxLines: 2,
+                        ),
+                      ),
+                      crossFadeState: isOther ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                      duration: const Duration(milliseconds: 200),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const Divider(height: 1),
+
+            // Actions
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(null),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        foregroundColor: Colors.grey.shade700,
+                      ),
+                      child: const Text('Keep Order'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: isValid ? () {
+                        String finalReason = _selectedReason!;
+                        if (finalReason == 'Other') {
+                          finalReason = _otherReasonController.text.trim();
+                        }
+                        Navigator.of(context).pop(finalReason);
+                      } : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        disabledBackgroundColor: Colors.red.shade100,
+                      ),
+                      child: const Text('Confirm Cancel'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------
+// ✅ HELPER FUNCTIONS & CLASSES FROM ORIGINAL FILE
 // -----------------------------------------------------------
 
 Future<void> printReceipt(

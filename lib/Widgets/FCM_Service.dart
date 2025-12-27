@@ -91,7 +91,9 @@ class FcmService {
       debugPrint('🔵 FCM Foreground Message: ${message.messageId}');
 
       // A. Show Heads-up Notification (Visual Alert)
-      _showNotification(message);
+      // ❌ DISABLED: Prevent double notification when app is open.
+      // The app will only show the custom dialog.
+      // _showNotification(message);
 
       // B. Trigger In-App Dialog (Interactive Alert)
       final context = navigatorKey.currentContext;
