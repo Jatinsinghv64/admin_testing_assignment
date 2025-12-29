@@ -8,6 +8,7 @@ import 'package:vibration/vibration.dart';
 
 import '../Screens/MainScreen.dart';
 import '../main.dart'; // Imports UserScopeService
+import 'RiderAssignment.dart'; // ✅ IMPORTED RiderAssignmentService
 
 class OrderNotificationService with ChangeNotifier {
   static const String _soundKey = 'notification_sound_enabled';
@@ -16,12 +17,14 @@ class OrderNotificationService with ChangeNotifier {
   final AudioPlayer _audioPlayer = AudioPlayer(); // Service-level player
 
   // ✅ ROBUSTNESS: Queue to handle high volume of incoming orders
-  // Populated by both FCM (fast) and Firestore Listener (reliable backup)
   final Queue<String> _orderQueue = Queue<String>();
   StreamSubscription? _backupSubscription;
 
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _isDialogOpen = false;
+
+  // ✅ FIX 1: Track the currently displayed Order ID to prevent duplicates
+  String? _currentOrderId;
 
   // Preferences
   bool _playSound = true;
@@ -70,10 +73,12 @@ class OrderNotificationService with ChangeNotifier {
     // Safety check for empty branch list
     if (scopeService.branchIds.isEmpty) return;
 
-    // Query all pending orders for this branch
+    debugPrint("🎧 Starting Backup Listener for branches: ${scopeService.branchIds}");
+
+    // ✅ Query 'branchIds' (array) using 'arrayContainsAny'
     _backupSubscription = FirebaseFirestore.instance
         .collection('Orders')
-        .where('branchId', whereIn: scopeService.branchIds)
+        .where('branchIds', arrayContainsAny: scopeService.branchIds)
         .where('status', isEqualTo: 'pending')
         .orderBy('timestamp', descending: false)
         .snapshots()
@@ -81,8 +86,25 @@ class OrderNotificationService with ChangeNotifier {
       for (var change in snapshot.docChanges) {
         if (change.type == DocumentChangeType.added) {
           String orderId = change.doc.id;
-          // Only add if not already in queue to avoid duplicates
-          if (!_orderQueue.contains(orderId)) {
+
+          // ✅ GHOST ORDER PROTECTION (Time check)
+          try {
+            final Timestamp? ts = change.doc['timestamp'] as Timestamp?;
+            if (ts != null) {
+              final DateTime orderTime = ts.toDate();
+              final Duration diff = DateTime.now().difference(orderTime);
+
+              if (diff.inHours > 12) {
+                debugPrint("👻 Ignoring GHOST ORDER (Too Old): $orderId (${diff.inHours} hours ago)");
+                continue; // Skip adding this to the queue
+              }
+            }
+          } catch (e) {
+            debugPrint("⚠️ Date parsing error in listener: $e");
+          }
+
+          // ✅ FIX 1: Check if this order is ALREADY open or ALREADY in queue
+          if (orderId != _currentOrderId && !_orderQueue.contains(orderId)) {
             debugPrint("📥 Backup Listener found pending order: $orderId");
             _orderQueue.add(orderId);
             _processOrderQueue(scopeService);
@@ -103,8 +125,8 @@ class OrderNotificationService with ChangeNotifier {
 
     debugPrint("🔔 UI: Received Order Notification: $orderId");
 
-    // Add to queue if not present (deduplication)
-    if (!_orderQueue.contains(orderId)) {
+    // ✅ FIX 1: Check if this order is ALREADY open or ALREADY in queue
+    if (orderId != _currentOrderId && !_orderQueue.contains(orderId)) {
       _orderQueue.add(orderId);
       _processOrderQueue(scopeService);
     }
@@ -123,6 +145,7 @@ class OrderNotificationService with ChangeNotifier {
 
     if (context != null && context.mounted) {
       _isDialogOpen = true;
+      _currentOrderId = orderId; // ✅ Mark as currently open
 
       showDialog(
         context: context,
@@ -135,6 +158,8 @@ class OrderNotificationService with ChangeNotifier {
             vibrate: _vibrate,
             onClose: () {
               _isDialogOpen = false;
+              _currentOrderId = null; // ✅ Clear currently open
+
               // Small delay to allow UI to settle before next popup
               Future.delayed(const Duration(milliseconds: 300), () {
                 _processOrderQueue(scopeService);
@@ -142,27 +167,31 @@ class OrderNotificationService with ChangeNotifier {
             },
             // --- ACCEPT LOGIC ---
             onAccept: () async {
-              // 4. 🛠️ ROBUSTNESS: Async Error Handling
               try {
+                // ✅ RECORD ADMIN EMAIL ON ACCEPT
+                String acceptedBy = scopeService.userEmail.isNotEmpty ? scopeService.userEmail : 'Admin';
+
                 await FirebaseFirestore.instance.collection('Orders').doc(orderId).update({
                   'status': 'preparing',
+                  'acceptedBy': acceptedBy,
+                  'acceptedAt': FieldValue.serverTimestamp(),
                 });
-
-                // ✅ UX FIX: Removed _navigateToOrder(orderId).
-                // The dialog will simply close via Navigator.pop in the widget.
-
               } catch (e) {
                 debugPrint("❌ Failed to accept order: $e");
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Error accepting order: $e"), backgroundColor: Colors.red),
-                );
-                // Rethrow so the UI knows not to close if it failed (optional)
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Error accepting order: $e"), backgroundColor: Colors.red),
+                  );
+                }
                 throw e;
               }
             },
             // --- REJECT LOGIC ---
             onReject: (reason) async {
               try {
+                // ✅ FIX: Explicitly cancel auto-assignment logic
+                await RiderAssignmentService.cancelAutoAssignment(orderId);
+
                 // 6. Security/Data Integrity
                 String rejectedBy = scopeService.userEmail.isNotEmpty ? scopeService.userEmail : 'Admin';
                 await FirebaseFirestore.instance.collection('Orders').doc(orderId).update({
@@ -173,9 +202,11 @@ class OrderNotificationService with ChangeNotifier {
                 });
               } catch (e) {
                 debugPrint("❌ Failed to reject order: $e");
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Error rejecting order: $e"), backgroundColor: Colors.red),
-                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Error rejecting order: $e"), backgroundColor: Colors.red),
+                  );
+                }
               }
             },
             // --- AUTO-ACCEPT LOGIC ---
@@ -186,11 +217,11 @@ class OrderNotificationService with ChangeNotifier {
                   'status': 'preparing',
                   'autoAccepted': true,
                 });
-                // Note: For auto-accept, we might still want to navigate or just notify.
-                // Keeping it consistent with manual accept (just update status).
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Order Auto-Accepted"), backgroundColor: Colors.orange),
-                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Order Auto-Accepted"), backgroundColor: Colors.orange),
+                  );
+                }
               } catch (e) {
                 debugPrint("❌ Failed to auto-accept order: $e");
               }
@@ -198,17 +229,12 @@ class OrderNotificationService with ChangeNotifier {
           );
         },
       ).then((_) {
-        // Ensure flag is reset when dialog closes
+        // Ensure flag is reset when dialog closes (double safety)
         _isDialogOpen = false;
+        _currentOrderId = null;
         _processOrderQueue(scopeService);
       });
     }
-  }
-
-  // Helper used by other parts of the app, or kept for reference
-  void _navigateToOrder(String orderId) {
-    // This function is no longer called by onAccept to prevent dashboard redirection.
-    // It can be removed if not used elsewhere.
   }
 }
 
@@ -221,7 +247,7 @@ class NewOrderDialog extends StatefulWidget {
   final UserScopeService scopeService;
   final bool playSound;
   final bool vibrate;
-  final Future<void> Function() onAccept; // Changed to Future for await
+  final Future<void> Function() onAccept;
   final Function(String) onReject;
   final VoidCallback onAutoAccept;
   final VoidCallback onClose;
@@ -246,12 +272,12 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   // Data State
   Map<String, dynamic>? _orderData;
   bool _isLoading = true;
-  String? _errorMessage;
+  String? _errorMessage; // If set, we show error UI
 
   // Timer & Audio
   Timer? _timer;
   int _countdown = 60;
-  bool _isStale = false; // New flag for stale orders
+  bool _isStale = false;
 
   final AudioPlayer _player = AudioPlayer();
   bool _isAudioPlaying = false;
@@ -323,6 +349,13 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
         return;
       }
 
+      // ✅ MULTI-ADMIN ROBUSTNESS CHECK
+      if (data['status'] != 'pending') {
+        debugPrint("⚠️ Order ${widget.orderId} is no longer pending (Status: ${data['status']})");
+        _handleError("Order already handled.");
+        return;
+      }
+
       if (mounted) {
         setState(() {
           _orderData = data;
@@ -343,14 +376,17 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   bool _isUserAuthorized(Map<String, dynamic> data) {
     if (widget.scopeService.isSuperAdmin) return true;
 
-    String? orderBranchId = data['branchId'];
-    if (orderBranchId == null && data['branchIds'] is List) {
-      final list = data['branchIds'] as List;
-      if (list.isNotEmpty) orderBranchId = list.first.toString();
+    // Check against array 'branchIds' or legacy 'branchId'
+    List<dynamic> orderBranchIds = [];
+    if (data['branchIds'] is List) {
+      orderBranchIds = data['branchIds'];
+    } else if (data['branchId'] != null) {
+      orderBranchIds = [data['branchId']];
     }
 
-    if (orderBranchId != null) {
-      return widget.scopeService.branchIds.contains(orderBranchId);
+    if (orderBranchIds.isNotEmpty) {
+      // Return true if any of the order's branch IDs match the user's branch IDs
+      return orderBranchIds.any((id) => widget.scopeService.branchIds.contains(id.toString()));
     }
 
     return false;
@@ -359,7 +395,8 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   void _handleError(String msg) {
     if (mounted) {
       setState(() {
-        _isLoading = false;
+        // ✅ FIX 2: Keep isLoading TRUE so we show the simple container, not the blank form
+        _isLoading = true;
         _errorMessage = msg;
       });
       Future.delayed(const Duration(seconds: 3), () {
@@ -368,7 +405,6 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     }
   }
 
-  // 3. 🐛 LOGIC: Handle Stale Orders
   void _initializeCountdown() {
     if (_orderData == null) return;
     try {
@@ -387,7 +423,6 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
         final now = DateTime.now();
         final elapsedSeconds = now.difference(orderTime).inSeconds;
 
-        // If order is older than 5 minutes (300 seconds), mark as stale and don't countdown
         if (elapsedSeconds > 300) {
           _isStale = true;
           _countdown = 0;
@@ -439,10 +474,8 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
         timer.cancel();
 
         if (_isStale) {
-          // If stale, just stop the alarm but force manual action
           _stopAlarm();
         } else {
-          // Only auto-accept if fresh
           _handleAutoAction();
         }
       } else {
@@ -454,22 +487,15 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   void _handleAutoAction() {
     _stopAlarm();
     widget.onAutoAccept();
-    // No pop needed here as auto-accept usually keeps user informed via snackbar,
-    // or you can add Navigator.pop if desired.
     if (mounted) Navigator.of(context).pop();
   }
 
-  // 5. 🔊 Resource Leak: Dispose Audio Player
   @override
   void dispose() {
     _stopAlarm();
     _timer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
-
-    // Dispose player to prevent leaks
     _player.dispose();
-
-    // Call onClose so the Service knows this dialog is done
     widget.onClose();
     super.dispose();
   }
@@ -487,17 +513,13 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     }
   }
 
-  // ✅ UX FIX: Close Dialog on Accept
   Future<void> _handleAcceptPress() async {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
 
     await _stopAlarm();
     try {
-      // Wait for the service to perform the Firestore update
       await widget.onAccept();
-
-      // Close the popup ONLY if successful
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       setState(() => _isProcessing = false);
@@ -524,19 +546,29 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
         elevation: 10,
         backgroundColor: Colors.white,
         insetPadding: const EdgeInsets.all(16),
+
+        // ✅ FIX 2: Check _isLoading (which handles error state now) to prevent blank UI
         child: _isLoading
             ? Container(
           padding: const EdgeInsets.all(30),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const CircularProgressIndicator(),
+              if (_errorMessage == null) const CircularProgressIndicator(),
               const SizedBox(height: 20),
-              const Text("Loading Order...", style: TextStyle(fontWeight: FontWeight.bold)),
+
+              Text(
+                  _errorMessage ?? "Loading Order...",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: _errorMessage != null ? Colors.red : Colors.black
+                  )
+              ),
+
               if (_errorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10.0),
-                  child: Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+                const Padding(
+                  padding: EdgeInsets.only(top: 8.0),
+                  child: Icon(Icons.error_outline, color: Colors.red, size: 30),
                 )
             ],
           ),

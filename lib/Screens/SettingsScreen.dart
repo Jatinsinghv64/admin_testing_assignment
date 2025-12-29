@@ -120,7 +120,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 12),
             ],
-            // ----------------------------------------------
 
             if (userScope.isSuperAdmin && userScope.can(Permissions.canManageStaff))
               buildSettingsCard(
@@ -770,6 +769,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // ✅ FIXED LOGOUT FUNCTION
   void _showLogoutDialog(BuildContext context, AuthService authService) {
     showDialog(
       context: context,
@@ -783,9 +783,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              Navigator.pop(context);
-              context.read<UserScopeService>().clearScope();
+              // 1. Close the Dialog
+              Navigator.of(context).pop();
+
+              // 2. Sign Out from Firebase
               await authService.signOut();
+
+              // 3. Clear the Scope & FORCE NAVIGATE to AuthWrapper
+              // This removes SettingsScreen from the stack instantly,
+              // preventing the "Access Denied" screen from rebuilding.
+              if (context.mounted) {
+                context.read<UserScopeService>().clearScope();
+
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (context) => const AuthWrapper()),
+                      (route) => false,
+                );
+              }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Sign Out'),

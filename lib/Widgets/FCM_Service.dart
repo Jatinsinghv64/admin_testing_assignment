@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../main.dart'; // For navigatorKey, UserScopeService
 import '../Screens/MainScreen.dart'; // For HomeScreen
+import 'Authorization.dart'; // ✅ IMPORT AUTHORIZATION FOR AUTHWRAPPER
 import 'notification.dart';
 
 class FcmService {
@@ -43,16 +44,11 @@ class FcmService {
         onDidReceiveNotificationResponse: (NotificationResponse response) {
           if (response.payload != null) {
             try {
-              // The payload might be a JSON string or just the ID depending on how it was sent.
-              // If it's a JSON string from 'showNotification', we decode it.
-              // If it's from the background handler, check if we can pass the data map directly.
               final decoded = jsonDecode(response.payload!);
               if (decoded is Map<String, dynamic>) {
                 _handleNotificationTap(decoded);
               }
             } catch (e) {
-              // If payload is not JSON, it might just be the orderId string (fallback)
-              // But ideally we want the full data map.
               debugPrint("Notification Payload Error: $e");
             }
           }
@@ -90,12 +86,6 @@ class FcmService {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       debugPrint('🔵 FCM Foreground Message: ${message.messageId}');
 
-      // A. Show Heads-up Notification (Visual Alert)
-      // ❌ DISABLED: Prevent double notification when app is open.
-      // The app will only show the custom dialog.
-      // _showNotification(message);
-
-      // B. Trigger In-App Dialog (Interactive Alert)
       final context = navigatorKey.currentContext;
       if (context != null) {
         final notifService = Provider.of<OrderNotificationService>(context, listen: false);
@@ -123,41 +113,6 @@ class FcmService {
     });
   }
 
-  Future<void> _showNotification(RemoteMessage message) async {
-    final data = message.data;
-    // Check data first because 'notification' object is removed in backend
-    String title = data['title'] ?? message.notification?.title ?? 'New Order';
-    String body = data['body'] ?? message.notification?.body ?? 'You have a new order';
-    final String? orderId = data['orderId'];
-
-    // ✅ Use Stable ID to deduplicate against Background Handler
-    final int notificationId = orderId != null
-        ? getStableId(orderId)
-        : DateTime.now().millisecondsSinceEpoch.remainder(100000);
-
-    const AndroidNotificationDetails androidPlatformChannelSpecifics =
-    AndroidNotificationDetails(
-      'high_importance_channel',
-      'New Order Notifications',
-      channelDescription: 'Important order notifications',
-      importance: Importance.max,
-      priority: Priority.high,
-      showWhen: true,
-      color: Colors.deepPurple,
-      visibility: NotificationVisibility.public,
-    );
-
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidPlatformChannelSpecifics,
-      iOS: DarwinNotificationDetails(presentSound: true),
-    );
-
-    await flutterLocalNotificationsPlugin.show(
-      notificationId, title, body, platformChannelSpecifics,
-      payload: jsonEncode(data),
-    );
-  }
-
   // ✅ FIX: Wait for Scope & Trigger Dialog
   void _handleNotificationTap(Map<String, dynamic> data) {
     final orderId = data['orderId'];
@@ -165,9 +120,10 @@ class FcmService {
       debugPrint("🚀 Notification Tapped. Navigating to Order: $orderId");
       final context = navigatorKey.currentContext;
       if (context != null) {
-        // 1. Navigate to Home
+
+        // 1. Navigate to AuthWrapper (triggers ScopeLoader) instead of HomeScreen
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          MaterialPageRoute(builder: (context) => const AuthWrapper()),
               (route) => false,
         );
 
