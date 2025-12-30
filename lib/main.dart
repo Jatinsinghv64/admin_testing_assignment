@@ -8,7 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:permission_handler/permission_handler.dart'; // 1. IMPORT THIS
+import 'package:permission_handler/permission_handler.dart'; //
 
 import 'Screens/ConnectionUtils.dart';
 import 'Screens/LoginScreen.dart';
@@ -82,6 +82,7 @@ class MyApp extends StatelessWidget {
               fontWeight: FontWeight.bold,
             ),
           ),
+          // ... (rest of the theme config remains the same)
           bottomNavigationBarTheme: const BottomNavigationBarThemeData(
             backgroundColor: Colors.white,
             selectedItemColor: Colors.deepPurple,
@@ -132,6 +133,7 @@ class ScopeLoader extends StatefulWidget {
 }
 
 class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
+  bool _showPermissionBanner = false; // State to toggle the banner
 
   @override
   void initState() {
@@ -148,11 +150,11 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // ✅ App Lifecycle Listener to re-check when user returns from Settings
+  // ✅ App Lifecycle Listener: Re-checks status silently when app resumes
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _checkNotificationPermissions();
+      _checkPermissionsStatusOnly();
     }
   }
 
@@ -177,58 +179,77 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
       notificationService.init(scopeService, navigatorKey);
       await FcmService().init(scopeService.userEmail);
 
-      // 2. CHECK PERMISSIONS & SHOW POPUP
-      await _checkNotificationPermissions();
+      // 2. CHECK PERMISSIONS (Request if needed)
+      await _requestInitialPermissions();
 
       debugPrint('🎯 SYSTEM READY: FCM-Only Mode Active');
     }
   }
 
   // -------------------------------------------------------------------------
-  // 🔔 PERMISSION CHECKER LOGIC
+  // 🔔 PERMISSION LOGIC (Fix for Issue 3.1)
   // -------------------------------------------------------------------------
-  Future<void> _checkNotificationPermissions() async {
-    // Check Status from Firebase (or you can use Permission.notification.status)
-    NotificationSettings settings = await FirebaseMessaging.instance.getNotificationSettings();
 
-    if (settings.authorizationStatus == AuthorizationStatus.denied ||
-        settings.authorizationStatus == AuthorizationStatus.provisional) {
+  /// Requests permissions initially. If denied, sets the banner flag.
+  Future<void> _requestInitialPermissions() async {
+    // We use permission_handler for granular status
+    PermissionStatus status = await Permission.notification.status;
 
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false, // Force user to choose
-          builder: (ctx) => AlertDialog(
-            title: Row(
-              children: [
-                Icon(Icons.notifications_off, color: Colors.red),
-                SizedBox(width: 10),
-                Text('Notifications Disabled'),
-              ],
-            ),
-            content: const Text(
-              'This app requires notifications to alert you of new incoming orders.\n\nPlease enable them in settings.',
-              style: TextStyle(fontSize: 16),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx), // User can dismiss if they really want
-                child: const Text('Not Now', style: TextStyle(color: Colors.grey)),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  Navigator.pop(ctx);
-                  // Open App Settings
-                  await openAppSettings();
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
-                child: const Text('Open Settings'),
-              ),
-            ],
-          ),
-        );
-      }
+    if (status.isGranted) {
+      if (mounted) setState(() => _showPermissionBanner = false);
+      return;
     }
+
+    // If not determined or denied (but not permanently), request it.
+    if (!status.isPermanentlyDenied) {
+      status = await Permission.notification.request();
+    }
+
+    if (mounted) {
+      // Show banner if still not granted
+      setState(() {
+        _showPermissionBanner = !status.isGranted;
+      });
+    }
+  }
+
+  /// Checks status without requesting (prevents loops on Resume)
+  Future<void> _checkPermissionsStatusOnly() async {
+    final status = await Permission.notification.status;
+    if (mounted) {
+      setState(() {
+        _showPermissionBanner = !status.isGranted;
+      });
+    }
+  }
+
+  Widget _buildPermissionBanner() {
+    return Container(
+      color: Colors.orange[50],
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      child: Row(
+        children: [
+          const Icon(Icons.notification_important, color: Colors.orange),
+          const SizedBox(width: 12),
+          Expanded(
+            child: const Text(
+              "Notifications are required to receive orders.",
+              style: TextStyle(fontSize: 13, color: Colors.brown),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () => openAppSettings(),
+            style: TextButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+              visualDensity: VisualDensity.compact,
+            ),
+            child: const Text("Enable"),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -248,10 +269,21 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
         ),
       );
     }
-    return const HomeScreen();
+
+    // Wrap HomeScreen with a Column to show the banner if needed
+    return Scaffold(
+      body: Column(
+        children: [
+          if (_showPermissionBanner)
+            SafeArea(bottom: false, child: _buildPermissionBanner()),
+          const Expanded(child: HomeScreen()),
+        ],
+      ),
+    );
   }
 }
 
+// ... (Rest of UserScopeService remains unchanged) ...
 class UserScopeService with ChangeNotifier {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   StreamSubscription? _scopeSubscription;

@@ -261,7 +261,6 @@ class _CategoriesTabState extends State<_CategoriesTab> {
         final filteredDocs = docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           final name = (data['name'] ?? '').toString().toLowerCase();
-          // Also search by Arabic name if search query is not empty
           final nameAr = (data['name_ar'] ?? '').toString().toLowerCase();
           return name.contains(widget.searchQuery) ||
               nameAr.contains(widget.searchQuery);
@@ -340,7 +339,7 @@ class _CategoriesTabState extends State<_CategoriesTab> {
   }
 
   Future<bool> _confirmDelete(BuildContext context, String itemType) async {
-    final result = await showDialog<bool>(
+    return await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
@@ -370,8 +369,7 @@ class _CategoriesTabState extends State<_CategoriesTab> {
           ),
         ],
       ),
-    );
-    return result ?? false;
+    ) ?? false;
   }
 }
 
@@ -396,7 +394,6 @@ class _CategoryCard extends StatelessWidget {
     final nameAr = data['name_ar'] as String? ?? '';
     final sortOrder = data['sortOrder'] ?? '0';
     final branchIds = List<String>.from(data['branchIds'] ?? []);
-    final branchIdsText = branchIds.isNotEmpty ? branchIds.join(', ') : 'Not assigned';
 
     return Container(
       decoration: BoxDecoration(
@@ -421,7 +418,6 @@ class _CategoryCard extends StatelessWidget {
               // Header Row
               Row(
                 children: [
-                  // Category Image/Icon
                   Container(
                     width: 60,
                     height: 60,
@@ -442,8 +438,6 @@ class _CategoryCard extends StatelessWidget {
                         : Icon(Icons.category_rounded, color: Colors.deepPurple, size: 32),
                   ),
                   const SizedBox(width: 16),
-
-                  // Category Info
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -479,7 +473,6 @@ class _CategoryCard extends StatelessWidget {
                                 ],
                               ),
                             ),
-                            // Status Switch
                             Transform.scale(
                               scale: 0.8,
                               child: Switch(
@@ -517,10 +510,7 @@ class _CategoryCard extends StatelessWidget {
                   ),
                 ],
               ),
-
               const SizedBox(height: 16),
-
-              // Status Badge
               Row(
                 children: [
                   Container(
@@ -554,10 +544,7 @@ class _CategoryCard extends StatelessWidget {
                   ),
                 ],
               ),
-
               const SizedBox(height: 16),
-
-              // Action Buttons
               Row(
                 children: [
                   Expanded(
@@ -639,7 +626,6 @@ class _CategoryCard extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Header with image
               Container(
                 height: 120,
                 decoration: BoxDecoration(
@@ -668,7 +654,6 @@ class _CategoryCard extends StatelessWidget {
                       )
                     else
                       _buildDefaultHeader(),
-                    // Close button
                     Positioned(
                       top: 12,
                       right: 12,
@@ -683,7 +668,6 @@ class _CategoryCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Title overlay
                     Positioned(
                       bottom: 16,
                       left: 20,
@@ -731,15 +715,12 @@ class _CategoryCard extends StatelessWidget {
                   ],
                 ),
               ),
-
-              // Content
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Status indicator
                       Row(
                         children: [
                           Container(
@@ -783,8 +764,6 @@ class _CategoryCard extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 24),
-
-                      // Details sections
                       _buildEnhancedDetailSection(
                         'Configuration',
                         Icons.settings_outlined,
@@ -805,7 +784,6 @@ class _CategoryCard extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 20),
-
                       if (imageUrl?.isNotEmpty == true) ...[
                         _buildEnhancedDetailSection(
                           'Media',
@@ -846,8 +824,6 @@ class _CategoryCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 20),
                       ],
-
-                      // Action buttons
                       Row(
                         children: [
                           Expanded(
@@ -1101,7 +1077,6 @@ class _MenuItemsTabState extends State<_MenuItemsTab> {
         final filteredDocs = docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           final name = (data['name'] ?? '').toString().toLowerCase();
-          // Also search by Arabic name if search query is not empty
           final nameAr = (data['name_ar'] ?? '').toString().toLowerCase();
           return name.contains(widget.searchQuery) ||
               nameAr.contains(widget.searchQuery);
@@ -1180,7 +1155,7 @@ class _MenuItemsTabState extends State<_MenuItemsTab> {
   }
 
   Future<bool> _confirmDelete(BuildContext context, String itemType) async {
-    final result = await showDialog<bool>(
+    return await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
@@ -1210,8 +1185,7 @@ class _MenuItemsTabState extends State<_MenuItemsTab> {
           ),
         ],
       ),
-    );
-    return result ?? false;
+    ) ?? false;
   }
 }
 
@@ -1242,7 +1216,6 @@ class _MenuItemCard extends StatelessWidget {
     final variants = data['variants'] as Map? ?? {};
     final tags = data['tags'] as Map? ?? {};
 
-    // Stock management data
     final outOfStockBranches = List<String>.from(data['outOfStockBranches'] ?? []);
     final userScope = context.read<UserScopeService>();
     final isOutOfStock = userScope.branchId != null &&
@@ -1267,10 +1240,8 @@ class _MenuItemCard extends StatelessWidget {
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
-              // Header Row
               Row(
                 children: [
-                  // Item Image/Icon
                   Container(
                     width: 80,
                     height: 80,
@@ -1299,7 +1270,6 @@ class _MenuItemCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  // Item Info
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1335,7 +1305,6 @@ class _MenuItemCard extends StatelessWidget {
                                 ],
                               ),
                             ),
-                            // Popular indicator
                             if (isPopular)
                               Container(
                                 padding: const EdgeInsets.symmetric(
@@ -1406,16 +1375,13 @@ class _MenuItemCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 16),
-              // Tags Section
               if (variants.isNotEmpty || tags.isNotEmpty) const SizedBox(height: 16),
-              // Combined Variants and Tags Section
               if (variants.isNotEmpty || tags.isNotEmpty)
                 Wrap(
                   spacing: 8.0,
                   runSpacing: 8.0,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    // Variants Badge
                     if (variants.isNotEmpty)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1433,8 +1399,6 @@ class _MenuItemCard extends StatelessWidget {
                           ),
                         ),
                       ),
-
-                    // Tag Chips
                     ...tags.entries
                         .where((e) => e.value == true)
                         .map((entry) {
@@ -1455,8 +1419,6 @@ class _MenuItemCard extends StatelessWidget {
                         ),
                       );
                     }),
-
-                    // Stock Status Badge
                     if (isOutOfStock)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1484,7 +1446,6 @@ class _MenuItemCard extends StatelessWidget {
                   ],
                 ),
               const SizedBox(height: 16),
-              // Status Badge
               Row(
                 children: [
                   Container(
@@ -1523,7 +1484,6 @@ class _MenuItemCard extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  // Availability Switch
                   Transform.scale(
                     scale: 0.8,
                     child: Switch(
@@ -1548,10 +1508,7 @@ class _MenuItemCard extends StatelessWidget {
                   ),
                 ],
               ),
-
               const SizedBox(height: 16),
-
-              // Action Buttons
               Row(
                 children: [
                   Expanded(
@@ -1617,7 +1574,6 @@ class _MenuItemCard extends StatelessWidget {
         ? branchIds.map((id) => id.toString()).join(', ')
         : 'Not assigned';
 
-    // Stock management data
     final outOfStockBranches = List<String>.from(data['outOfStockBranches'] ?? []);
     final userScope = context.read<UserScopeService>();
     final isOutOfStock = userScope.branchId != null &&
@@ -1647,7 +1603,6 @@ class _MenuItemCard extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Header with image
               Container(
                 height: 140,
                 decoration: BoxDecoration(
@@ -1676,7 +1631,6 @@ class _MenuItemCard extends StatelessWidget {
                       )
                     else
                       _buildDefaultMenuHeader(),
-                    // Popular badge
                     if (data['isPopular'] == true)
                       Positioned(
                         top: 16,
@@ -1710,7 +1664,6 @@ class _MenuItemCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                    // Stock status badge
                     if (isOutOfStock)
                       Positioned(
                         top: 16,
@@ -1744,7 +1697,6 @@ class _MenuItemCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                    // Close button
                     Positioned(
                       top: 12,
                       right: 12,
@@ -1759,7 +1711,6 @@ class _MenuItemCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Title and price overlay
                     Positioned(
                       bottom: 0,
                       left: 0,
@@ -1825,14 +1776,12 @@ class _MenuItemCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // Content
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Status indicators
                       Row(
                         children: [
                           Container(
@@ -1876,8 +1825,6 @@ class _MenuItemCard extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 24),
-
-                      // Description
                       if (data['description']?.isNotEmpty == true) ...[
                         Text(
                           data['description'],
@@ -1889,8 +1836,6 @@ class _MenuItemCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 24),
                       ],
-
-                      // Basic Information
                       _buildEnhancedMenuDetailSection(
                         'Basic Information',
                         Icons.info_outline,
@@ -1916,7 +1861,6 @@ class _MenuItemCard extends StatelessWidget {
                                 ? Colors.blue
                                 : Colors.grey,
                           ),
-                          // Stock status
                           _buildEnhancedMenuDetailRow(
                             Icons.inventory_2,
                             'Stock Status',
@@ -1925,7 +1869,6 @@ class _MenuItemCard extends StatelessWidget {
                           ),
                         ],
                       ),
-
                       if (variants.isNotEmpty) ...[
                         const SizedBox(height: 20),
                         _buildEnhancedMenuDetailSection(
@@ -1962,7 +1905,6 @@ class _MenuItemCard extends StatelessWidget {
                           ],
                         ),
                       ],
-
                       if (tags.isNotEmpty) ...[
                         const SizedBox(height: 20),
                         _buildEnhancedMenuDetailSection(
@@ -1997,9 +1939,7 @@ class _MenuItemCard extends StatelessWidget {
                           ],
                         ),
                       ],
-
                       const SizedBox(height: 24),
-                      // Action buttons
                       Row(
                         children: [
                           Expanded(
@@ -2156,18 +2096,14 @@ class _MenuItemCard extends StatelessWidget {
   }
 }
 
-
 extension StringExtension on String {
   String capitalize() {
     return "${this[0].toUpperCase()}${substring(1).toLowerCase()}";
   }
 }
 
-
-
-
 class _CategoryDialog extends StatefulWidget {
-  final DocumentSnapshot? doc; // If doc is provided, it's an edit
+  final DocumentSnapshot? doc;
   const _CategoryDialog({this.doc});
 
   @override
@@ -2177,7 +2113,7 @@ class _CategoryDialog extends StatefulWidget {
 class _CategoryDialogState extends State<_CategoryDialog> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
-  late TextEditingController _nameArController; // ADDED
+  late TextEditingController _nameArController;
   late TextEditingController _imageUrlController;
   late TextEditingController _sortOrderController;
   late bool _isActive;
@@ -2192,7 +2128,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
     final data = widget.doc?.data() as Map<String, dynamic>? ?? {};
 
     _nameController = TextEditingController(text: data['name'] ?? '');
-    _nameArController = TextEditingController(text: data['name_ar'] ?? ''); // ADDED
+    _nameArController = TextEditingController(text: data['name_ar'] ?? '');
     _imageUrlController = TextEditingController(text: data['imageUrl'] ?? '');
     _sortOrderController = TextEditingController(text: (data['sortOrder'] ?? 0).toString());
     _isActive = data['isActive'] ?? true;
@@ -2201,7 +2137,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
 
   Future<void> _saveCategory() async {
     if (!_formKey.currentState!.validate()) return;
-    if (!mounted) return; // ADD THIS CHECK
+    if (!mounted) return;
 
     setState(() => _isLoading = true);
 
@@ -2209,13 +2145,13 @@ class _CategoryDialogState extends State<_CategoryDialog> {
     final db = FirebaseFirestore.instance;
 
     final String name = _nameController.text.trim();
-    final String nameAr = _nameArController.text.trim(); // ADDED
+    final String nameAr = _nameArController.text.trim();
     List<String> branchIdsToSave;
 
     if (userScope.isSuperAdmin) {
       branchIdsToSave = _selectedBranchIds;
       if (branchIdsToSave.isEmpty) {
-        if (!mounted) return; // ADD THIS CHECK
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
               backgroundColor: Colors.red,
@@ -2231,7 +2167,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
 
     final data = {
       'name': name,
-      'name_ar': nameAr, // ADDED
+      'name_ar': nameAr,
       'imageUrl': _imageUrlController.text.trim(),
       'isActive': _isActive,
       'branchIds': branchIdsToSave,
@@ -2245,16 +2181,16 @@ class _CategoryDialogState extends State<_CategoryDialog> {
         await db.collection('menu_categories').add(data);
       }
 
-      if (mounted) { // ADD THIS CHECK
+      if (mounted) {
         _showSuccess('Category ${_isEdit ? 'updated' : 'added'} successfully!');
         Navigator.of(context).pop();
       }
     } catch (e) {
-      if (mounted) { // ADD THIS CHECK
+      if (mounted) {
         _showError('Error saving category: $e');
       }
     } finally {
-      if (mounted) { // ADD THIS CHECK
+      if (mounted) {
         setState(() => _isLoading = false);
       }
     }
@@ -2289,6 +2225,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
       ),
     );
   }
+
   Future<String?> pickAndUploadWebP({
     required BuildContext context,
     required String storageFolder,
@@ -2307,8 +2244,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
 
       if (image == null) return null;
 
-      // Show loading dialog
-      if (!mounted) return null; // ADD THIS CHECK
+      if (!mounted) return null;
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -2323,21 +2259,18 @@ class _CategoryDialogState extends State<_CategoryDialog> {
         ),
       );
 
-      // Convert image to WebP format and upload to Firebase Storage
       final String downloadUrl = await _convertAndUploadImage(
         image.path,
         storageFolder,
       );
 
-      // Close loading dialog
-      if (mounted) { // ADD THIS CHECK
+      if (mounted) {
         Navigator.of(context).pop();
       }
 
       return downloadUrl;
     } catch (e) {
-      // Close loading dialog if there's an error
-      if (mounted) { // ADD THIS CHECK
+      if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2355,21 +2288,14 @@ class _CategoryDialogState extends State<_CategoryDialog> {
       String storageFolder,
       ) async {
     try {
-      // For web, we can't easily convert to WebP, so we'll upload the original image
-      // In a real Flutter web app, you might want to use a different approach
-
       final File imageFile = File(imagePath);
       final String fileName = '${DateTime.now().millisecondsSinceEpoch}_${imageFile.uri.pathSegments.last}';
       final String storagePath = '$storageFolder/$fileName';
 
-      // Upload to Firebase Storage
       final Reference storageRef = FirebaseStorage.instance.ref().child(storagePath);
       final UploadTask uploadTask = storageRef.putFile(imageFile);
 
-      // Wait for upload to complete
       final TaskSnapshot snapshot = await uploadTask;
-
-      // Get download URL
       final String downloadUrl = await snapshot.ref.getDownloadURL();
 
       return downloadUrl;
@@ -2391,10 +2317,6 @@ class _CategoryDialogState extends State<_CategoryDialog> {
       _showSuccess('Image uploaded successfully!');
     }
   }
-
-
-
-
 
   Widget _buildSectionHeader(String title, IconData icon) {
     return Container(
@@ -2437,7 +2359,6 @@ class _CategoryDialogState extends State<_CategoryDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -2457,18 +2378,14 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                   ),
                 ],
               ),
-
               const SizedBox(height: 20),
-
               Form(
                 key: _formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Basic Information Section
                     _buildSectionHeader('Basic Information', Icons.info_outline),
                     const SizedBox(height: 12),
-
                     TextFormField(
                       controller: _nameController,
                       decoration: const InputDecoration(
@@ -2480,8 +2397,6 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                       validator: (val) => val!.isEmpty ? 'Name is required' : null,
                     ),
                     const SizedBox(height: 12),
-
-                    // --- ADDED ARABIC NAME FIELD ---
                     TextFormField(
                       controller: _nameArController,
                       decoration: const InputDecoration(
@@ -2490,12 +2405,10 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                         filled: true,
                         fillColor: Colors.white,
                       ),
-                      textDirection: TextDirection.rtl, // This hints the OS to use an RTL keyboard
+                      textDirection: TextDirection.rtl,
                       keyboardType: TextInputType.text,
                     ),
                     const SizedBox(height: 12),
-                    // --- END OF ADDED FIELD ---
-
                     TextFormField(
                       controller: _sortOrderController,
                       decoration: const InputDecoration(
@@ -2508,11 +2421,8 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                       keyboardType: TextInputType.number,
                     ),
                     const SizedBox(height: 12),
-
-                    // Image Upload Section
                     _buildSectionHeader('Media', Icons.image),
                     const SizedBox(height: 12),
-
                     Row(
                       children: [
                         Expanded(
@@ -2539,14 +2449,8 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 24),
-
-                    // Branch Assignment Section
-                    // Branch Assignment Section
-                    // _buildSectionHeader('wBranch Assignment', Icons.business),
                     const SizedBox(height: 12),
-
                     if (isSuperAdmin)
                       MultiBranchSelector(
                         selectedIds: _selectedBranchIds,
@@ -2590,13 +2494,9 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                           ],
                         ),
                       ),
-
                     const SizedBox(height: 24),
-
-                    // Status Section
                     _buildSectionHeader('Status', Icons.power_settings_new),
                     const SizedBox(height: 12),
-
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -2629,10 +2529,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 24),
-
-              // Actions
               Row(
                 children: [
                   Expanded(
@@ -2683,7 +2580,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
 }
 
 class _MenuItemDialog extends StatefulWidget {
-  final DocumentSnapshot? doc; // If doc is provided, it's an edit
+  final DocumentSnapshot? doc;
   const _MenuItemDialog({this.doc});
 
   @override
@@ -2693,7 +2590,7 @@ class _MenuItemDialog extends StatefulWidget {
 class _MenuItemDialogState extends State<_MenuItemDialog> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
-  late TextEditingController _nameArController; // Was declared but not initialized
+  late TextEditingController _nameArController;
   late TextEditingController _descController;
   late TextEditingController _priceController;
   late TextEditingController _imageUrlController;
@@ -2709,7 +2606,6 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
   late List<String> _selectedBranchIds;
   bool _isLoading = false;
 
-  // Variants management
   final List<Map<String, dynamic>> _variants = [];
   final Map<String, bool> _tags = {
     'Vegan': false,
@@ -2734,9 +2630,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
     final data = widget.doc?.data() as Map<String, dynamic>? ?? {};
 
     _nameController = TextEditingController(text: data['name'] ?? '');
-    // --- THIS LINE WAS MISSING ---
     _nameArController = TextEditingController(text: data['name_ar'] ?? '');
-    // --- END OF FIX ---
     _descController = TextEditingController(text: data['description'] ?? '');
     _priceController = TextEditingController(text: (data['price'] as num?)?.toString() ?? '');
     _imageUrlController = TextEditingController(text: data['imageUrl'] ?? '');
@@ -2751,7 +2645,6 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
     _selectedCategoryId = data['categoryId'];
     _selectedBranchIds = List<String>.from(data['branchIds'] ?? []);
 
-    // Initialize variants
     final variantsData = data['variants'] as Map<String, dynamic>? ?? {};
     _variants.addAll(variantsData.entries.map((entry) => {
       'id': entry.key,
@@ -2759,13 +2652,11 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       'variantprice': (entry.value['variantprice'] as num?)?.toDouble() ?? 0.0,
     }));
 
-    // Initialize tags
     final tagsData = data['tags'] as Map<String, dynamic>? ?? {};
     _tags.forEach((key, value) {
       _tags[key] = tagsData[key] ?? false;
     });
 
-    // FIX: Initialize out of stock status correctly
     final userScope = context.read<UserScopeService>();
     final currentBranch = userScope.branchId;
     final outOfStockBranches = List<String>.from(data['outOfStockBranches'] ?? []);
@@ -2794,28 +2685,6 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       branchIdsToSave = [userScope.branchId!];
     }
 
-    // FIX: Handle out of stock branches - ADD to existing array, don't replace
-    final Map<String, dynamic>? docData = widget.doc?.data() as Map<String, dynamic>?;
-    final List<dynamic>? outOfStockData = docData?['outOfStockBranches'] as List<dynamic>?;
-    final List<String> currentOutOfStockBranches = outOfStockData != null
-        ? outOfStockData.map((e) => e.toString()).toList()
-        : [];
-
-    final List<String> updatedOutOfStockBranches = List.from(currentOutOfStockBranches);
-
-    if (_isOutOfStock) {
-      // Add current branch to out of stock if not already there
-      if (userScope.branchId != null && !updatedOutOfStockBranches.contains(userScope.branchId)) {
-        updatedOutOfStockBranches.add(userScope.branchId!);
-      }
-    } else {
-      // Remove current branch from out of stock if it's there
-      if (userScope.branchId != null) {
-        updatedOutOfStockBranches.remove(userScope.branchId);
-      }
-    }
-
-    // Prepare variants data
     final Map<String, Map<String, dynamic>> variantsMap = {};
     for (var variant in _variants) {
       if (variant['name'].toString().isNotEmpty) {
@@ -2827,9 +2696,12 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
     }
 
     final double? discountedPrice = double.tryParse(_discountedPriceController.text);
+
+    // ✅ CRITICAL FIX: Prepare the base data map
+    // We do NOT include 'outOfStockBranches' here for edits to avoid the race condition.
     final data = {
       'name': _nameController.text.trim(),
-      'name_ar': _nameArController.text.trim(), // ADDED
+      'name_ar': _nameArController.text.trim(),
       'description': _descController.text.trim(),
       'price': double.tryParse(_priceController.text) ?? 0.0,
       'discountedPrice': (discountedPrice != null && discountedPrice > 0) ? discountedPrice : null,
@@ -2840,7 +2712,6 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       'isPopular': _isPopular,
       'categoryId': _selectedCategoryId,
       'branchIds': branchIdsToSave,
-      'outOfStockBranches': updatedOutOfStockBranches, // Use the updated array
       'tags': _tags,
       'variants': variantsMap.isNotEmpty ? variantsMap : null,
       'lastUpdated': FieldValue.serverTimestamp(),
@@ -2848,9 +2719,28 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
 
     try {
       if (_isEdit) {
+        // ✅ CRITICAL FIX: Atomic Stock Updates
+        // If we are editing and have a valid branch context, we add atomic operations
+        // to the update map instead of overwriting the whole array.
+        if (userScope.branchId != null) {
+          if (_isOutOfStock) {
+            data['outOfStockBranches'] = FieldValue.arrayUnion([userScope.branchId]);
+          } else {
+            data['outOfStockBranches'] = FieldValue.arrayRemove([userScope.branchId]);
+          }
+        }
+
         await db.collection('menu_items').doc(widget.doc!.id).update(data);
         _showSuccess('Menu item updated successfully!');
       } else {
+        // For CREATE, we use the list logic because there is no document to race against.
+        // If we are creating as a specific branch admin (and marking it OOS immediately):
+        if (_isOutOfStock && userScope.branchId != null) {
+          data['outOfStockBranches'] = [userScope.branchId!];
+        } else {
+          data['outOfStockBranches'] = [];
+        }
+
         await db.collection('menu_items').add(data);
         _showSuccess('Menu item added successfully!');
       }
@@ -2861,6 +2751,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
+
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2892,6 +2783,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       ),
     );
   }
+
   Future<String?> pickAndUploadWebP({
     required BuildContext context,
     required String storageFolder,
@@ -2910,7 +2802,6 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
 
       if (image == null) return null;
 
-      // Show loading dialog
       if (!mounted) return null;
       showDialog(
         context: context,
@@ -2926,20 +2817,17 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
         ),
       );
 
-      // Upload to Firebase Storage
       final String downloadUrl = await _convertAndUploadImage(
         image.path,
         storageFolder,
       );
 
-      // Close loading dialog
       if (mounted) {
         Navigator.of(context).pop();
       }
 
       return downloadUrl;
     } catch (e) {
-      // Close loading dialog if there's an error
       if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2962,14 +2850,10 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       final String fileName = '${DateTime.now().millisecondsSinceEpoch}_${imageFile.uri.pathSegments.last}';
       final String storagePath = '$storageFolder/$fileName';
 
-      // Upload to Firebase Storage
       final Reference storageRef = FirebaseStorage.instance.ref().child(storagePath);
       final UploadTask uploadTask = storageRef.putFile(imageFile);
 
-      // Wait for upload to complete
       final TaskSnapshot snapshot = await uploadTask;
-
-      // Get download URL
       final String downloadUrl = await snapshot.ref.getDownloadURL();
 
       return downloadUrl;
@@ -3194,7 +3078,6 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -3214,18 +3097,14 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                   ),
                 ],
               ),
-
               const SizedBox(height: 20),
-
               Form(
                 key: _formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Basic Information Section
                     _buildSectionHeader('Basic Information', Icons.info_outline),
                     const SizedBox(height: 12),
-
                     TextFormField(
                       controller: _nameController,
                       decoration: const InputDecoration(
@@ -3237,8 +3116,6 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                       validator: (val) => val!.isEmpty ? 'Name is required' : null,
                     ),
                     const SizedBox(height: 12),
-
-                    // --- ADDED ARABIC NAME FIELD ---
                     TextFormField(
                       controller: _nameArController,
                       decoration: const InputDecoration(
@@ -3247,12 +3124,10 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                         filled: true,
                         fillColor: Colors.white,
                       ),
-                      textDirection: TextDirection.rtl, // This hints the OS to use an RTL keyboard
+                      textDirection: TextDirection.rtl,
                       keyboardType: TextInputType.text,
                     ),
                     const SizedBox(height: 12),
-                    // --- END OF ADDED FIELD ---
-
                     TextFormField(
                       controller: _descController,
                       maxLines: 2,
@@ -3264,7 +3139,6 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                       ),
                     ),
                     const SizedBox(height: 12),
-
                     Row(
                       children: [
                         Expanded(
@@ -3299,7 +3173,6 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                       ],
                     ),
                     const SizedBox(height: 12),
-
                     Row(
                       children: [
                         Expanded(
@@ -3331,25 +3204,17 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 24),
-
-                    // Category Section
                     _buildSectionHeader('Category', Icons.category),
                     const SizedBox(height: 12),
-
                     _CategoryDropdown(
                       selectedId: _selectedCategoryId,
                       userScope: userScope,
                       onChanged: (id) => setState(() => _selectedCategoryId = id),
                     ),
-
                     const SizedBox(height: 24),
-
-                    // Media Section
                     _buildSectionHeader('Media', Icons.image),
                     const SizedBox(height: 12),
-
                     Row(
                       children: [
                         Expanded(
@@ -3376,13 +3241,9 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 24),
-
-                    // Branch Assignment Section
                     _buildSectionHeader('Branch Assignment', Icons.business),
                     const SizedBox(height: 12),
-
                     if (isSuperAdmin)
                       Container(
                         padding: const EdgeInsets.all(16),
@@ -3498,17 +3359,12 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                           ],
                         ),
                       ),
-
                     const SizedBox(height: 24),
-
-                    // Variants Section
                     _buildSectionHeader('Variants', Icons.tune),
                     const SizedBox(height: 12),
-
                     ..._variants.asMap().entries.map((entry) {
                       return _buildVariantField(entry.value, entry.key);
                     }).toList(),
-
                     if (_variants.isEmpty)
                       Container(
                         padding: const EdgeInsets.all(16),
@@ -3524,9 +3380,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                           ),
                         ),
                       ),
-
                     const SizedBox(height: 12),
-
                     ElevatedButton.icon(
                       onPressed: _addVariant,
                       icon: const Icon(Icons.add, size: 18),
@@ -3537,13 +3391,9 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                         minimumSize: const Size(double.infinity, 44),
                       ),
                     ),
-
                     const SizedBox(height: 24),
-
-                    // Tags & Attributes Section
                     _buildSectionHeader('Tags & Attributes', Icons.local_offer),
                     const SizedBox(height: 12),
-
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -3561,8 +3411,6 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                                   (val) => setState(() => _isPopular = val)),
                           _buildToggleRow('Available', _isAvailable, Icons.check_circle,
                                   (val) => setState(() => _isAvailable = val)),
-
-                          // Out of Stock Toggle
                           Container(
                             margin: const EdgeInsets.only(top: 8),
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -3619,10 +3467,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 24),
-
-              // Actions
               Row(
                 children: [
                   Expanded(
