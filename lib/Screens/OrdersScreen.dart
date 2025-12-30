@@ -11,6 +11,14 @@ import 'package:pdf/widgets.dart' as pw;
 import '../Widgets/RiderAssignment.dart';
 import '../main.dart';
 
+// ✅ HELPER: Convert Device/Server Time -> Restaurant Time (UTC+3 for Qatar)
+DateTime getRestaurantTime(DateTime date) {
+  // 1. Convert to UTC to remove device timezone bias
+  DateTime utc = date.toUtc();
+  // 2. Add the Restaurant's Offset (e.g., +3 hours for Qatar/Saudi)
+  return utc.add(const Duration(hours: 3));
+}
+
 class OrdersScreen extends StatefulWidget {
   final String? initialOrderType;
   final String? initialStatus;
@@ -156,7 +164,7 @@ class _OrdersScreenState extends State<OrdersScreen>
 
     try {
       if (newStatus == 'cancelled') {
-        // ✅ CRITICAL FIX: Use Transaction for Cancellation to prevent race conditions
+        // ✅ Transaction for Cancellation
         await db.runTransaction((transaction) async {
           final snapshot = await transaction.get(orderRef);
           if (!snapshot.exists) throw Exception("Order does not exist!");
@@ -181,7 +189,6 @@ class _OrdersScreenState extends State<OrdersScreen>
           transaction.update(orderRef, updates);
 
           // 2. Handle Rider Cleanup
-          // Check for riderId in the SNAPSHOT (latest data)
           final String? riderId = data['riderId'];
           if (riderId != null && riderId.isNotEmpty) {
             final driverRef = db.collection('Drivers').doc(riderId);
@@ -192,11 +199,10 @@ class _OrdersScreenState extends State<OrdersScreen>
           }
         });
 
-        // Cleanup assignment docs separately (safe to fail)
         await RiderAssignmentService.cancelAutoAssignment(orderId);
 
       } else {
-        // ✅ Standard Batch Update for other statuses
+        // ✅ Standard Batch Update
         final WriteBatch batch = db.batch();
         final Map<String, dynamic> updateData = {
           'status': newStatus,
@@ -207,7 +213,7 @@ class _OrdersScreenState extends State<OrdersScreen>
         } else if (newStatus == 'delivered') {
           updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
 
-          // Free up rider
+          // Free up rider (Only if Delivery type)
           final orderDoc = await orderRef.get();
           final data = orderDoc.data() as Map<String, dynamic>? ?? {};
           final String orderType = (data['Order_type'] as String?)?.toLowerCase() ?? '';
@@ -368,6 +374,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                     'Preparing', 'preparing', Icons.restaurant_rounded),
                 _buildEnhancedStatusChip(
                     'Prepared', 'prepared', Icons.done_all_rounded),
+                // Only show relevant status chips for Delivery context usually, but keeping all is safer for Admin
                 _buildEnhancedStatusChip('Needs Assign',
                     'needs_rider_assignment', Icons.person_pin_circle_outlined),
                 _buildEnhancedStatusChip('Rider Assigned', 'rider_assigned',
@@ -518,7 +525,6 @@ class _OrdersScreenState extends State<OrdersScreen>
                 (orderDoc.id == widget.initialOrderId || orderDoc.id == _orderToScrollTo);
 
             return _OrderCard(
-              // ✅ CRITICAL FIX: Use ValueKey to maintain state during list updates
               key: ValueKey(orderDoc.id),
               order: orderDoc,
               orderType: orderType,
@@ -585,24 +591,15 @@ class _OrderCardState extends State<_OrderCard> {
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'pending':
-        return Colors.orange;
-      case 'preparing':
-        return Colors.teal;
-      case 'prepared':
-        return Colors.blueAccent;
-      case 'rider_assigned':
-        return Colors.purple;
-      case 'pickedup':
-        return Colors.deepPurple;
-      case 'delivered':
-        return Colors.green;
-      case 'cancelled':
-        return Colors.red;
-      case 'needs_rider_assignment':
-        return Colors.orange;
-      default:
-        return Colors.grey;
+      case 'pending': return Colors.orange;
+      case 'preparing': return Colors.teal;
+      case 'prepared': return Colors.blueAccent;
+      case 'rider_assigned': return Colors.purple;
+      case 'pickedup': return Colors.deepPurple;
+      case 'delivered': return Colors.green;
+      case 'cancelled': return Colors.red;
+      case 'needs_rider_assignment': return Colors.orange;
+      default: return Colors.grey;
     }
   }
 
@@ -669,14 +666,16 @@ class _OrderCardState extends State<_OrderCard> {
 
     final List<Widget> buttons = [];
     final data = widget.order.data();
-    final bool isAutoAssigning = data.containsKey('autoAssignStarted');
+    final String orderTypeLower = widget.orderType.toLowerCase();
+
+    // ✅ CHECK FOR AUTO ASSIGNMENT (Only visible for Delivery)
+    final bool isAutoAssigning = data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
     final bool needsManualAssignment = status == 'needs_rider_assignment';
 
-    const EdgeInsets btnPadding =
-    EdgeInsets.symmetric(horizontal: 14, vertical: 10);
+    const EdgeInsets btnPadding = EdgeInsets.symmetric(horizontal: 14, vertical: 10);
     const Size btnMinSize = Size(0, 40);
 
-    // --- STATUS TRANSITIONS ---
+    // --- BUTTON GENERATION LOGIC ---
 
     if (status == 'pending') {
       buttons.add(
@@ -689,8 +688,7 @@ class _OrderCardState extends State<_OrderCard> {
             foregroundColor: Colors.white,
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
@@ -707,15 +705,14 @@ class _OrderCardState extends State<_OrderCard> {
             foregroundColor: Colors.white,
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
     }
 
-    final statusLower = status.toLowerCase();
-    if (statusLower != 'pending' && statusLower != 'cancelled') {
+    // --- REPRINT RECEIPT (Always available except cancelled) ---
+    if (status != 'pending' && status != 'cancelled') {
       buttons.add(
         OutlinedButton.icon(
           icon: const Icon(Icons.print, size: 16),
@@ -729,21 +726,32 @@ class _OrderCardState extends State<_OrderCard> {
             side: BorderSide(color: Colors.deepPurple.shade300),
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
     }
 
-    final orderTypeLower = widget.orderType.toLowerCase();
-
+    // --- NON-DELIVERY LOGIC (Pickup, Takeaway, Dine-in) ---
+    // ✅ FIX: Strict separation. No rider assignment code enters here.
     if (orderTypeLower == 'pickup' || orderTypeLower == 'takeaway' || orderTypeLower == 'dine_in') {
       if (status == 'prepared') {
+        String label = 'Mark as Completed';
+        IconData icon = Icons.task_alt;
+
+        if (orderTypeLower == 'dine_in') {
+          label = 'Served to Table';
+          icon = Icons.restaurant_menu;
+        } else if (orderTypeLower == 'pickup' || orderTypeLower == 'takeaway') {
+          label = 'Handed to Customer';
+          icon = Icons.local_mall;
+        }
+
         buttons.add(
           ElevatedButton.icon(
-            icon: const Icon(Icons.task_alt, size: 16),
-            label: const Text('Mark as Completed'),
+            icon: Icon(icon, size: 16),
+            label: Text(label),
+            // ✅ ACTION: Directly move to 'delivered' (Completed state)
             onPressed: () => widget.onStatusChange(widget.order.id, 'delivered'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
@@ -756,8 +764,9 @@ class _OrderCardState extends State<_OrderCard> {
           ),
         );
       }
-    } else if (orderTypeLower == 'delivery') {
-      // ✅ IMPROVEMENT: Allow assigning when preparing too, just in case
+    }
+    // --- DELIVERY LOGIC ---
+    else if (orderTypeLower == 'delivery') {
       final bool canAssign = (status == 'prepared' || status == 'preparing' || needsManualAssignment);
 
       if (canAssign && !isAutoAssigning) {
@@ -795,58 +804,59 @@ class _OrderCardState extends State<_OrderCard> {
           ),
         );
       }
-    }
 
-    if (isAutoAssigning) {
-      buttons.add(
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 40),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation(Colors.blue))),
-                    SizedBox(width: 8),
-                    Text('Auto-assigning...',
-                        style: TextStyle(
-                            color: Colors.blue,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13)),
-                  ],
+      // Auto-assigning UI (Only for Delivery)
+      if (isAutoAssigning) {
+        buttons.add(
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 40),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation(Colors.blue))),
+                      SizedBox(width: 8),
+                      Text('Auto-assigning...',
+                          style: TextStyle(
+                              color: Colors.blue,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13)),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.stop_circle_outlined, size: 16),
-              label: const Text('Override'),
-              onPressed: () => _assignRiderManually(context),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange.shade700,
-                foregroundColor: Colors.white,
-                padding: btnPadding,
-                minimumSize: btnMinSize,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.stop_circle_outlined, size: 16),
+                label: const Text('Override'),
+                onPressed: () => _assignRiderManually(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange.shade700,
+                  foregroundColor: Colors.white,
+                  padding: btnPadding,
+                  minimumSize: btnMinSize,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
               ),
-            ),
-          ],
-        ),
-      );
+            ],
+          ),
+        );
+      }
     }
 
     if (status != 'cancelled' && status != 'delivered') {
@@ -878,7 +888,7 @@ class _OrderCardState extends State<_OrderCard> {
     );
   }
 
-  // Helper methods for UI building (unchanged logic, just keeping structure)
+  // ... helper methods (getStatusDisplayText, etc) ...
   String _getStatusDisplayText(String status) {
     switch (status.toLowerCase()) {
       case 'needs_rider_assignment': return 'NEEDS ASSIGN';
@@ -967,13 +977,19 @@ class _OrderCardState extends State<_OrderCard> {
     final data = widget.order.data();
     final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
     final status = data['status']?.toString() ?? 'pending';
-    final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
+    final String orderTypeLower = widget.orderType.toLowerCase();
+
+    // ✅ TIMEZONE FIX: Use helper instead of raw toDate()
+    final DateTime? rawTimestamp = (data['timestamp'] as Timestamp?)?.toDate();
+    final DateTime? timestamp = rawTimestamp != null ? getRestaurantTime(rawTimestamp) : null;
+
     final orderNumber = data['dailyOrderNumber']?.toString() ?? widget.order.id.substring(0, 6).toUpperCase();
     final double subtotal = (data['subtotal'] as num? ?? 0.0).toDouble();
     final double deliveryFee = (data['deliveryFee'] as num? ?? 0.0).toDouble();
     final double totalAmount = (data['totalAmount'] as num? ?? 0.0).toDouble();
 
-    final bool isAutoAssigning = data.containsKey('autoAssignStarted');
+    // ✅ CHECK FOR AUTO ASSIGNMENT (Only visible for Delivery)
+    final bool isAutoAssigning = data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
     final bool needsManualAssignment = status == 'needs_rider_assignment';
 
     return Container(
@@ -1460,7 +1476,10 @@ Future<void> printReceipt(
         final double finalSubtotal = subtotal > 0 ? subtotal : calculatedSubtotal;
         final double riderPaymentAmount = (order['riderPaymentAmount'] as num?)?.toDouble() ?? 0.0;
 
-        final DateTime? orderDate = (order['timestamp'] as Timestamp?)?.toDate();
+        // ✅ TIMEZONE FIX: Use helper instead of toDate()
+        final DateTime? rawDate = (order['timestamp'] as Timestamp?)?.toDate();
+        final DateTime? orderDate = rawDate != null ? getRestaurantTime(rawDate) : null;
+
         final String formattedDate = orderDate != null
             ? DateFormat('dd/MM/yyyy').format(orderDate)
             : "N/A";

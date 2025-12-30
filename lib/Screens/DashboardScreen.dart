@@ -785,10 +785,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
         updateData['timestamps.cancelled'] = FieldValue.serverTimestamp();
 
         // 🛑 CRITICAL FIX: Stop Auto-Assignment
-        // We must remove the 'autoAssignStarted' flag so background services stop.
         updateData['autoAssignStarted'] = FieldValue.delete();
 
-        // Also cleanup the server-side logic doc just in case
         FirebaseFirestore.instance.collection('rider_assignments').doc(orderId).delete();
 
         if (rejectionReason != null) {
@@ -802,7 +800,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
           updateData['rejectedAt'] = FieldValue.serverTimestamp();
         }
 
-        // Clean up rider assignment if exists
         final orderDoc = await FirebaseFirestore.instance.collection('Orders').doc(orderId).get();
         final data = orderDoc.data() as Map<String, dynamic>? ?? {};
         final String? riderId = data['riderId'] as String?;
@@ -920,7 +917,10 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
 
     final List<Widget> buttons = [];
     final data = widget.order.data() as Map<String, dynamic>? ?? {};
-    final bool isAutoAssigning = data.containsKey('autoAssignStarted');
+    final String orderTypeLower = orderType.toLowerCase();
+
+    // ✅ CRITICAL FIX: Restrict auto-assign visual to Delivery only
+    final bool isAutoAssigning = data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
     final bool needsManualAssignment = status == 'needs_rider_assignment';
 
     const EdgeInsets btnPadding = EdgeInsets.symmetric(horizontal: 14, vertical: 10);
@@ -985,7 +985,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
 
     // --- ORDER-TYPE SPECIFIC ACTIONS ---
-    final orderTypeLower = orderType.toLowerCase();
 
     // PICKUP
     if (orderTypeLower == 'pickup') {
@@ -1060,49 +1059,48 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
           ),
         );
       }
-    }
 
-    // Auto-assigning indicator
-    if (isAutoAssigning) {
-      buttons.add(
-        ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 40),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.blue.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.blue.withOpacity(0.3)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation(Colors.blue),
+      // Auto-assigning indicator (Only for Delivery)
+      if (isAutoAssigning) {
+        buttons.add(
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 40),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue.withOpacity(0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation(Colors.blue),
+                    ),
                   ),
-                ),
-                SizedBox(width: 8),
-                Text(
-                  'Auto-assigning rider...',
-                  style: TextStyle(
-                    color: Colors.blue,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
+                  SizedBox(width: 8),
+                  Text(
+                    'Auto-assigning rider...',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-      );
+        );
+      }
     }
 
-    // --- CANCEL ACTIONS (FIXED) ---
-    // ✅ Fix: Added 'needs_rider_assignment' so you can cancel failed assignments
+    // --- CANCEL ACTIONS ---
     if (status == 'pending' || status == 'preparing' || status == 'needs_rider_assignment') {
       buttons.add(
         ElevatedButton.icon(
@@ -1139,7 +1137,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     );
   }
 
-  // ... [REMAINING UI HELPERS START HERE: _buildSectionHeader, _buildDetailRow, etc.] ...
   Widget _buildSectionHeader(String title, IconData icon) {
     return Row(
       children: [
@@ -1249,14 +1246,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
 
   @override
   Widget build(BuildContext context) {
-    // This calls the build method of the parent which is not possible directly like this
-    // but the Dialog content is rendered in the build() method of _OrderPopupDialogState
-    // ... WAIT: This helper logic should be part of the build() method itself or imported.
-    // Assuming the user's code structure was correct, we just provided the fix.
-    // The previous block _buildActionButtons is the critical fix.
-    // The rest of the UI code is assumed to be handled by the original file.
-    // I will include the dialog's build method to be complete.
-
     final data = widget.order.data() as Map<String, dynamic>? ?? {};
     final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
     final status = data['status']?.toString() ?? 'pending';
@@ -1278,7 +1267,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -1319,13 +1307,15 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
                 decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
                 child: Column(
                   children: [
-                    if (orderType == 'delivery') ...[
+                    if (orderType.toLowerCase() == 'delivery') ...[
                       _buildDetailRow(Icons.person, 'Customer:', data['customerName'] ?? 'N/A'),
                       _buildDetailRow(Icons.phone, 'Phone:', data['customerPhone'] ?? 'N/A'),
                       _buildDetailRow(Icons.location_on, 'Address:', '${data['deliveryAddress']?['street'] ?? ''}, ${data['deliveryAddress']?['city'] ?? ''}'),
                       if (data['riderId']?.isNotEmpty == true) _buildDetailRow(Icons.delivery_dining, 'Rider:', data['riderId']),
-                    ],
-                    // ... other order types ...
+                    ] else ...[
+                      _buildDetailRow(Icons.person, 'Customer:', data['customerName'] ?? 'N/A'),
+                      _buildDetailRow(Icons.phone, 'Phone:', data['customerPhone'] ?? 'N/A'),
+                    ]
                   ],
                 ),
               ),
@@ -1480,7 +1470,6 @@ class _RiderSelectionDialog extends StatelessWidget {
   }
 }
 
-// ✅ 3. NEW: Cancellation Reason Dialog (Included as requested)
 class _CancellationReasonDialog extends StatefulWidget {
   const _CancellationReasonDialog();
 
