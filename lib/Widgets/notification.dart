@@ -341,7 +341,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
 
       if (data['status'] != 'pending') {
         debugPrint("⚠️ Order ${widget.orderId} is no longer pending (Status: ${data['status']})");
-        _handleError("Order already handled.");
+        _handleError("No New Order To handle.");
         return;
       }
 

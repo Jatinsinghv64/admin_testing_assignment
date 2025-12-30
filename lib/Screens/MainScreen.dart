@@ -55,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final userScope = context.watch<UserScopeService>();
     final badgeProvider = context.read<BadgeCountProvider>();
 
+    // 1. INITIALIZATION: Only runs if App starts or Branch changes
     if (_allScreens.isEmpty || userScope.branchId != _lastKnownBranchId) {
       _lastKnownBranchId = userScope.branchId;
 
@@ -115,13 +116,18 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       };
 
-      _buildNavItems();
-
+      // Trigger status check only on fresh load/branch change
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _initializeRestaurantStatus();
         }
       });
+    }
+
+    // 2. PERMISSION CHECK: Runs EVERY time UserScope updates (e.g. Role Change)
+    // ✅ FIX: Moved outside the 'if' block so it updates immediately when role changes.
+    if (_allScreens.isNotEmpty) {
+      _buildNavItems();
     }
   }
 
@@ -401,8 +407,6 @@ class ManualAssignmentBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = context.watch<BadgeCountProvider>().manualAssignmentCount;
-
-    debugPrint('ManualAssignmentBadge building with count: $count');
 
     return Stack(
       clipBehavior: Clip.none,

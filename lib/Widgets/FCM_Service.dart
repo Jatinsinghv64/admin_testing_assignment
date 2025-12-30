@@ -22,7 +22,7 @@ class FcmService {
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
   bool _isInitialized = false;
-  String? _currentEmail; // Track email for cleanup
+  String? _currentEmail;
 
   Future<void> init(String adminEmail) async {
     if (_isInitialized) return;
@@ -64,12 +64,12 @@ class FcmService {
 
       debugPrint('FCM Permission: ${settings.authorizationStatus}');
 
-      // 3. Save Token (MULTI-DEVICE FIX)
+      // 3. Save Token (Strict Subcollection Mode)
       final token = await _fcm.getToken();
       if (token != null && adminEmail.isNotEmpty) {
         await _saveTokenToDatabase(adminEmail, token);
 
-        // Listen for refreshes
+        // Listen for token refreshes
         _fcm.onTokenRefresh.listen((newToken) {
           _saveTokenToDatabase(adminEmail, newToken);
         });
@@ -79,7 +79,7 @@ class FcmService {
       _setupMessageHandlers();
 
       _isInitialized = true;
-      debugPrint("✅ FCM Service: Initialized (Multi-Device Mode)");
+      debugPrint("✅ FCM Service: Initialized (Strict Subcollection Mode)");
     } catch (e) {
       debugPrint("❌ FCM Init error: $e");
     }
@@ -143,10 +143,9 @@ class FcmService {
     }
   }
 
-  // ✅ CORRECTED: Save to 'tokens' subcollection
+  // ✅ STRICT FIX: Save ONLY to Subcollection 'tokens'
   Future<void> _saveTokenToDatabase(String adminEmail, String token) async {
     try {
-      // We use the token itself as the document ID for easy removal later
       await _db
           .collection('staff')
           .doc(adminEmail)
@@ -157,13 +156,13 @@ class FcmService {
         'lastUpdated': FieldValue.serverTimestamp(),
         'platform': defaultTargetPlatform.toString(),
       });
-      debugPrint("✅ FCM Token saved to Subcollection: ${token.substring(0, 6)}...");
+      debugPrint('✅ FCM Token saved to subcollection: ...${token.substring(token.length - 6)}');
     } catch (e) {
       debugPrint('❌ Error saving FCM token: $e');
     }
   }
 
-  // ✅ NEW: Call this from AuthService.signOut()
+  // ✅ NEW: Delete Token on Sign Out
   Future<void> deleteToken() async {
     if (_currentEmail == null) return;
     try {

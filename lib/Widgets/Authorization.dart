@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../Screens/LoginScreen.dart';
 import '../main.dart';
+import 'FCM_Service.dart'; // ✅ Import FCM Service for token cleanup
+
 // Auth Service
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -26,7 +28,21 @@ class AuthService {
     }
   }
 
+  // ✅ UPDATED: Sign Out with Token Cleanup & Safety
   Future<void> signOut() async {
+    try {
+      // 1. Delete the specific device token from Firestore
+      // This prevents the "Shared Device" issue (receiving notifs for the previous user).
+      debugPrint("🚪 Attempting to delete FCM token before sign out...");
+      await FcmService().deleteToken();
+    } catch (e) {
+      // If offline, token deletion might fail. We catch the error
+      // so the user can still sign out locally.
+      debugPrint("⚠️ Error deleting token (likely offline): $e");
+    }
+
+    // 2. Perform Firebase Sign Out
+    // This triggers the userStream, which AuthWrapper listens to.
     await _auth.signOut();
   }
 }
@@ -43,16 +59,25 @@ class AuthWrapper extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.active) {
           final User? user = snapshot.data;
+
+          // ✅ FIX: User is signed out
           if (user == null) {
-            // ✅ **FIX: User is signed out.**
-            // Before showing LoginScreen, clear the scope.
-            // This cancels any active stream listeners.
-            context.read<UserScopeService>().clearScope();
+            // We use addPostFrameCallback to ensure we don't modify the
+            // provider state (notifyListeners) while the widget tree is still building.
+            // This prevents the "Access Denied" glitch and "setState during build" errors.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                context.read<UserScopeService>().clearScope();
+              }
+            });
+
             return const LoginScreen();
           }
-          // User is signed in.
+
+          // User is signed in
           return ScopeLoader(user: user);
         }
+
         return const Scaffold(
           body: Center(child: CircularProgressIndicator()),
         );

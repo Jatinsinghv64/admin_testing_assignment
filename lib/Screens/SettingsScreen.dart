@@ -1,12 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:vibration/vibration.dart';
-
 import '../Widgets/AccessDeniedWidget.dart';
 import '../Widgets/Authorization.dart';
 import '../Widgets/Permissions.dart';
@@ -17,7 +13,6 @@ import 'AnalyticsScreen.dart';
 import 'BranchManagement.dart';
 import 'CouponsScreen.dart';
 import 'OrderHistory.dart';
-import 'OrderHistoryScreen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -922,6 +917,12 @@ class _BranchSettingItem extends StatelessWidget {
   }
 }
 
+
+
+// -----------------------------------------------------------------------------
+// IMPROVED STAFF MANAGEMENT SCREEN (Bug Fixes & Edge Cases)
+// -----------------------------------------------------------------------------
+
 class StaffManagementScreen extends StatefulWidget {
   const StaffManagementScreen({super.key});
 
@@ -936,16 +937,12 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
 
-    // DOUBLE SECURITY CHECK: Only allow superadmin with canManageStaff permission
+    // 🔒 SECURITY: Only Super Admin with permission can access
     if (!userScope.isSuperAdmin || !userScope.can(Permissions.canManageStaff)) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('Manage Staff'),
-          backgroundColor: Colors.white,
-          elevation: 0,
-        ),
+        appBar: AppBar(title: const Text('Access Denied')),
         body: const Center(
-          child: Text('Access Denied - Super Admin privileges required'),
+          child: Text('❌ You do not have permission to manage staff.'),
         ),
       );
     }
@@ -969,6 +966,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: IconButton(
+              tooltip: 'Add New Staff',
               icon: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
@@ -977,7 +975,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
                 ),
                 child: const Icon(Icons.add, color: Colors.deepPurple),
               ),
-              onPressed: _showAddStaffDialog,
+              onPressed: () => _showAddStaffDialog(userScope.userEmail),
             ),
           ),
         ],
@@ -994,26 +992,10 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
           }
 
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.people_outline, size: 80, color: Colors.grey[400]),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No staff members found',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.grey[600],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Add your first staff member',
-                    style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-                  ),
-                ],
+            return const Center(
+              child: Text(
+                'No staff members found',
+                style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
             );
           }
@@ -1027,10 +1009,14 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
               final staff = staffMembers[index];
               final data = staff.data() as Map<String, dynamic>;
 
+              // Identify if this card belongs to the currently logged-in user
+              final isSelf = staff.id == userScope.userEmail;
+
               return _StaffCard(
                 staffId: staff.id,
                 data: data,
-                onEdit: () => _showEditStaffDialog(staff.id, data),
+                isSelf: isSelf,
+                onEdit: () => _showEditStaffDialog(staff.id, data, isSelf),
               );
             },
           );
@@ -1039,44 +1025,62 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
     );
   }
 
-  void _showAddStaffDialog() {
+  void _showAddStaffDialog(String currentUserEmail) {
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => _StaffEditDialog(
         isEditing: false,
+        isSelf: false, // Creating new user is never "self"
         onSave: (staffData) => _addStaffMember(staffData),
       ),
     );
   }
 
-  void _showEditStaffDialog(String staffId, Map<String, dynamic> currentData) {
+  void _showEditStaffDialog(String staffId, Map<String, dynamic> currentData, bool isSelf) {
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => _StaffEditDialog(
         isEditing: true,
+        isSelf: isSelf, // Pass self flag to disable dangerous fields
         currentData: currentData,
         onSave: (staffData) => _updateStaffMember(staffId, staffData),
       ),
     );
   }
 
+  // ✅ EDGE CASE: Check existence & Initialize FCM fields
   Future<void> _addStaffMember(Map<String, dynamic> staffData) async {
+    final String email = staffData['email'];
+
     try {
-      await _db.collection('staff').doc(staffData['email']).set({
+      // 1. Check if user already exists
+      final docRef = _db.collection('staff').doc(email);
+      final docSnapshot = await docRef.get();
+
+      if (docSnapshot.exists) {
+        if (mounted) {
+          _showSnackBar('❌ User with email $email already exists.', isError: true);
+        }
+        return;
+      }
+
+      // 2. Create User with FCM Initialization
+      await docRef.set({
         ...staffData,
         'isActive': true,
-        'fcmTokenUpdated': FieldValue.serverTimestamp(),
+        'createdAt': FieldValue.serverTimestamp(),
+        'fcmToken': null,
+        'fcmTokenUpdated': null,
       });
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Staff member added successfully')),
-        );
+        _showSnackBar('✅ Staff member added successfully');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding staff: $e')),
-        );
+        _showSnackBar('Error adding staff: $e', isError: true);
       }
     }
   }
@@ -1084,26 +1088,24 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
   Future<void> _updateStaffMember(String staffId, Map<String, dynamic> staffData) async {
     try {
       final userScope = context.read<UserScopeService>();
-      final currentUserEmail = userScope.userEmail;
+      final isUpdatingSelf = staffId == userScope.userEmail;
 
-      final bool isUpdatingSelf = staffId == currentUserEmail;
-
-      await _db.collection('staff').doc(staffId).update(staffData);
+      await _db.collection('staff').doc(staffId).update({
+        ...staffData,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Staff member updated successfully')),
-        );
+        _showSnackBar('✅ Staff member updated successfully');
       }
 
+      // If user updated their own permissions, reload scope immediately
       if (isUpdatingSelf) {
         _reloadCurrentUserScope();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating staff: $e')),
-        );
+        _showSnackBar('Error updating staff: $e', isError: true);
       }
     }
   }
@@ -1114,33 +1116,18 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
     final currentUser = authService.currentUser;
 
     if (currentUser != null) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const AlertDialog(
-          content: Row(
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Text('Reloading permissions...'),
-            ],
-          ),
-        ),
-      );
-
       await userScope.clearScope();
       await userScope.loadUserScope(currentUser, authService);
-
-      if (mounted) {
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Permissions updated. App refreshed.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
     }
+  }
+
+  void _showSnackBar(String message, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+      ),
+    );
   }
 }
 
@@ -1148,11 +1135,13 @@ class _StaffCard extends StatelessWidget {
   final String staffId;
   final Map<String, dynamic> data;
   final VoidCallback onEdit;
+  final bool isSelf;
 
   const _StaffCard({
     required this.staffId,
     required this.data,
     required this.onEdit,
+    required this.isSelf,
   });
 
   @override
@@ -1162,16 +1151,13 @@ class _StaffCard extends StatelessWidget {
     final String role = data['role'] ?? 'No Role';
     final bool isActive = data['isActive'] ?? false;
     final List<dynamic> branchIds = data['branchIds'] ?? [];
-    final Map<String, dynamic> permissions = data['permissions'] ?? {};
-
-    // Count enabled permissions
-    int enabledPermissions = permissions.values.where((v) => v == true).length;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isSelf ? Colors.deepPurple.withOpacity(0.03) : Colors.white,
         borderRadius: BorderRadius.circular(20),
+        border: isSelf ? Border.all(color: Colors.deepPurple.withOpacity(0.3)) : null,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -1183,28 +1169,23 @@ class _StaffCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 // Avatar
                 Container(
-                  width: 60,
-                  height: 60,
+                  width: 50,
+                  height: 50,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.deepPurple, Colors.deepPurple.shade300],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(16),
+                    color: isSelf ? Colors.deepPurple : Colors.grey[300],
+                    borderRadius: BorderRadius.circular(15),
                   ),
                   child: Center(
                     child: Text(
                       name.isNotEmpty ? name[0].toUpperCase() : '?',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
+                      style: TextStyle(
+                        color: isSelf ? Colors.white : Colors.grey[700],
+                        fontSize: 20,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -1212,98 +1193,87 @@ class _StaffCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 16),
 
-                // Name and Email
+                // Info
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        name.isEmpty ? 'Unnamed Staff' : name,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
                       Row(
                         children: [
-                          Icon(Icons.email_outlined, size: 14, color: Colors.grey[600]),
-                          const SizedBox(width: 4),
-                          Expanded(
+                          Flexible(
                             child: Text(
-                              email,
-                              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                              name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          if (isSelf)
+                            Container(
+                              margin: const EdgeInsets.only(left: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.deepPurple,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'YOU',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
                         ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        email,
+                        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
 
                 // Edit Button
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.deepPurple.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.edit, color: Colors.deepPurple, size: 20),
-                    onPressed: onEdit,
-                  ),
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined, color: Colors.deepPurple),
+                  onPressed: onEdit,
                 ),
               ],
             ),
-
             const SizedBox(height: 16),
-            const Divider(height: 1),
-            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 8),
 
-            // Role and Status Row
+            // ✅ FIXED OVERFLOW: Use Expanded here
             Row(
               children: [
                 Expanded(
-                  child: _InfoChip(
-                    icon: Icons.badge_outlined,
-                    label: 'Role',
-                    value: _formatRole(role),
+                  child: _StatusBadge(
+                    label: _formatRole(role),
                     color: Colors.blue,
+                    icon: Icons.security,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
-                  child: _InfoChip(
-                    icon: isActive ? Icons.check_circle_outline : Icons.cancel_outlined,
-                    label: 'Status',
-                    value: isActive ? 'Active' : 'Inactive',
+                  child: _StatusBadge(
+                    label: isActive ? 'Active' : 'Inactive',
                     color: isActive ? Colors.green : Colors.red,
+                    icon: isActive ? Icons.check_circle : Icons.cancel,
                   ),
                 ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            // Branches and Permissions Row
-            Row(
-              children: [
+                const SizedBox(width: 8),
                 Expanded(
-                  child: _InfoChip(
-                    icon: Icons.business_outlined,
-                    label: 'Branches',
-                    value: '${branchIds.length}',
+                  child: _StatusBadge(
+                    label: '${branchIds.length} Branches',
                     color: Colors.orange,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _InfoChip(
-                    icon: Icons.lock_outline,
-                    label: 'Permissions',
-                    value: '$enabledPermissions',
-                    color: Colors.purple,
+                    icon: Icons.store,
                   ),
                 ),
               ],
@@ -1315,14 +1285,344 @@ class _StaffCard extends StatelessWidget {
   }
 
   String _formatRole(String role) {
-    switch (role) {
-      case 'superadmin':
-        return 'Super Admin';
-      case 'branchadmin':
-        return 'Branch Admin';
-      default:
-        return role;
+    // Normalize role string for display
+    final normalized = role.toLowerCase().replaceAll('_', '');
+    if (normalized == 'superadmin') return 'Super Admin';
+    if (normalized == 'branchadmin') return 'Branch Admin';
+    return role.toUpperCase();
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  final String label;
+  final Color color;
+  final IconData icon;
+
+  const _StatusBadge({required this.label, required this.color, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center, // Center content in Expanded
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Flexible( // Prevent text overflow inside badge
+            child: Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// ROBUST EDIT DIALOG WITH VALIDATION & SELF-LOCK
+// -----------------------------------------------------------------------------
+
+class _StaffEditDialog extends StatefulWidget {
+  final bool isEditing;
+  final bool isSelf;
+  final Map<String, dynamic>? currentData;
+  final Function(Map<String, dynamic>) onSave;
+
+  const _StaffEditDialog({
+    required this.isEditing,
+    required this.isSelf,
+    this.currentData,
+    required this.onSave,
+  });
+
+  @override
+  State<_StaffEditDialog> createState() => _StaffEditDialogState();
+}
+
+class _StaffEditDialogState extends State<_StaffEditDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+
+  String _selectedRole = 'branchadmin';
+  bool _isActive = true;
+  List<String> _selectedBranches = [];
+
+  // Default permissions
+  final Map<String, bool> _permissions = {
+    'canViewDashboard': true,
+    'canManageOrders': true,
+    'canManageInventory': false,
+    'canManageRiders': false,
+    'canManageSettings': false,
+    'canManageStaff': false,
+    'canManageCoupons': false,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isEditing && widget.currentData != null) {
+      _nameController.text = widget.currentData!['name'] ?? '';
+      _emailController.text = widget.currentData!['email'] ?? '';
+
+      // ✅ FIX: Normalize role value from DB to match Dropdown items
+      // This solves the assertion error "Either zero or 2 items..."
+      String rawRole = widget.currentData!['role'] ?? 'branchadmin';
+
+      // Handle legacy/alternate casing from manual DB edits
+      if (rawRole == 'super_admin') rawRole = 'superadmin';
+      if (rawRole == 'branch_admin') rawRole = 'branchadmin';
+
+      // Safety check: ensure role is one of our valid options
+      if (['superadmin', 'branchadmin'].contains(rawRole)) {
+        _selectedRole = rawRole;
+      } else {
+        _selectedRole = 'branchadmin'; // Safe Fallback
+      }
+
+      _isActive = widget.currentData!['isActive'] ?? true;
+      _selectedBranches = List<String>.from(widget.currentData!['branchIds'] ?? []);
+
+      final currentPermissions = widget.currentData!['permissions'] ?? {};
+      _permissions.forEach((key, value) {
+        if (currentPermissions.containsKey(key)) {
+          _permissions[key] = currentPermissions[key];
+        }
+      });
+    } else {
+      // New User Defaults
+      _permissions['canViewDashboard'] = true;
     }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 800),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  Icon(
+                    widget.isEditing ? Icons.edit_note : Icons.person_add,
+                    color: Colors.deepPurple,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    widget.isEditing ? 'Edit Staff' : 'Add New Staff',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+
+            // Form Content
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Name
+                      TextFormField(
+                        controller: _nameController,
+                        decoration: _inputDecoration('Full Name', Icons.person_outline),
+                        validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null,
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Email (Locked if editing)
+                      TextFormField(
+                        controller: _emailController,
+                        enabled: !widget.isEditing, // 🔒 Cannot change email (Doc ID)
+                        decoration: _inputDecoration('Email Address', Icons.email_outlined).copyWith(
+                          filled: widget.isEditing, // Grey out if disabled
+                        ),
+                        validator: (v) {
+                          if (v?.trim().isEmpty ?? true) return 'Required';
+                          if (!v!.contains('@')) return 'Invalid email';
+                          return null;
+                        },
+                      ),
+                      if (widget.isEditing)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4, left: 12),
+                          child: Text(
+                            'Email cannot be changed after creation.',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          ),
+                        ),
+                      const SizedBox(height: 24),
+
+                      // Role Selection (Locked if Self)
+                      const Text('Role & Access', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: _selectedRole,
+                        // 🔒 Prevent changing own role to avoid lockout
+                        onChanged: widget.isSelf ? null : (value) {
+                          if (value != null) setState(() => _selectedRole = value);
+                        },
+                        decoration: _inputDecoration('Select Role', Icons.security),
+                        items: const [
+                          DropdownMenuItem(value: 'branchadmin', child: Text('Branch Admin')),
+                          DropdownMenuItem(value: 'superadmin', child: Text('Super Admin')),
+                        ],
+                      ),
+                      if (widget.isSelf)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 4, left: 12),
+                          child: Text(
+                            '🚫 You cannot change your own role.',
+                            style: TextStyle(fontSize: 12, color: Colors.red),
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+
+                      // Active Switch (Locked if Self)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Account Active'),
+                        subtitle: Text(_isActive ? 'User can log in' : 'User access revoked'),
+                        value: _isActive,
+                        activeColor: Colors.deepPurple,
+                        // 🔒 Prevent deactivating self
+                        onChanged: widget.isSelf ? null : (val) => setState(() => _isActive = val),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Branch Selection
+                      const Text('Assigned Branches', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      MultiBranchSelector(
+                        selectedIds: _selectedBranches,
+                        onChanged: (list) => setState(() => _selectedBranches = list),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // Permissions
+                      const Text('Detailed Permissions', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          children: _permissions.keys.map((key) {
+                            return CheckboxListTile(
+                              title: Text(_formatPermission(key)),
+                              value: _permissions[key],
+                              activeColor: Colors.deepPurple,
+                              onChanged: (val) => setState(() => _permissions[key] = val!),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Footer Actions
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: _validateAndSave,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepPurple,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    child: Text(widget.isEditing ? 'Save Changes' : 'Create User'),
+                  ),
+                ],
+              ),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _validateAndSave() {
+    if (_formKey.currentState!.validate()) {
+      // ✅ EDGE CASE: Branch Admin must have at least one branch
+      if (_selectedRole == 'branchadmin' && _selectedBranches.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Branch Admins must be assigned to at least one branch.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      final staffData = {
+        'name': _nameController.text.trim(),
+        'email': _emailController.text.trim().toLowerCase(), // Normalize email
+        'role': _selectedRole,
+        'isActive': _isActive,
+        'branchIds': _selectedBranches,
+        'permissions': _permissions,
+      };
+
+      widget.onSave(staffData);
+      Navigator.pop(context);
+    }
+  }
+
+  InputDecoration _inputDecoration(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, color: Colors.grey[600]),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
+
+  String _formatPermission(String key) {
+    return key.replaceFirst('can', '').replaceAllMapped(
+        RegExp(r'([A-Z])'), (match) => ' ${match.group(0)}'
+    ).trim();
   }
 }
 
@@ -1382,306 +1682,3 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
-class _StaffEditDialog extends StatefulWidget {
-  final bool isEditing;
-  final Map<String, dynamic>? currentData;
-  final Function(Map<String, dynamic>) onSave;
-
-  const _StaffEditDialog({
-    required this.isEditing,
-    this.currentData,
-    required this.onSave,
-  });
-
-  @override
-  State<_StaffEditDialog> createState() => _StaffEditDialogState();
-}
-
-class _StaffEditDialogState extends State<_StaffEditDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  String _selectedRole = 'branchadmin';
-  bool _isActive = true;
-  List<String> _selectedBranches = [];
-
-  final Map<String, bool> _permissions = {
-    'canViewDashboard': false,
-    'canManageInventory': false,
-    'canManageOrders': false,
-    'canManageRiders': false,
-    'canManageSettings': false,
-    'canManageStaff': false,
-    'canViewAnalytics': false,
-    'canManageCoupons': false,
-  };
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.isEditing && widget.currentData != null) {
-      _nameController.text = widget.currentData!['name'] ?? '';
-      _emailController.text = widget.currentData!['email'] ?? '';
-      _selectedRole = widget.currentData!['role'] ?? 'branchadmin';
-      _isActive = widget.currentData!['isActive'] ?? true;
-      _selectedBranches = List<String>.from(widget.currentData!['branchIds'] ?? []);
-
-      final currentPermissions = widget.currentData!['permissions'] ?? {};
-      _permissions.forEach((key, value) {
-        _permissions[key] = currentPermissions[key] ?? false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 500),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.deepPurple.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          widget.isEditing ? Icons.edit : Icons.person_add,
-                          color: Colors.deepPurple,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          widget.isEditing ? 'Edit Staff Member' : 'Add Staff Member',
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.deepPurple,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Name Field
-                  TextFormField(
-                    controller: _nameController,
-                    decoration: InputDecoration(
-                      labelText: 'Full Name',
-                      prefixIcon: const Icon(Icons.person_outline),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    validator: (value) =>
-                    (value?.isEmpty ?? true) ? 'Name is required' : null,
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Email Field
-                  TextFormField(
-                    controller: _emailController,
-                    decoration: InputDecoration(
-                      labelText: 'Email',
-                      prefixIcon: const Icon(Icons.email_outlined),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    keyboardType: TextInputType.emailAddress,
-                    validator: (value) =>
-                    (value?.isEmpty ?? true) ? 'Email is required' : null,
-                    readOnly: widget.isEditing,
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Role Dropdown
-                  DropdownButtonFormField<String>(
-                    value: _selectedRole,
-                    decoration: InputDecoration(
-                      labelText: 'Role',
-                      prefixIcon: const Icon(Icons.badge_outlined),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'superadmin', child: Text('Super Admin')),
-                      DropdownMenuItem(value: 'branchadmin', child: Text('Branch Admin')),
-                    ],
-                    onChanged: (value) {
-                      setState(() => _selectedRole = value!);
-                    },
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Active Status Switch
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.grey[50],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey[300]!),
-                    ),
-                    child: SwitchListTile(
-                      title: const Text('Active Status'),
-                      subtitle: Text(_isActive ? 'Staff member is active' : 'Staff member is inactive'),
-                      value: _isActive,
-                      onChanged: (value) {
-                        setState(() => _isActive = value);
-                      },
-                      activeColor: Colors.deepPurple,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Branch Selector
-                  MultiBranchSelector(
-                    selectedIds: _selectedBranches,
-                    onChanged: (branches) {
-                      setState(() => _selectedBranches = branches);
-                    },
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Permissions Section
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.deepPurple.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.lock_outline, color: Colors.deepPurple, size: 20),
-                            const SizedBox(width: 8),
-                            const Text(
-                              'Permissions',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: Colors.deepPurple,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        ..._permissions.entries.map((entry) => CheckboxListTile(
-                          title: Text(_getPermissionLabel(entry.key)),
-                          value: entry.value,
-                          onChanged: (value) {
-                            setState(() => _permissions[entry.key] = value ?? false);
-                          },
-                          activeColor: Colors.deepPurple,
-                          contentPadding: EdgeInsets.zero,
-                        )),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Action Buttons
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Cancel'),
-                      ),
-                      const SizedBox(width: 12),
-                      ElevatedButton(
-                        onPressed: _saveStaff,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.deepPurple,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 32,
-                            vertical: 16,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: Text(
-                          widget.isEditing ? 'Update' : 'Add',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _getPermissionLabel(String key) {
-    switch (key) {
-      case 'canViewDashboard':
-        return 'View Dashboard';
-      case 'canManageInventory':
-        return 'Manage Inventory';
-      case 'canManageOrders':
-        return 'Manage Orders';
-      case 'canManageRiders':
-        return 'Manage Riders';
-      case 'canManageSettings':
-        return 'Manage Settings';
-      case 'canManageStaff':
-        return 'Manage Staff';
-      case 'canViewAnalytics':
-        return 'View Analytics';
-      case 'canManageCoupons':
-        return 'Manage Coupons';
-      default:
-        return key;
-    }
-  }
-
-  void _saveStaff() {
-    if (_formKey.currentState!.validate()) {
-      final staffData = {
-        'name': _nameController.text.trim(),
-        'email': _emailController.text.trim(),
-        'role': _selectedRole,
-        'isActive': _isActive,
-        'branchIds': _selectedBranches,
-        'permissions': _permissions,
-      };
-      widget.onSave(staffData);
-      Navigator.of(context).pop();
-    }
-  }
-}
