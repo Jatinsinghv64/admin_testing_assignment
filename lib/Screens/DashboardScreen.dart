@@ -756,7 +756,7 @@ class _OrderPopupDialog extends StatefulWidget {
 class _OrderPopupDialogState extends State<_OrderPopupDialog> {
   bool _isLoading = false;
 
-  Future<void> updateOrderStatus(String orderId, String newStatus, {String? rejectionReason}) async {
+  Future<void> updateOrderStatus(String orderId, String newStatus, {String? cancellationReason}) async {
     setState(() {
       _isLoading = true;
     });
@@ -789,8 +789,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
 
         FirebaseFirestore.instance.collection('rider_assignments').doc(orderId).delete();
 
-        if (rejectionReason != null) {
-          updateData['rejectionReason'] = rejectionReason;
+        if (cancellationReason != null) {
+          updateData['cancellationReason'] = cancellationReason;
           try {
             final userScope = context.read<UserScopeService>();
             updateData['rejectedBy'] = userScope.userEmail.isNotEmpty ? userScope.userEmail : 'Admin';
@@ -1112,7 +1112,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               builder: (context) => const _CancellationReasonDialog(),
             );
             if (reason != null && reason.trim().isNotEmpty) {
-              updateOrderStatus(orderId, 'cancelled', rejectionReason: reason);
+              updateOrderStatus(orderId, 'cancelled', cancellationReason: reason);
             }
           },
           style: ElevatedButton.styleFrom(

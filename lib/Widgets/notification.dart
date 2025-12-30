@@ -186,7 +186,7 @@ class OrderNotificationService with ChangeNotifier {
                 String rejectedBy = scopeService.userEmail.isNotEmpty ? scopeService.userEmail : 'Admin';
                 await FirebaseFirestore.instance.collection('Orders').doc(orderId).update({
                   'status': 'cancelled',
-                  'rejectionReason': reason,
+                  'cancellationReason': reason,
                   'rejectedBy': rejectedBy,
                   'rejectedAt': FieldValue.serverTimestamp(),
                 });
@@ -500,7 +500,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
     await _stopAlarm();
     final String? reason = await showDialog<String>(
       context: context,
-      builder: (BuildContext context) => const RejectionReasonDialog(),
+      builder: (BuildContext context) => const CancellationReasonDialog(),
     );
     if (reason != null && mounted) {
       setState(() => _isProcessing = true);
@@ -719,14 +719,14 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   }
 }
 
-class RejectionReasonDialog extends StatefulWidget {
-  const RejectionReasonDialog({Key? key}) : super(key: key);
+class CancellationReasonDialog extends StatefulWidget {
+  const CancellationReasonDialog({Key? key}) : super(key: key);
 
   @override
-  State<RejectionReasonDialog> createState() => _RejectionReasonDialogState();
+  State<CancellationReasonDialog> createState() => _CancellationReasonDialogState();
 }
 
-class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
+class _CancellationReasonDialogState extends State<CancellationReasonDialog> {
   String? _selectedReason;
   final TextEditingController _otherReasonController = TextEditingController();
   final FocusNode _otherFocusNode = FocusNode();

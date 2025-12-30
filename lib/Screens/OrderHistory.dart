@@ -367,7 +367,7 @@ class _OrderHistoryItem extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               // Show quick rejection reason if cancelled
-              if (status.toLowerCase() == 'cancelled' && data['rejectionReason'] != null)
+              if (status.toLowerCase() == 'cancelled' && data['cancellationReason'] != null)
                 Container(
                   width: double.infinity,
                   margin: const EdgeInsets.only(bottom: 12),
@@ -378,7 +378,7 @@ class _OrderHistoryItem extends StatelessWidget {
                     border: Border.all(color: Colors.red.shade100),
                   ),
                   child: Text(
-                    'Cancelled: ${data['rejectionReason']}',
+                    'Cancelled: ${data['cancellationReason']}',
                     style: TextStyle(color: Colors.red.shade800, fontSize: 12, fontStyle: FontStyle.italic),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -435,7 +435,7 @@ class OrderDetailsDialog extends StatelessWidget {
     final double totalAmount = (data['totalAmount'] as num?)?.toDouble() ?? 0.0;
 
     // Cancellation Details
-    final String? rejectionReason = data['rejectionReason'];
+    final String? cancellationReason = data['cancellationReason'];
     final String? rejectedBy = data['rejectedBy'];
     final Timestamp? rejectedAt = data['rejectedAt'];
 
@@ -497,8 +497,8 @@ class OrderDetailsDialog extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    if (rejectionReason != null)
-                      Text('Reason: $rejectionReason', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    if (cancellationReason != null)
+                      Text('Reason: $cancellationReason', style: const TextStyle(fontWeight: FontWeight.w600)),
                     if (rejectedBy != null)
                       Text('Cancelled by: $rejectedBy', style: const TextStyle(fontSize: 12)),
                     if (rejectedAt != null)
