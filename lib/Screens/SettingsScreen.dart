@@ -25,6 +25,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _darkModeEnabled = false;
   String _selectedLanguage = 'English';
 
+  // ✅ State to track logout process
+  bool _isLoggingOut = false;
+
   late OrderNotificationService _notificationService;
   late RestaurantStatusService _restaurantStatus;
 
@@ -55,6 +58,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ Check if logging out FIRST to prevent Access Denied flicker
+    if (_isLoggingOut) {
+      return const Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text("Signing out..."),
+            ],
+          ),
+        ),
+      );
+    }
+
     final userScope = context.watch<UserScopeService>();
     final authService = context.read<AuthService>();
 
@@ -97,7 +116,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             buildSectionHeader('Administration', Icons.admin_panel_settings),
             const SizedBox(height: 16),
 
-            // --- ADDED: Order History (View All Orders) ---
+            // --- Order History ---
             if (userScope.isSuperAdmin || userScope.role == 'branchadmin') ...[
               buildSettingsCard(
                 icon: Icons.history_edu_rounded,
@@ -314,7 +333,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildRestaurantStatusCard(
       RestaurantStatusService status, UserScopeService scope) {
     if (scope.isSuperAdmin) {
-      // Super admins don't have a single branch, so they can't toggle status via this simple switch.
       return const SizedBox.shrink();
     }
 
@@ -778,19 +796,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
+              // -----------------------------------------------------------
+              // ✅ CRITICAL FIX: Capture references BEFORE async gaps.
+              // If we don't do this, 'context' might be deactivated/unstable
+              // after 'await authService.signOut()', causing the crash.
+              // -----------------------------------------------------------
+              final navigator = Navigator.of(context);
+              final userScope = context.read<UserScopeService>();
+
               // 1. Close the Dialog
-              Navigator.of(context).pop();
+              navigator.pop();
 
-              // 2. Sign Out from Firebase
-              await authService.signOut();
+              // 2. Set State to 'logging out' immediately to prevent
+              // the "Access Denied" widget from rendering during teardown.
+              if (mounted) {
+                setState(() {
+                  _isLoggingOut = true;
+                });
+              }
 
-              // 3. Clear the Scope & FORCE NAVIGATE to AuthWrapper
-              // This removes SettingsScreen from the stack instantly,
-              // preventing the "Access Denied" screen from rebuilding.
-              if (context.mounted) {
-                context.read<UserScopeService>().clearScope();
+              try {
+                // 3. Clear scope first (safe to do since we captured the instance)
+                await userScope.clearScope();
 
-                Navigator.of(context).pushAndRemoveUntil(
+                // 4. Sign Out
+                await authService.signOut();
+              } catch (e) {
+                debugPrint("Error during logout: $e");
+              } finally {
+                // 5. Force Navigate using captured navigator
+                // We use pushAndRemoveUntil to clear the entire stack,
+                // ensuring the user lands on AuthWrapper/LoginScreen clean.
+                navigator.pushAndRemoveUntil(
                   MaterialPageRoute(builder: (context) => const AuthWrapper()),
                       (route) => false,
                 );
@@ -920,7 +957,7 @@ class _BranchSettingItem extends StatelessWidget {
 
 
 // -----------------------------------------------------------------------------
-// IMPROVED STAFF MANAGEMENT SCREEN (Bug Fixes & Edge Cases)
+// STAFF MANAGEMENT SCREEN (Unchanged from previous fix, included for completeness)
 // -----------------------------------------------------------------------------
 
 class StaffManagementScreen extends StatefulWidget {
@@ -937,7 +974,6 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
 
-    // 🔒 SECURITY: Only Super Admin with permission can access
     if (!userScope.isSuperAdmin || !userScope.can(Permissions.canManageStaff)) {
       return Scaffold(
         appBar: AppBar(title: const Text('Access Denied')),
@@ -1009,7 +1045,6 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
               final staff = staffMembers[index];
               final data = staff.data() as Map<String, dynamic>;
 
-              // Identify if this card belongs to the currently logged-in user
               final isSelf = staff.id == userScope.userEmail;
 
               return _StaffCard(
@@ -1031,7 +1066,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       barrierDismissible: false,
       builder: (context) => _StaffEditDialog(
         isEditing: false,
-        isSelf: false, // Creating new user is never "self"
+        isSelf: false,
         onSave: (staffData) => _addStaffMember(staffData),
       ),
     );
@@ -1043,19 +1078,17 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       barrierDismissible: false,
       builder: (context) => _StaffEditDialog(
         isEditing: true,
-        isSelf: isSelf, // Pass self flag to disable dangerous fields
+        isSelf: isSelf,
         currentData: currentData,
         onSave: (staffData) => _updateStaffMember(staffId, staffData),
       ),
     );
   }
 
-  // ✅ EDGE CASE: Check existence & Initialize FCM fields
   Future<void> _addStaffMember(Map<String, dynamic> staffData) async {
     final String email = staffData['email'];
 
     try {
-      // 1. Check if user already exists
       final docRef = _db.collection('staff').doc(email);
       final docSnapshot = await docRef.get();
 
@@ -1066,7 +1099,6 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
         return;
       }
 
-      // 2. Create User with FCM Initialization
       await docRef.set({
         ...staffData,
         'isActive': true,
@@ -1099,7 +1131,6 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
         _showSnackBar('✅ Staff member updated successfully');
       }
 
-      // If user updated their own permissions, reload scope immediately
       if (isUpdatingSelf) {
         _reloadCurrentUserScope();
       }
@@ -1172,7 +1203,6 @@ class _StaffCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                // Avatar
                 Container(
                   width: 50,
                   height: 50,
@@ -1192,8 +1222,6 @@ class _StaffCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 16),
-
-                // Info
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1238,8 +1266,6 @@ class _StaffCard extends StatelessWidget {
                     ],
                   ),
                 ),
-
-                // Edit Button
                 IconButton(
                   icon: const Icon(Icons.edit_outlined, color: Colors.deepPurple),
                   onPressed: onEdit,
@@ -1249,8 +1275,6 @@ class _StaffCard extends StatelessWidget {
             const SizedBox(height: 16),
             const Divider(),
             const SizedBox(height: 8),
-
-            // ✅ FIXED OVERFLOW: Use Expanded here
             Row(
               children: [
                 Expanded(
@@ -1285,7 +1309,6 @@ class _StaffCard extends StatelessWidget {
   }
 
   String _formatRole(String role) {
-    // Normalize role string for display
     final normalized = role.toLowerCase().replaceAll('_', '');
     if (normalized == 'superadmin') return 'Super Admin';
     if (normalized == 'branchadmin') return 'Branch Admin';
@@ -1309,11 +1332,11 @@ class _StatusBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center, // Center content in Expanded
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(icon, size: 14, color: color),
           const SizedBox(width: 4),
-          Flexible( // Prevent text overflow inside badge
+          Flexible(
             child: Text(
               label,
               style: TextStyle(
@@ -1329,10 +1352,6 @@ class _StatusBadge extends StatelessWidget {
     );
   }
 }
-
-// -----------------------------------------------------------------------------
-// ROBUST EDIT DIALOG WITH VALIDATION & SELF-LOCK
-// -----------------------------------------------------------------------------
 
 class _StaffEditDialog extends StatefulWidget {
   final bool isEditing;
@@ -1360,7 +1379,6 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
   bool _isActive = true;
   List<String> _selectedBranches = [];
 
-  // Default permissions
   final Map<String, bool> _permissions = {
     'canViewDashboard': true,
     'canManageOrders': true,
@@ -1378,19 +1396,14 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
       _nameController.text = widget.currentData!['name'] ?? '';
       _emailController.text = widget.currentData!['email'] ?? '';
 
-      // ✅ FIX: Normalize role value from DB to match Dropdown items
-      // This solves the assertion error "Either zero or 2 items..."
       String rawRole = widget.currentData!['role'] ?? 'branchadmin';
-
-      // Handle legacy/alternate casing from manual DB edits
       if (rawRole == 'super_admin') rawRole = 'superadmin';
       if (rawRole == 'branch_admin') rawRole = 'branchadmin';
 
-      // Safety check: ensure role is one of our valid options
       if (['superadmin', 'branchadmin'].contains(rawRole)) {
         _selectedRole = rawRole;
       } else {
-        _selectedRole = 'branchadmin'; // Safe Fallback
+        _selectedRole = 'branchadmin';
       }
 
       _isActive = widget.currentData!['isActive'] ?? true;
@@ -1403,7 +1416,6 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
         }
       });
     } else {
-      // New User Defaults
       _permissions['canViewDashboard'] = true;
     }
   }
@@ -1417,7 +1429,6 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header
             Padding(
               padding: const EdgeInsets.all(20),
               child: Row(
@@ -1440,8 +1451,6 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
               ),
             ),
             const Divider(height: 1),
-
-            // Form Content
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
@@ -1450,20 +1459,17 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Name
                       TextFormField(
                         controller: _nameController,
                         decoration: _inputDecoration('Full Name', Icons.person_outline),
                         validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null,
                       ),
                       const SizedBox(height: 16),
-
-                      // Email (Locked if editing)
                       TextFormField(
                         controller: _emailController,
-                        enabled: !widget.isEditing, // 🔒 Cannot change email (Doc ID)
+                        enabled: !widget.isEditing,
                         decoration: _inputDecoration('Email Address', Icons.email_outlined).copyWith(
-                          filled: widget.isEditing, // Grey out if disabled
+                          filled: widget.isEditing,
                         ),
                         validator: (v) {
                           if (v?.trim().isEmpty ?? true) return 'Required';
@@ -1480,13 +1486,10 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                           ),
                         ),
                       const SizedBox(height: 24),
-
-                      // Role Selection (Locked if Self)
                       const Text('Role & Access', style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
                         value: _selectedRole,
-                        // 🔒 Prevent changing own role to avoid lockout
                         onChanged: widget.isSelf ? null : (value) {
                           if (value != null) setState(() => _selectedRole = value);
                         },
@@ -1505,31 +1508,22 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                           ),
                         ),
                       const SizedBox(height: 16),
-
-                      // Active Switch (Locked if Self)
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Account Active'),
                         subtitle: Text(_isActive ? 'User can log in' : 'User access revoked'),
                         value: _isActive,
                         activeColor: Colors.deepPurple,
-                        // 🔒 Prevent deactivating self
                         onChanged: widget.isSelf ? null : (val) => setState(() => _isActive = val),
                       ),
-
                       const SizedBox(height: 16),
-
-                      // Branch Selection
                       const Text('Assigned Branches', style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
                       MultiBranchSelector(
                         selectedIds: _selectedBranches,
                         onChanged: (list) => setState(() => _selectedBranches = list),
                       ),
-
                       const SizedBox(height: 24),
-
-                      // Permissions
                       const Text('Detailed Permissions', style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
                       Container(
@@ -1553,8 +1547,6 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                 ),
               ),
             ),
-
-            // Footer Actions
             Padding(
               padding: const EdgeInsets.all(20),
               child: Row(
@@ -1585,7 +1577,6 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
 
   void _validateAndSave() {
     if (_formKey.currentState!.validate()) {
-      // ✅ EDGE CASE: Branch Admin must have at least one branch
       if (_selectedRole == 'branchadmin' && _selectedBranches.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1598,7 +1589,7 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
 
       final staffData = {
         'name': _nameController.text.trim(),
-        'email': _emailController.text.trim().toLowerCase(), // Normalize email
+        'email': _emailController.text.trim().toLowerCase(),
         'role': _selectedRole,
         'isActive': _isActive,
         'branchIds': _selectedBranches,
@@ -1681,4 +1672,3 @@ class _InfoChip extends StatelessWidget {
     );
   }
 }
-
