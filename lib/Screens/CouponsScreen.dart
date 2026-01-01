@@ -113,7 +113,14 @@ class _CouponCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Basic Info
     final code = data['code'] ?? '';
+    final titleEn = data['title'] ?? '';
+    final titleAr = data['title_ar'] ?? '';
+
+    // Display Title logic: Show Title (EN) if exists, else Code.
+    final displayTitle = (titleEn != null && titleEn.isNotEmpty) ? titleEn : code;
+
     final value = data['value'] ?? 0;
     final type = data['type'] ?? 'fixed';
     final minSubtotal = data['min_subtotal'];
@@ -145,7 +152,7 @@ class _CouponCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header Row - Status and Code
+            // Header Row - Status and Code/Title
             Row(
               children: [
                 // Status Badge
@@ -201,8 +208,26 @@ class _CouponCard extends StatelessWidget {
             ),
 
             const SizedBox(height: 16),
-            const Divider(height: 1),
-            const SizedBox(height: 16),
+
+            // Display Titles if available
+            if (titleEn.isNotEmpty || titleAr.isNotEmpty) ...[
+              Text(
+                titleEn,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
+              ),
+              if (titleAr.isNotEmpty)
+                Text(
+                  titleAr,
+                  style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14, color: Colors.grey[700], fontFamily: 'NotoSansArabic'),
+                  textDirection: TextDirection.rtl,
+                ),
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              const SizedBox(height: 16),
+            ] else ...[
+              const Divider(height: 1),
+              const SizedBox(height: 16),
+            ],
 
             // Discount Value
             Row(
@@ -480,8 +505,15 @@ class CouponDialog extends StatefulWidget {
 
 class _CouponDialogState extends State<CouponDialog> {
   final _formKey = GlobalKey<FormState>();
+
+  // Existing Controllers
   late TextEditingController _codeCtrl, _typeCtrl, _valueCtrl;
   late TextEditingController _minSubtotalCtrl, _maxDiscountCtrl;
+
+  // New Localized Controllers
+  late TextEditingController _titleEnCtrl, _titleArCtrl;
+  late TextEditingController _descEnCtrl, _descArCtrl;
+
   DateTime? _validFrom, _validUntil;
   bool _loading = false;
   bool _isActive = true;
@@ -495,12 +527,19 @@ class _CouponDialogState extends State<CouponDialog> {
     super.initState();
     final data = widget.initialData ?? {};
 
+    // Initialize existing fields
     _codeCtrl = TextEditingController(text: data['code'] ?? '');
     _typeCtrl = TextEditingController(text: data['type'] ?? 'percentage');
     _valueCtrl = TextEditingController(text: data['value']?.toString() ?? '');
     _minSubtotalCtrl = TextEditingController(text: data['min_subtotal']?.toString() ?? '');
     _maxDiscountCtrl = TextEditingController(text: data['max_discount']?.toString() ?? '0');
     _isActive = data['active'] ?? true;
+
+    // Initialize New Arabic/English fields
+    _titleEnCtrl = TextEditingController(text: data['title'] ?? '');
+    _titleArCtrl = TextEditingController(text: data['title_ar'] ?? '');
+    _descEnCtrl = TextEditingController(text: data['description'] ?? '');
+    _descArCtrl = TextEditingController(text: data['description_ar'] ?? '');
 
     _validFrom = (data['valid_from'] is Timestamp)
         ? (data['valid_from'] as Timestamp).toDate()
@@ -540,6 +579,10 @@ class _CouponDialogState extends State<CouponDialog> {
     _valueCtrl.dispose();
     _minSubtotalCtrl.dispose();
     _maxDiscountCtrl.dispose();
+    _titleEnCtrl.dispose();
+    _titleArCtrl.dispose();
+    _descEnCtrl.dispose();
+    _descArCtrl.dispose();
     super.dispose();
   }
 
@@ -612,8 +655,36 @@ class _CouponDialogState extends State<CouponDialog> {
                   ),
                   const SizedBox(height: 20),
 
-                  _formSectionHeader('Coupon Details'),
-                  _roundedInput(_codeCtrl, 'Code', Icons.card_giftcard_rounded,
+                  // --- NEW SECTION: Display Info (Localized) ---
+                  _formSectionHeader('Display Info'),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _roundedInput(_titleEnCtrl, 'Title (English)', Icons.title,
+                            validator: (v) => v!.isEmpty ? 'Required' : null),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _roundedInput(_titleArCtrl, 'Title (Arabic)', Icons.translate, textDirection: TextDirection.rtl),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _roundedInput(_descEnCtrl, 'Description (English)', Icons.description),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _roundedInput(_descArCtrl, 'Description (Arabic)', Icons.description, textDirection: TextDirection.rtl),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  _formSectionHeader('Coupon Logic'),
+                  _roundedInput(_codeCtrl, 'Code (Unique)', Icons.card_giftcard_rounded,
                       validator: (v) => v == null || v.isEmpty ? 'Code required' : null),
                   const SizedBox(height: 16),
 
@@ -782,11 +853,12 @@ class _CouponDialogState extends State<CouponDialog> {
   );
 
   Widget _roundedInput(TextEditingController c, String label, IconData icon,
-      {String? Function(String?)? validator, TextInputType? type}) {
+      {String? Function(String?)? validator, TextInputType? type, TextDirection? textDirection}) {
     return TextFormField(
       controller: c,
       keyboardType: type,
       validator: validator,
+      textDirection: textDirection,
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon, color: Colors.deepPurple),
@@ -880,6 +952,13 @@ class _CouponDialogState extends State<CouponDialog> {
 
   Map<String, dynamic> _formData({bool newCoupon = false}) {
     final data = {
+      // New Fields
+      'title': _titleEnCtrl.text.trim(),
+      'title_ar': _titleArCtrl.text.trim(),
+      'description': _descEnCtrl.text.trim(),
+      'description_ar': _descArCtrl.text.trim(),
+
+      // Existing Fields
       'code': _codeCtrl.text.trim(),
       'type': _typeCtrl.text.trim(),
       'value': num.tryParse(_valueCtrl.text) ?? 0,

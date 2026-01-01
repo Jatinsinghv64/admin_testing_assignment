@@ -1,124 +1,99 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:mdd/Widgets/working_hours_model.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
 
-class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
+class RestaurantStatusService with ChangeNotifier {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // Streams & Timers
   StreamSubscription<DocumentSnapshot>? _branchSubscription;
-  Timer? _scheduleCheckTimer;
+  Timer? _timer;
 
-  // Controllers
   final _closingPopupController = StreamController<bool>.broadcast();
   Stream<bool> get closingPopupStream => _closingPopupController.stream;
 
-  // State
+  bool _popupShownToday = false;
+
+  // --- STATE VARIABLES ---
+  bool _isManualOpen = false;
+  bool _isScheduleOpen = false;
+  bool _isLoading = false;
+  Duration? _timeUntilClose;
+
   String? _restaurantId;
   String? _restaurantName;
   String _timezone = 'UTC';
+  Map<String, dynamic> _workingHours = {};
 
-  // Parsed Schedule
-  Map<String, DaySchedule> _scheduleMap = {};
-
-  // Status Flags
-  bool _isManualOpen = false; // Database "isOpen" flag
-  bool _isWithinSchedule = false; // Is current time within a valid slot?
-  bool _isLoading = true;
-  Duration? _timeUntilClose;
-
-  // --- ✅ RESTORED GETTERS FOR UI ---
+  // --- GETTERS ---
   bool get isLoading => _isLoading;
+  String? get restaurantId => _restaurantId;
   String? get restaurantName => _restaurantName;
+  bool get isManualOpen => _isManualOpen;
+  bool get isScheduleOpen => _isScheduleOpen;
+  bool get isOpen => _isManualOpen && _isScheduleOpen;
   Duration? get timeUntilClose => _timeUntilClose;
 
-  // 1. Used by the Switch Widget to show if the "toggle" is On/Off
-  bool get isManualOpen => _isManualOpen;
-
-  // 2. Used by the App Bar to show "Green/Red" status
-  // It is only "Fully Open" if the Switch is ON AND the Schedule matches.
-  bool get isOpen => _isManualOpen && _isWithinSchedule;
-
-  // 3. Used by the Status Badge text
   String get statusText {
     if (!_isManualOpen) return "Closed (Manually)";
-    if (!_isWithinSchedule) return "Closed (Schedule)";
+    if (!_isScheduleOpen) return "Closed (Schedule)";
     return "Open";
-  }
-
-  RestaurantStatusService() {
-    WidgetsBinding.instance.addObserver(this);
-    tz_data.initializeTimeZones();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _branchSubscription?.cancel();
-    _scheduleCheckTimer?.cancel();
-    _closingPopupController.close();
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _calculateScheduleStatus();
-    }
   }
 
   void initialize(String restaurantId, {String restaurantName = "Restaurant"}) {
     if (_restaurantId == restaurantId) return;
+
     _restaurantId = restaurantId;
     _restaurantName = restaurantName;
-    _startListening();
+
+    tz_data.initializeTimeZones();
+
+    _startListeningToRestaurantStatus();
+
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _recalculateScheduleStatus();
+    });
   }
 
-  void _startListening() {
+  @override
+  void dispose() {
+    _branchSubscription?.cancel();
+    _timer?.cancel();
+    _closingPopupController.close();
+    super.dispose();
+  }
+
+  void _startListeningToRestaurantStatus() {
+    if (_restaurantId == null) return;
     _isLoading = true;
     notifyListeners();
 
     _branchSubscription?.cancel();
-    _branchSubscription = _db.collection('Branch').doc(_restaurantId).snapshots().listen(
-          (doc) {
-        if (!doc.exists) {
-          _handleErrorState();
-          return;
-        }
-
+    _branchSubscription = _db.collection('Branch').doc(_restaurantId).snapshots().listen((doc) {
+      if (doc.exists) {
         final data = doc.data()!;
         _isManualOpen = data['isOpen'] ?? false;
         _restaurantName = data['name'] ?? _restaurantName;
         _timezone = data['timezone'] ?? 'UTC';
+        _workingHours = Map<String, dynamic>.from(data['workingHours'] ?? {});
 
-        // Parse Schedule
-        final rawHours = data['workingHours'] as Map<String, dynamic>? ?? {};
-        _scheduleMap = rawHours.map((key, value) =>
-            MapEntry(key, DaySchedule.fromMap(value)));
+        // Note: We do NOT reset _popupShownToday here to avoid loops.
+      } else {
+        _isManualOpen = false;
+      }
 
-        _isLoading = false;
-        _calculateScheduleStatus();
-      },
-      onError: (e) => debugPrint("🔥 Error listening to branch: $e"),
-    );
+      _recalculateScheduleStatus();
+      _isLoading = false;
+      notifyListeners();
+    });
   }
 
-  void _handleErrorState() {
-    _isManualOpen = false;
-    _isWithinSchedule = false;
-    _isLoading = false;
-    notifyListeners();
-  }
-
-  void _calculateScheduleStatus() {
-    if (_scheduleMap.isEmpty) {
-      // If no schedule is defined, we assume it's "Always Open" regarding schedule
-      // and rely solely on the Manual Switch.
-      if (!_isWithinSchedule) {
-        _isWithinSchedule = true;
+  void _recalculateScheduleStatus() {
+    if (_workingHours.isEmpty) {
+      if (_isScheduleOpen != true) {
+        _isScheduleOpen = true;
         notifyListeners();
       }
       return;
@@ -128,96 +103,118 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
       final location = tz.getLocation(_timezone);
       final now = tz.TZDateTime.now(location);
 
-      final currentSlotEnd = _getCurrentSlotEndTime(now);
-      final bool newScheduleStatus = currentSlotEnd != null;
+      bool openNow = _checkDaySchedule(now, 0) || _checkDaySchedule(now, -1);
 
-      // Check for Auto-Close Trigger (Schedule ended while manually open)
-      if (_isWithinSchedule && !newScheduleStatus && _isManualOpen) {
-        debugPrint("⏰ Schedule End Reached. Closing Restaurant in DB...");
-        toggleRestaurantStatus(false);
-        _closingPopupController.add(true);
+      // --- INDUSTRY LEVEL UPDATE ---
+      // We removed the logic that calls 'toggleRestaurantStatus(false)'.
+      // The Cloud Function now handles the database write.
+      // We only update the local variable so the UI reflects the schedule immediately.
+
+      if (_isScheduleOpen != openNow) {
+        _isScheduleOpen = openNow;
+        // Only reset popup flag if the schedule effectively changes (e.g. new shift started)
+        if (openNow) {
+          _popupShownToday = false;
+        }
+        notifyListeners();
       }
 
-      _isWithinSchedule = newScheduleStatus;
-
-      if (_isWithinSchedule && currentSlotEnd != null) {
-        final diff = currentSlotEnd.difference(now);
-        _timeUntilClose = diff;
-        _scheduleNextCheck(diff);
+      // Only calculate countdown if we are effectively OPEN (Manual + Schedule)
+      if (openNow && _isManualOpen) {
+        _calculateTimeUntilClose(now);
       } else {
         _timeUntilClose = null;
-        _scheduleNextCheck(const Duration(minutes: 1));
+        notifyListeners();
       }
-
-      notifyListeners();
 
     } catch (e) {
-      debugPrint("⚠️ Schedule Calculation Error: $e");
-    }
-  }
-
-  void _scheduleNextCheck(Duration duration) {
-    _scheduleCheckTimer?.cancel();
-    // Update at least every minute for UI countdowns
-    final nextTick = duration.inSeconds > 60 ? const Duration(minutes: 1) : duration;
-
-    _scheduleCheckTimer = Timer(nextTick, () {
-      _calculateScheduleStatus();
-    });
-  }
-
-  tz.TZDateTime? _getCurrentSlotEndTime(tz.TZDateTime now) {
-    for (int dayOffset in [-1, 0]) {
-      final checkDate = now.add(Duration(days: dayOffset));
-      final dayName = _getDayName(checkDate.weekday);
-      final schedule = _scheduleMap[dayName];
-
-      if (schedule == null || !schedule.isOpen) continue;
-
-      final int nowMinutesTotal = _getMinutesFromMidnight(now, checkDate);
-
-      for (var slot in schedule.slots) {
-        bool isOpen;
-
-        if (slot.closeMinutes < slot.openMinutes) {
-          // Spans midnight
-          if (dayOffset == -1) {
-            isOpen = nowMinutesTotal < slot.closeMinutes + 1440;
-          } else {
-            isOpen = nowMinutesTotal >= slot.openMinutes;
-          }
-        } else {
-          // Standard Slot
-          if (dayOffset == -1) continue;
-          isOpen = nowMinutesTotal >= slot.openMinutes && nowMinutesTotal < slot.closeMinutes;
-        }
-
-        if (isOpen) {
-          return _getPreciseClosingTime(checkDate, slot);
-        }
+      debugPrint("⚠️ Schedule Error: $e");
+      if (!_isScheduleOpen) {
+        _isScheduleOpen = true;
+        notifyListeners();
       }
     }
-    return null;
   }
 
-  tz.TZDateTime _getPreciseClosingTime(tz.TZDateTime date, TimeSlot slot) {
-    int closeDay = date.day;
-    int closeMinutes = slot.closeMinutes;
+  void _calculateTimeUntilClose(tz.TZDateTime now) {
+    tz.TZDateTime? closingTime;
 
-    if (slot.closeMinutes < slot.openMinutes) {
-      closeDay += 1;
+    for (int dayOffset in [0, -1]) {
+      final checkDate = now.add(Duration(days: dayOffset));
+      final dayName = _getDayName(checkDate.weekday);
+      final dayData = _workingHours[dayName];
+      if (dayData == null || dayData['isOpen'] != true) continue;
+
+      final List slots = dayData['slots'] ?? [];
+      for (var slot in slots) {
+        final times = _parseSlotTimes(now, checkDate, slot['open'], slot['close']);
+        if (times != null && now.isAfter(times['open']!) && now.isBefore(times['close']!)) {
+          closingTime = times['close'];
+          break;
+        }
+      }
+      if (closingTime != null) break;
     }
 
-    return tz.TZDateTime(
-        date.location, date.year, date.month, closeDay,
-        closeMinutes ~/ 60, closeMinutes % 60
-    );
+    if (closingTime != null) {
+      final difference = closingTime.difference(now);
+
+      // Reset popup logic: If user extended time (difference > 5 mins), allow popup again later
+      if (difference.inMinutes > 5) {
+        _popupShownToday = false;
+      }
+
+      // Update Banner (Show if <= 30 mins)
+      if (difference.inMinutes <= 30 && difference.inSeconds > 0) {
+        _timeUntilClose = difference;
+        notifyListeners();
+      } else {
+        if (_timeUntilClose != null) {
+          _timeUntilClose = null;
+          notifyListeners();
+        }
+      }
+
+      // Trigger Popup (Show if <= 2 mins)
+      if (difference.inMinutes <= 2 && difference.inSeconds > 0 && !_popupShownToday) {
+        _popupShownToday = true;
+        _closingPopupController.add(true);
+      }
+    }
   }
 
-  int _getMinutesFromMidnight(tz.TZDateTime now, tz.TZDateTime midnightRef) {
-    return now.difference(tz.TZDateTime(
-        now.location, midnightRef.year, midnightRef.month, midnightRef.day
-    )).inMinutes;
+  bool _checkDaySchedule(tz.TZDateTime now, int dayOffset) {
+    final checkDate = now.add(Duration(days: dayOffset));
+    final String dayName = _getDayName(checkDate.weekday);
+    final dayData = _workingHours[dayName];
+    if (dayData == null || dayData['isOpen'] != true) return false;
+    final List slots = dayData['slots'] ?? [];
+    if (slots.isEmpty) return false;
+
+    for (var slot in slots) {
+      final times = _parseSlotTimes(now, checkDate, slot['open'], slot['close']);
+      if (times != null && now.isAfter(times['open']!) && now.isBefore(times['close']!)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Map<String, tz.TZDateTime>? _parseSlotTimes(tz.TZDateTime now, tz.TZDateTime refDate, String openStr, String closeStr) {
+    try {
+      final openParts = openStr.split(':').map(int.parse).toList();
+      final openTime = tz.TZDateTime(now.location, refDate.year, refDate.month, refDate.day, openParts[0], openParts[1]);
+
+      final closeParts = closeStr.split(':').map(int.parse).toList();
+      var closeTime = tz.TZDateTime(now.location, refDate.year, refDate.month, refDate.day, closeParts[0], closeParts[1]);
+
+      if (closeTime.isBefore(openTime) || closeTime.isAtSameMomentAs(openTime)) {
+        closeTime = closeTime.add(const Duration(days: 1));
+      }
+      return {'open': openTime, 'close': closeTime};
+    } catch (e) {
+      return null;
+    }
   }
 
   String _getDayName(int weekday) {
@@ -225,18 +222,23 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
     return days[weekday] ?? 'monday';
   }
 
+  /// Manually toggles the restaurant status.
+  /// This should only be called by User Interaction (e.g. Tapping the Switch in Settings),
+  /// NEVER by the automatic timer.
   Future<void> toggleRestaurantStatus(bool newStatus) async {
     if (_restaurantId == null) return;
 
+    // Optimistic Update
     _isManualOpen = newStatus;
     notifyListeners();
 
     try {
-      await _db.collection('Branch').doc(_restaurantId!).update({
+      await _db.collection('Branch').doc(_restaurantId!).set({
         'isOpen': newStatus,
         'lastStatusUpdate': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
     } catch (e) {
+      // Revert if failed
       _isManualOpen = !newStatus;
       notifyListeners();
       rethrow;
