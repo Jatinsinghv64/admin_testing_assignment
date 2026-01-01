@@ -5,14 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../Widgets/Permissions.dart';
 import '../Widgets/RestaurantStatusService.dart';
-// import '../Widgets/RiderAssignment.dart'; // No longer needed here
 import '../main.dart';
 import 'DashboardScreen.dart';
 import 'MenuManagement.dart';
-import 'ManualAssignmentScreen.dart'; // Import the new screen
+import 'ManualAssignmentScreen.dart';
 import 'OrdersScreen.dart';
 import 'RidersScreen.dart';
 import 'SettingsScreen.dart';
+import 'RestaurantTimingScreen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -25,17 +25,12 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   List<Widget> _screens = [];
   List<BottomNavigationBarItem> _navItems = [];
-  Map<AppTab, AppScreen> _allScreens = {}; // Initialize as empty
+  Map<AppTab, AppScreen> _allScreens = {};
 
-  // Restaurant status
   bool _isRestaurantStatusInitialized = false;
   bool _isBuildingNavItems = false;
-  // bool _didInitScreens = false; // No longer needed
-
-  // --- FIX: Store the last known branchId to detect changes ---
   String? _lastKnownBranchId;
 
-  // Callback method for tab changes from Dashboard
   void _onTabChange(int index) {
     setState(() {
       _currentIndex = index;
@@ -45,7 +40,14 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // initState is clean. All init logic is in didChangeDependencies.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final statusService = context.read<RestaurantStatusService>();
+      statusService.closingPopupStream.listen((shouldShow) {
+        if (shouldShow && mounted) {
+          _showClosingWarningDialog(context);
+        }
+      });
+    });
   }
 
   @override
@@ -55,14 +57,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final userScope = context.watch<UserScopeService>();
     final badgeProvider = context.read<BadgeCountProvider>();
 
-    // 1. INITIALIZATION: Only runs if App starts or Branch changes
     if (_allScreens.isEmpty || userScope.branchId != _lastKnownBranchId) {
       _lastKnownBranchId = userScope.branchId;
-
-      // Initialize the badge stream
       badgeProvider.initializeStream(userScope);
 
-      // Initialize screens
       _allScreens = {
         AppTab.dashboard: AppScreen(
           tab: AppTab.dashboard,
@@ -116,7 +114,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       };
 
-      // Trigger status check only on fresh load/branch change
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _initializeRestaurantStatus();
@@ -124,17 +121,12 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
 
-    // 2. PERMISSION CHECK: Runs EVERY time UserScope updates (e.g. Role Change)
-    // ✅ FIX: Moved outside the 'if' block so it updates immediately when role changes.
     if (_allScreens.isNotEmpty) {
       _buildNavItems();
     }
   }
 
-
   void _initializeRestaurantStatus() {
-    // This context is safe to use now
-    // We use context.read() because this is a one-time call.
     final scopeService = context.read<UserScopeService>();
     final statusService = context.read<RestaurantStatusService>();
 
@@ -149,6 +141,56 @@ class _HomeScreenState extends State<HomeScreen> {
           restaurantName: restaurantName);
       _isRestaurantStatusInitialized = true;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // ✅ FIXED POPUP: "Yes" now actually closes the restaurant in DB
+  // ---------------------------------------------------------------------------
+  void _showClosingWarningDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: const [
+            Icon(Icons.timer_off, color: Colors.red),
+            SizedBox(width: 10),
+            Text('Restaurant is Closing'),
+          ],
+        ),
+        content: const Text(
+          'The scheduled closing time is in less than 2 minutes.\n\nDo you want to close now or extend the timing?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              // ✅ CRITICAL FIX: Explicitly turn off the Manual Switch
+              // This updates Firestore 'isOpen' to false, ensuring customers can't order.
+              await context.read<RestaurantStatusService>().toggleRestaurantStatus(false);
+
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('🛑 Restaurant is now CLOSED.')),
+                );
+              }
+            },
+            child: const Text('Yes, Close', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const RestaurantTimingScreen()),
+              );
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+            child: const Text('Extend Time'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildRestaurantToggle(RestaurantStatusService statusService) {
@@ -173,7 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
           )
         else
           Switch(
-            value: statusService.isOpen,
+            value: statusService.isManualOpen,
             onChanged: (newValue) {
               _showStatusChangeConfirmation(newValue);
             },
@@ -210,8 +252,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         content: Text(
           newValue
-              ? 'The restaurant will be opened for business. New orders will be accepted and notifications will be enabled.'
-              : 'The restaurant will be closed. No new orders will be accepted and background services will be stopped.',
+              ? 'The restaurant will be manually set to OPEN. (Schedule checks will apply)'
+              : 'The restaurant will be manually CLOSED immediately.',
         ),
         actions: [
           TextButton(
@@ -229,8 +271,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     SnackBar(
                       content: Text(
                         newValue
-                            ? '✅ Restaurant is now OPEN - Background service started'
-                            : '🛑 Restaurant is now CLOSED - Background service stopped',
+                            ? '✅ Restaurant is now OPEN'
+                            : '🛑 Restaurant is now CLOSED',
                       ),
                       backgroundColor: newValue ? Colors.green : Colors.red,
                     ),
@@ -264,8 +306,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_isBuildingNavItems) return;
     _isBuildingNavItems = true;
 
-    // We use context.read() here because the containing function
-    // (didChangeDependencies) is already reacting to changes.
     final userScope = context.read<UserScopeService>();
     final List<AppScreen> allowedScreens = [];
 
@@ -297,26 +337,29 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    debugPrint('🛑 HomeScreen disposed');
-    super.dispose();
+  // ✅ Hybrid Formatter
+  String _formatDuration(Duration d) {
+    if (d.inMinutes >= 5) {
+      return '${d.inMinutes} mins';
+    } else {
+      final minutes = d.inMinutes;
+      final seconds = d.inSeconds % 60;
+      return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // We watch userScope and statusService here to rebuild the AppBar
-    // when their values change.
     final userScope = context.watch<UserScopeService>();
     final statusService = context.watch<RestaurantStatusService>();
+    final timeUntilClose = statusService.timeUntilClose;
+
     final String appBarTitle = userScope.isSuperAdmin
         ? 'Super Admin'
         : userScope.branchId.isNotEmpty
         ? userScope.branchId.replaceAll('_', ' ')
         : 'Admin Panel';
 
-    // If nav items are empty, it means the first didChangeDependencies
-    // hasn't completed. Show a loader.
     if (_navItems.isEmpty || _screens.isEmpty) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
@@ -349,7 +392,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   child: Text(
-                    statusService.isOpen ? 'OPEN' : 'CLOSED',
+                    statusService.statusText.toUpperCase(),
                     style: TextStyle(
                       color: statusService.isOpen ? Colors.green : Colors.red,
                       fontWeight: FontWeight.bold,
@@ -379,7 +422,30 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-      body: _screens[_currentIndex],
+      body: Column(
+        children: [
+          // 🔴 CLOSING SOON BANNER
+          if (timeUntilClose != null)
+            Container(
+              width: double.infinity,
+              color: Colors.orange,
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Closing in ${_formatDuration(timeUntilClose)}',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+
+          Expanded(child: _screens[_currentIndex]),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         currentIndex: _currentIndex,
@@ -395,11 +461,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// --- Dedicated stateful widget for the badge ---
-
-/// A dedicated widget to display the manual assignment icon and badge.
-/// This isolates the Firestore stream from the parent screen's build cycle,
-/// preventing flickering and unnecessary rebuilds.
+// ... (Rest of ManualAssignmentBadge and BadgeCountProvider remain unchanged) ...
 class ManualAssignmentBadge extends StatelessWidget {
   final bool isActive;
   const ManualAssignmentBadge({super.key, this.isActive = false});
@@ -456,22 +518,14 @@ class BadgeCountProvider with ChangeNotifier {
   void initializeStream(UserScopeService userScope) {
     final branchId = userScope.isSuperAdmin ? null : userScope.branchId;
 
-    // Only reinitialize if branch changed
     if (_currentBranchId == branchId && _subscription != null) return;
 
     _currentBranchId = branchId;
     _subscription?.cancel();
 
-    final now = DateTime.now();
-    final startOfToday = DateTime(now.year, now.month, now.day);
-    final endOfToday = startOfToday.add(const Duration(days: 1));
-
     Query query = FirebaseFirestore.instance
         .collection('Orders')
-        .where('status', isEqualTo: 'needs_rider_assignment')
-    // --- FIX: Query on 'timestamp' instead of 'needsAssignmentAt' ---
-        .where('timestamp', isGreaterThanOrEqualTo: startOfToday)
-        .where('timestamp', isLessThan: endOfToday);
+        .where('status', isEqualTo: 'needs_rider_assignment');
 
     if (branchId != null && branchId.isNotEmpty) {
       query = query.where('branchIds', arrayContains: branchId);
@@ -480,17 +534,14 @@ class BadgeCountProvider with ChangeNotifier {
     _subscription = query.snapshots().listen((snapshot) {
       final newCount = snapshot.docs.length;
 
-      // --- FIX: Only notify if the count has actually changed ---
       if (newCount != _manualAssignmentCount) {
-        debugPrint('BadgeCountProvider: Count updated from $_manualAssignmentCount to $newCount');
+        debugPrint(
+            'BadgeCountProvider: Count updated from $_manualAssignmentCount to $newCount');
         _manualAssignmentCount = newCount;
         notifyListeners();
       }
-      // --- End of FIX ---
-
     }, onError: (error) {
       debugPrint('BadgeCountProvider stream error: $error');
-      // Optional: Reset count to 0 on error
       if (_manualAssignmentCount != 0) {
         _manualAssignmentCount = 0;
         notifyListeners();

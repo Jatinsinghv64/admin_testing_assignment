@@ -10,6 +10,19 @@ class DashboardScreen extends StatelessWidget {
 
   const DashboardScreen({super.key, required this.onTabChange});
 
+  // ✅ HELPER: Calculates 6:00 AM cut-off for "Business Day"
+  Timestamp _getBusinessStartTimestamp() {
+    var now = DateTime.now();
+    // If it's early morning (e.g., 00:00 - 05:59), shift back to yesterday
+    // so we count it as part of the previous night's shift.
+    if (now.hour < 6) {
+      now = now.subtract(const Duration(days: 1));
+    }
+    // Set start time to 6:00 AM of the calculated "business day"
+    final startOfBusinessDay = DateTime(now.year, now.month, now.day, 6, 0, 0);
+    return Timestamp.fromDate(startOfBusinessDay);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -34,7 +47,8 @@ class DashboardScreen extends StatelessWidget {
           children: [
             _buildEnhancedStatCardsGrid(context),
             const SizedBox(height: 32),
-            _buildSectionHeader('Recent Orders (Today)', Icons.receipt_long_outlined),
+            _buildSectionHeader(
+                'Recent Orders (Current Shift)', Icons.receipt_long_outlined),
             const SizedBox(height: 16),
             _buildEnhancedRecentOrdersSection(context),
           ],
@@ -78,9 +92,8 @@ class DashboardScreen extends StatelessWidget {
   }
 
   Widget _buildEnhancedStatCardsGrid(BuildContext context) {
-    final DateTime startOfToday = DateTime.now();
-    final DateTime startOfDay = DateTime(startOfToday.year, startOfToday.month, startOfToday.day);
-    final Timestamp startOfTodayTimestamp = Timestamp.fromDate(startOfDay);
+    // ✅ Use Business Day Timestamp (6:00 AM cut-off)
+    final Timestamp startOfShift = _getBusinessStartTimestamp();
 
     return Container(
       decoration: BoxDecoration(
@@ -103,10 +116,11 @@ class DashboardScreen extends StatelessWidget {
                 child: _buildStatCardWrapper(
                   stream: FirebaseFirestore.instance
                       .collection('Orders')
-                      .where('timestamp', isGreaterThanOrEqualTo: startOfTodayTimestamp)
+                      .where('timestamp', isGreaterThanOrEqualTo: startOfShift)
                       .snapshots(),
                   builder: (context, snapshot) {
-                    final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                    final count =
+                    snapshot.hasData ? snapshot.data!.docs.length : 0;
                     return _EnhancedStatCard(
                       title: "Today's Orders",
                       value: count.toString(),
@@ -125,7 +139,8 @@ class DashboardScreen extends StatelessWidget {
                       .where('isAvailable', isEqualTo: true)
                       .snapshots(),
                   builder: (context, snapshot) {
-                    final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                    final count =
+                    snapshot.hasData ? snapshot.data!.docs.length : 0;
                     return _EnhancedStatCard(
                       title: 'Active Riders',
                       value: count.toString(),
@@ -145,17 +160,23 @@ class DashboardScreen extends StatelessWidget {
                 child: _buildStatCardWrapper(
                   stream: FirebaseFirestore.instance
                       .collection('Orders')
-                      .where('timestamp', isGreaterThanOrEqualTo: startOfTodayTimestamp)
+                      .where('timestamp', isGreaterThanOrEqualTo: startOfShift)
                       .snapshots(),
                   builder: (context, snapshot) {
                     double totalRevenue = 0;
                     if (snapshot.hasData) {
-                      final billableStatuses = {'delivered', 'completed', 'paid'};
+                      final billableStatuses = {
+                        'delivered',
+                        'completed',
+                        'paid'
+                      };
                       for (var doc in snapshot.data!.docs) {
                         final data = doc.data() as Map<String, dynamic>;
-                        final status = (data['status'] ?? '').toString().toLowerCase();
+                        final status =
+                        (data['status'] ?? '').toString().toLowerCase();
                         if (billableStatuses.contains(status)) {
-                          totalRevenue += (data['totalAmount'] as num? ?? 0).toDouble();
+                          totalRevenue +=
+                              (data['totalAmount'] as num? ?? 0).toDouble();
                         }
                       }
                     }
@@ -164,7 +185,8 @@ class DashboardScreen extends StatelessWidget {
                       value: 'QAR ${totalRevenue.toStringAsFixed(2)}',
                       icon: Icons.attach_money_outlined,
                       color: Colors.orangeAccent,
-                      onTap: () => _navigateToAnalytics(context),
+                      // ✅ CHANGED: Navigates to Orders Screen instead of Analytics
+                      onTap: () => _navigateToOrders(context),
                     );
                   },
                 ),
@@ -177,7 +199,8 @@ class DashboardScreen extends StatelessWidget {
                       .where('isAvailable', isEqualTo: true)
                       .snapshots(),
                   builder: (context, snapshot) {
-                    final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                    final count =
+                    snapshot.hasData ? snapshot.data!.docs.length : 0;
                     return _EnhancedStatCard(
                       title: 'Menu Items',
                       value: count.toString(),
@@ -196,24 +219,26 @@ class DashboardScreen extends StatelessWidget {
   }
 
   void _navigateToOrders(BuildContext context) {
-    onTabChange(2);
+    onTabChange(2); // Index 2 is usually Orders
   }
 
   void _navigateToRiders(BuildContext context) {
-    onTabChange(3);
+    onTabChange(3); // Index 3 is usually Riders
   }
 
   void _navigateToAnalytics(BuildContext context) {
-    onTabChange(4);
+    onTabChange(4); // Keep for reference, even if Revenue now points to Orders
   }
 
   void _navigateToMenuManagement(BuildContext context) {
-    onTabChange(1);
+    onTabChange(1); // Index 1 is usually Inventory/Menu
   }
 
   Widget _buildStatCardWrapper({
     required Stream<QuerySnapshot<Map<String, dynamic>>> stream,
-    required Widget Function(BuildContext, AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>>) builder,
+    required Widget Function(
+        BuildContext, AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>>)
+    builder,
   }) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: stream,
@@ -222,7 +247,8 @@ class DashboardScreen extends StatelessWidget {
           return const _EnhancedLoadingStatCard();
         }
         if (snapshot.hasError) {
-          return const _EnhancedErrorStatCard(errorMessage: 'Error loading data');
+          return const _EnhancedErrorStatCard(
+              errorMessage: 'Error loading data');
         }
         return builder(context, snapshot);
       },
@@ -230,9 +256,8 @@ class DashboardScreen extends StatelessWidget {
   }
 
   Widget _buildEnhancedRecentOrdersSection(BuildContext context) {
-    final DateTime now = DateTime.now();
-    final DateTime startOfDay = DateTime(now.year, now.month, now.day);
-    final Timestamp startOfTodayTimestamp = Timestamp.fromDate(startOfDay);
+    // ✅ Use Business Day Timestamp
+    final Timestamp startOfShift = _getBusinessStartTimestamp();
 
     return Container(
       decoration: BoxDecoration(
@@ -295,7 +320,7 @@ class DashboardScreen extends StatelessWidget {
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: FirebaseFirestore.instance
                   .collection('Orders')
-                  .where('timestamp', isGreaterThanOrEqualTo: startOfTodayTimestamp)
+                  .where('timestamp', isGreaterThanOrEqualTo: startOfShift)
                   .orderBy('timestamp', descending: true)
                   .limit(5)
                   .snapshots(),
@@ -311,7 +336,8 @@ class DashboardScreen extends StatelessWidget {
                   );
                 }
                 if (snapshot.hasError) {
-                  return _buildErrorState('Error loading orders: ${snapshot.error}');
+                  return _buildErrorState(
+                      'Error loading orders: ${snapshot.error}');
                 }
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return _buildEmptyState();
@@ -319,7 +345,8 @@ class DashboardScreen extends StatelessWidget {
                 return ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: snapshot.data!.docs.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 12),
+                  separatorBuilder: (context, index) =>
+                  const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     var order = snapshot.data!.docs[index];
                     return _EnhancedOrderListItem(order: order);
@@ -367,10 +394,11 @@ class DashboardScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.receipt_long_outlined, size: 48, color: Colors.grey[400]),
+            Icon(Icons.receipt_long_outlined,
+                size: 48, color: Colors.grey[400]),
             const SizedBox(height: 12),
             Text(
-              'No orders today',
+              'No orders yet today',
               style: TextStyle(
                 color: Colors.grey[600],
                 fontSize: 16,
@@ -561,11 +589,16 @@ class _EnhancedOrderListItem extends StatelessWidget {
 
   String _formatOrderType(String type) {
     switch (type) {
-      case 'delivery': return 'Delivery';
-      case 'takeaway': return 'Takeaway';
-      case 'pickup': return 'Pick Up';
-      case 'dine_in': return 'Dine-in';
-      default: return 'Unknown Type';
+      case 'delivery':
+        return 'Delivery';
+      case 'takeaway':
+        return 'Takeaway';
+      case 'pickup':
+        return 'Pick Up';
+      case 'dine_in':
+        return 'Dine-in';
+      default:
+        return 'Unknown Type';
     }
   }
 
@@ -614,7 +647,8 @@ class _EnhancedOrderListItem extends StatelessWidget {
                     color: statusColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(Icons.receipt_long_outlined, color: statusColor, size: 20),
+                  child: Icon(Icons.receipt_long_outlined,
+                      color: statusColor, size: 20),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -636,7 +670,8 @@ class _EnhancedOrderListItem extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
                               color: Colors.blue.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(8),
@@ -671,7 +706,8 @@ class _EnhancedOrderListItem extends StatelessWidget {
                           Flexible(
                             child: Text(
                               ' • $placedDate',
-                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                              style:
+                              TextStyle(fontSize: 12, color: Colors.grey),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -685,7 +721,8 @@ class _EnhancedOrderListItem extends StatelessWidget {
                   constraints: const BoxConstraints(
                     maxWidth: 90,
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: statusColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
@@ -732,14 +769,22 @@ class _EnhancedOrderListItem extends StatelessWidget {
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'pending': return Colors.orange;
-      case 'preparing': return Colors.teal;
-      case 'prepared': return Colors.blueAccent;
-      case 'pickedup': return Colors.purple;
-      case 'delivered': return Colors.green;
-      case 'cancelled': return Colors.red;
-      case 'needs_rider_assignment': return Colors.orange;
-      default: return Colors.grey;
+      case 'pending':
+        return Colors.orange;
+      case 'preparing':
+        return Colors.teal;
+      case 'prepared':
+        return Colors.blueAccent;
+      case 'pickedup':
+        return Colors.purple;
+      case 'delivered':
+        return Colors.green;
+      case 'cancelled':
+        return Colors.red;
+      case 'needs_rider_assignment':
+        return Colors.orange;
+      default:
+        return Colors.grey;
     }
   }
 }
@@ -756,7 +801,8 @@ class _OrderPopupDialog extends StatefulWidget {
 class _OrderPopupDialogState extends State<_OrderPopupDialog> {
   bool _isLoading = false;
 
-  Future<void> updateOrderStatus(String orderId, String newStatus, {String? cancellationReason}) async {
+  Future<void> updateOrderStatus(String orderId, String newStatus,
+      {String? cancellationReason}) async {
     setState(() {
       _isLoading = true;
     });
@@ -770,13 +816,21 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
         updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
       } else if (newStatus == 'delivered') {
         updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
-        final orderDoc = await FirebaseFirestore.instance.collection('Orders').doc(orderId).get();
+        final orderDoc = await FirebaseFirestore.instance
+            .collection('Orders')
+            .doc(orderId)
+            .get();
         final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-        final String orderType = (data['Order_type'] as String?)?.toLowerCase() ?? '';
-        final String? riderId = data.containsKey('riderId') ? data['riderId'] as String? : null;
+        final String orderType =
+            (data['Order_type'] as String?)?.toLowerCase() ?? '';
+        final String? riderId =
+        data.containsKey('riderId') ? data['riderId'] as String? : null;
 
         if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
-          await FirebaseFirestore.instance.collection('Drivers').doc(riderId).update({
+          await FirebaseFirestore.instance
+              .collection('Drivers')
+              .doc(riderId)
+              .update({
             'assignedOrderId': '',
             'isAvailable': true,
           });
@@ -784,28 +838,39 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       } else if (newStatus == 'cancelled') {
         updateData['timestamps.cancelled'] = FieldValue.serverTimestamp();
 
-        // 🛑 CRITICAL FIX: Stop Auto-Assignment
+        // 🛑 Stop Auto-Assignment
         updateData['autoAssignStarted'] = FieldValue.delete();
 
-        FirebaseFirestore.instance.collection('rider_assignments').doc(orderId).delete();
+        FirebaseFirestore.instance
+            .collection('rider_assignments')
+            .doc(orderId)
+            .delete();
 
         if (cancellationReason != null) {
           updateData['cancellationReason'] = cancellationReason;
           try {
             final userScope = context.read<UserScopeService>();
-            updateData['rejectedBy'] = userScope.userEmail.isNotEmpty ? userScope.userEmail : 'Admin';
+            updateData['rejectedBy'] = userScope.userEmail.isNotEmpty
+                ? userScope.userEmail
+                : 'Admin';
           } catch (_) {
             updateData['rejectedBy'] = 'Admin';
           }
           updateData['rejectedAt'] = FieldValue.serverTimestamp();
         }
 
-        final orderDoc = await FirebaseFirestore.instance.collection('Orders').doc(orderId).get();
+        final orderDoc = await FirebaseFirestore.instance
+            .collection('Orders')
+            .doc(orderId)
+            .get();
         final data = orderDoc.data() as Map<String, dynamic>? ?? {};
         final String? riderId = data['riderId'] as String?;
 
         if (riderId != null && riderId.isNotEmpty) {
-          await FirebaseFirestore.instance.collection('Drivers').doc(riderId).update({
+          await FirebaseFirestore.instance
+              .collection('Drivers')
+              .doc(riderId)
+              .update({
             'assignedOrderId': '',
             'isAvailable': true,
           });
@@ -817,7 +882,10 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
         updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
       }
 
-      await FirebaseFirestore.instance.collection('Orders').doc(orderId).update(updateData);
+      await FirebaseFirestore.instance
+          .collection('Orders')
+          .doc(orderId)
+          .update(updateData);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -852,7 +920,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
 
     final rider = await showDialog<String>(
       context: context,
-      builder: (context) => _RiderSelectionDialog(currentBranchId: currentBranchId),
+      builder: (context) =>
+          _RiderSelectionDialog(currentBranchId: currentBranchId),
     );
 
     if (rider != null && rider.isNotEmpty) {
@@ -868,12 +937,15 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
           'timestamp': FieldValue.serverTimestamp(),
         };
 
-        await FirebaseFirestore.instance.collection('Orders').doc(orderId).update(updateMap);
+        await FirebaseFirestore.instance
+            .collection('Orders')
+            .doc(orderId)
+            .update(updateMap);
 
-        await FirebaseFirestore.instance.collection('Drivers').doc(rider).update({
-          'assignedOrderId': orderId,
-          'isAvailable': false
-        });
+        await FirebaseFirestore.instance
+            .collection('Drivers')
+            .doc(rider)
+            .update({'assignedOrderId': orderId, 'isAvailable': false});
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -919,11 +991,13 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     final data = widget.order.data() as Map<String, dynamic>? ?? {};
     final String orderTypeLower = orderType.toLowerCase();
 
-    // ✅ CRITICAL FIX: Restrict auto-assign visual to Delivery only
-    final bool isAutoAssigning = data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
+    // Check Auto-Assignment
+    final bool isAutoAssigning =
+        data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
     final bool needsManualAssignment = status == 'needs_rider_assignment';
 
-    const EdgeInsets btnPadding = EdgeInsets.symmetric(horizontal: 14, vertical: 10);
+    const EdgeInsets btnPadding =
+    EdgeInsets.symmetric(horizontal: 14, vertical: 10);
     const Size btnMinSize = Size(0, 40);
 
     // --- UNIVERSAL ACTIONS ---
@@ -943,7 +1017,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
             side: BorderSide(color: Colors.deepPurple.shade300),
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
@@ -961,7 +1036,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
             foregroundColor: Colors.white,
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
@@ -978,7 +1054,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
             foregroundColor: Colors.white,
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
@@ -999,7 +1076,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
           ),
         );
@@ -1018,7 +1096,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
           ),
         );
@@ -1030,14 +1109,17 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.delivery_dining, size: 16),
-            label: Text(needsManualAssignment ? 'Assign Manually' : 'Assign Rider'),
+            label: Text(
+                needsManualAssignment ? 'Assign Manually' : 'Assign Rider'),
             onPressed: () => _assignRider(orderId),
             style: ElevatedButton.styleFrom(
-              backgroundColor: needsManualAssignment ? Colors.orange : Colors.blue,
+              backgroundColor:
+              needsManualAssignment ? Colors.orange : Colors.blue,
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
           ),
         );
@@ -1054,7 +1136,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
           ),
         );
@@ -1101,7 +1184,9 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
 
     // --- CANCEL ACTIONS ---
-    if (status == 'pending' || status == 'preparing' || status == 'needs_rider_assignment') {
+    if (status == 'pending' ||
+        status == 'preparing' ||
+        status == 'needs_rider_assignment') {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.cancel, size: 16),
@@ -1112,7 +1197,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               builder: (context) => const _CancellationReasonDialog(),
             );
             if (reason != null && reason.trim().isNotEmpty) {
-              updateOrderStatus(orderId, 'cancelled', cancellationReason: reason);
+              updateOrderStatus(orderId, 'cancelled',
+                  cancellationReason: reason);
             }
           },
           style: ElevatedButton.styleFrom(
@@ -1120,7 +1206,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
             foregroundColor: Colors.white,
             padding: btnPadding,
             minimumSize: btnMinSize,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       );
@@ -1164,11 +1251,14 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
           const SizedBox(width: 12),
           Expanded(
             flex: 2,
-            child: Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+            child: Text(label,
+                style:
+                const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
           ),
           Expanded(
             flex: 3,
-            child: Text(value, style: const TextStyle(fontSize: 14, color: Colors.black87)),
+            child: Text(value,
+                style: const TextStyle(fontSize: 14, color: Colors.black87)),
           ),
         ],
       ),
@@ -1190,7 +1280,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
             child: Text.rich(
               TextSpan(
                 text: name,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                style:
+                const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
                 children: [
                   TextSpan(
                     text: ' (x$qty)',
@@ -1250,7 +1341,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
     final status = data['status']?.toString() ?? 'pending';
     final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
-    final orderNumber = data['dailyOrderNumber']?.toString() ?? widget.order.id.substring(0, 6).toUpperCase();
+    final orderNumber = data['dailyOrderNumber']?.toString() ??
+        widget.order.id.substring(0, 6).toUpperCase();
     final double subtotal = (data['subtotal'] as num? ?? 0.0).toDouble();
     final double deliveryFee = (data['deliveryFee'] as num? ?? 0.0).toDouble();
     final double totalAmount = (data['totalAmount'] as num? ?? 0.0).toDouble();
@@ -1262,7 +1354,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       child: SingleChildScrollView(
         child: Container(
           padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+          decoration: BoxDecoration(
+              color: Colors.white, borderRadius: BorderRadius.circular(20)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1274,25 +1367,46 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Order #$orderNumber', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+                        Text('Order #$orderNumber',
+                            style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.deepPurple)),
                         const SizedBox(height: 4),
-                        Text(timestamp != null ? DateFormat('MMM dd, yyyy hh:mm a').format(timestamp) : 'No date', style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+                        Text(
+                            timestamp != null
+                                ? DateFormat('MMM dd, yyyy hh:mm a')
+                                .format(timestamp)
+                                : 'No date',
+                            style: TextStyle(
+                                color: Colors.grey[600], fontSize: 14)),
                       ],
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: _getStatusColor(status).withOpacity(0.1),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: _getStatusColor(status).withOpacity(0.3)),
+                      border: Border.all(
+                          color: _getStatusColor(status).withOpacity(0.3)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: _getStatusColor(status))),
+                        Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _getStatusColor(status))),
                         const SizedBox(width: 6),
-                        Text(status.toUpperCase(), style: TextStyle(color: _getStatusColor(status), fontWeight: FontWeight.bold, fontSize: 12)),
+                        Text(status.toUpperCase(),
+                            style: TextStyle(
+                                color: _getStatusColor(status),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12)),
                       ],
                     ),
                   ),
@@ -1304,17 +1418,27 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
+                decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey[200]!)),
                 child: Column(
                   children: [
                     if (orderType.toLowerCase() == 'delivery') ...[
-                      _buildDetailRow(Icons.person, 'Customer:', data['customerName'] ?? 'N/A'),
-                      _buildDetailRow(Icons.phone, 'Phone:', data['customerPhone'] ?? 'N/A'),
-                      _buildDetailRow(Icons.location_on, 'Address:', '${data['deliveryAddress']?['street'] ?? ''}, ${data['deliveryAddress']?['city'] ?? ''}'),
-                      if (data['riderId']?.isNotEmpty == true) _buildDetailRow(Icons.delivery_dining, 'Rider:', data['riderId']),
+                      _buildDetailRow(Icons.person, 'Customer:',
+                          data['customerName'] ?? 'N/A'),
+                      _buildDetailRow(Icons.phone, 'Phone:',
+                          data['customerPhone'] ?? 'N/A'),
+                      _buildDetailRow(Icons.location_on, 'Address:',
+                          '${data['deliveryAddress']?['street'] ?? ''}, ${data['deliveryAddress']?['city'] ?? ''}'),
+                      if (data['riderId']?.isNotEmpty == true)
+                        _buildDetailRow(
+                            Icons.delivery_dining, 'Rider:', data['riderId']),
                     ] else ...[
-                      _buildDetailRow(Icons.person, 'Customer:', data['customerName'] ?? 'N/A'),
-                      _buildDetailRow(Icons.phone, 'Phone:', data['customerPhone'] ?? 'N/A'),
+                      _buildDetailRow(Icons.person, 'Customer:',
+                          data['customerName'] ?? 'N/A'),
+                      _buildDetailRow(Icons.phone, 'Phone:',
+                          data['customerPhone'] ?? 'N/A'),
                     ]
                   ],
                 ),
@@ -1325,8 +1449,13 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
-                child: Column(children: items.map((item) => _buildItemRow(item)).toList()),
+                decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey[200]!)),
+                child: Column(
+                    children:
+                    items.map((item) => _buildItemRow(item)).toList()),
               ),
 
               const SizedBox(height: 20),
@@ -1334,13 +1463,18 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
+                decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey[200]!)),
                 child: Column(
                   children: [
                     _buildSummaryRow('Subtotal', subtotal),
-                    if (deliveryFee > 0) _buildSummaryRow('Delivery Fee', deliveryFee),
+                    if (deliveryFee > 0)
+                      _buildSummaryRow('Delivery Fee', deliveryFee),
                     const Divider(height: 20),
-                    _buildSummaryRow('Total Amount', totalAmount, isTotal: true),
+                    _buildSummaryRow('Total Amount', totalAmount,
+                        isTotal: true),
                   ],
                 ),
               ),
@@ -1354,8 +1488,13 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
-                  onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.grey, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  onPressed:
+                  _isLoading ? null : () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.grey,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12))),
                   child: const Text('Close'),
                 ),
               ),
@@ -1368,15 +1507,24 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'pending': return Colors.orange;
-      case 'preparing': return Colors.teal;
-      case 'prepared': return Colors.blueAccent;
-      case 'rider_assigned': return Colors.purple;
-      case 'pickedup': return Colors.deepPurple;
-      case 'delivered': return Colors.green;
-      case 'cancelled': return Colors.red;
-      case 'needs_rider_assignment': return Colors.orange;
-      default: return Colors.grey;
+      case 'pending':
+        return Colors.orange;
+      case 'preparing':
+        return Colors.teal;
+      case 'prepared':
+        return Colors.blueAccent;
+      case 'rider_assigned':
+        return Colors.purple;
+      case 'pickedup':
+        return Colors.deepPurple;
+      case 'delivered':
+        return Colors.green;
+      case 'cancelled':
+        return Colors.red;
+      case 'needs_rider_assignment':
+        return Colors.orange;
+      default:
+        return Colors.grey;
     }
   }
 }
@@ -1417,7 +1565,8 @@ class _RiderSelectionDialog extends StatelessWidget {
 
             final filteredDrivers = snapshot.data!.docs.where((driver) {
               final data = driver.data() as Map<String, dynamic>;
-              final driverBranchIds = List<String>.from(data['branchIds'] ?? []);
+              final driverBranchIds =
+              List<String>.from(data['branchIds'] ?? []);
               if (currentBranchId == null) return true;
               return driverBranchIds.contains(currentBranchId);
             }).toList();
@@ -1429,7 +1578,9 @@ class _RiderSelectionDialog extends StatelessWidget {
                   children: [
                     Icon(Icons.person_off, size: 48, color: Colors.grey),
                     SizedBox(height: 8),
-                    Text('No drivers available\nfor your branch', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                    Text('No drivers available\nfor your branch',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey)),
                   ],
                 ),
               );
@@ -1447,13 +1598,16 @@ class _RiderSelectionDialog extends StatelessWidget {
                 final String status = data['status'] ?? 'offline';
 
                 return Card(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   elevation: 2,
                   color: Colors.grey.shade50,
                   child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
                     leading: CircleAvatar(child: Icon(Icons.person)),
-                    title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    title: Text(name,
+                        style: const TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: Text(status),
                     onTap: () => Navigator.pop(context, driverId),
                   ),
@@ -1464,7 +1618,9 @@ class _RiderSelectionDialog extends StatelessWidget {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.red))),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.red))),
       ],
     );
   }
@@ -1474,7 +1630,8 @@ class _CancellationReasonDialog extends StatefulWidget {
   const _CancellationReasonDialog();
 
   @override
-  State<_CancellationReasonDialog> createState() => _CancellationReasonDialogState();
+  State<_CancellationReasonDialog> createState() =>
+      _CancellationReasonDialogState();
 }
 
 class _CancellationReasonDialogState extends State<_CancellationReasonDialog> {
@@ -1498,10 +1655,12 @@ class _CancellationReasonDialogState extends State<_CancellationReasonDialog> {
   @override
   Widget build(BuildContext context) {
     final bool isOther = _selectedReason == 'Other';
-    final bool isValid = _selectedReason != null && (!isOther || _otherReasonController.text.trim().isNotEmpty);
+    final bool isValid = _selectedReason != null &&
+        (!isOther || _otherReasonController.text.trim().isNotEmpty);
 
     return AlertDialog(
-      title: const Text('Cancel Order', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+      title: const Text('Cancel Order',
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,

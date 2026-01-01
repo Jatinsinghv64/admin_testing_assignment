@@ -5,8 +5,6 @@ import 'package:provider/provider.dart';
 import '../Widgets/RiderAssignment.dart';
 import '../main.dart'; // Assuming UserScopeService is here
 
-/// A dedicated screen for manually assigning riders to orders that
-/// failed auto-assignment (status 'needs_rider_assignment').
 class ManualAssignmentScreen extends StatefulWidget {
   const ManualAssignmentScreen({super.key});
 
@@ -15,25 +13,22 @@ class ManualAssignmentScreen extends StatefulWidget {
 }
 
 class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
-  /// Opens the rider selection dialog and assigns the chosen rider.
   Future<void> _promptAssignRider(
       BuildContext context, String orderId, String currentBranchId) async {
     if (!mounted) return;
 
     final riderId = await showDialog<String>(
       context: context,
-      // Use the beautiful, professional, and fixed dialog
       builder: (context) =>
           RiderSelectionDialog(currentBranchId: currentBranchId),
     );
 
     if (riderId != null && riderId.isNotEmpty) {
       if (!mounted) return;
-      // Use the static method from RiderAssignmentService
       await RiderAssignmentService.manualAssignRider(
         orderId: orderId,
         riderId: riderId,
-        context: context, // Pass the context for SnackBars
+        context: context,
       );
     }
   }
@@ -42,18 +37,12 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
   Widget build(BuildContext context) {
     final userScope = context.read<UserScopeService>();
 
-    // --- Add date filter for "current day" ---
-    final now = DateTime.now();
-    final startOfToday = DateTime(now.year, now.month, now.day);
-    final endOfToday = startOfToday.add(const Duration(days: 1));
-
-    // Base query for orders needing assignment
+    // ✅ FIX: REMOVED DATE FILTER
+    // This ensures the screen displays ALL orders that need assignment,
+    // matching the Badge Count and preventing hidden tasks.
     Query query = FirebaseFirestore.instance
         .collection('Orders')
-        .where('status', isEqualTo: 'needs_rider_assignment')
-    // --- FIX: Query on 'timestamp' instead of 'needsAssignmentAt' ---
-        .where('timestamp', isGreaterThanOrEqualTo: startOfToday)
-        .where('timestamp', isLessThan: endOfToday);
+        .where('status', isEqualTo: 'needs_rider_assignment');
 
     // Filter by branch for non-super admins
     if (!userScope.isSuperAdmin) {
@@ -77,8 +66,6 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
         ),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        // --- FIX: Removed the .orderBy() to avoid needing a composite index ---
-        // We will sort the results manually in the builder.
         stream: query.snapshots()
         as Stream<QuerySnapshot<Map<String, dynamic>>>,
         builder: (context, snapshot) {
@@ -110,12 +97,6 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
                       style: TextStyle(color: Colors.red[700]),
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'This might be due to a missing Firestore index. Please check your debug console for a link to create it.',
-                      style: TextStyle(color: Colors.grey, fontSize: 12),
-                      textAlign: TextAlign.center,
-                    ),
                   ],
                 ),
               ),
@@ -140,7 +121,7 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    "No orders need manual assignment for today.",
+                    "No orders need manual assignment.",
                     style: TextStyle(
                       color: Colors.grey[600],
                       fontSize: 14,
@@ -153,33 +134,21 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
 
           final docs = snapshot.data!.docs;
 
-          // --- FIX: Sort the documents in-memory ---
-          // This avoids the complex Firestore index requirement
-          // by sorting after the data is fetched.
+          // Sort in-memory (Newest first)
           try {
             docs.sort((a, b) {
               final aData = a.data();
               final bData = b.data();
-
-              // --- FIX: Sort by 'timestamp' ---
-              final aTimestamp =
-              (aData['timestamp'] as Timestamp?)?.toDate();
-              final bTimestamp =
-              (bData['timestamp'] as Timestamp?)?.toDate();
-
-              // Handle nulls
+              final aTimestamp = (aData['timestamp'] as Timestamp?)?.toDate();
+              final bTimestamp = (bData['timestamp'] as Timestamp?)?.toDate();
               if (aTimestamp == null && bTimestamp == null) return 0;
-              if (aTimestamp == null) return 1; // Put nulls at the end
-              if (bTimestamp == null) return -1; // Keep non-nulls at the start
-
-              // Sort descending (newest first)
+              if (aTimestamp == null) return 1;
+              if (bTimestamp == null) return -1;
               return bTimestamp.compareTo(aTimestamp);
             });
           } catch (e) {
-            // Handle potential sort error (e.g., bad data)
             debugPrint("Error sorting documents: $e");
           }
-          // --- End of FIX ---
 
           return ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
@@ -205,8 +174,7 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start, // Fixed typo here
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -346,10 +314,6 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
   }
 }
 
-// -----------------------------------------------------------------------------
-// Professional Rider Selection Dialog
-// -----------------------------------------------------------------------------
-
 class RiderSelectionDialog extends StatelessWidget {
   final String currentBranchId;
 
@@ -357,19 +321,16 @@ class RiderSelectionDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Build the branch-aware query for available drivers
     Query query = FirebaseFirestore.instance
         .collection('Drivers')
         .where('isAvailable', isEqualTo: true)
         .where('status', isEqualTo: 'online');
 
-    // Filter by branch
     if (currentBranchId.isNotEmpty) {
       query = query.where('branchIds', arrayContains: currentBranchId);
     }
 
     return AlertDialog(
-      // --- FIX: Add shape for professional look ---
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
@@ -387,10 +348,9 @@ class RiderSelectionDialog extends StatelessWidget {
         ],
       ),
       content:
-      // --- FIX: Add fixed height container to prevent overflow ---
       Container(
         width: double.maxFinite,
-        height: 300, // Set a fixed height for the list
+        height: 300,
         child: StreamBuilder<QuerySnapshot>(
           stream: query.snapshots(),
           builder: (context, snapshot) {
@@ -453,15 +413,11 @@ class RiderSelectionDialog extends StatelessWidget {
             }
 
             final drivers = snapshot.data!.docs;
-            // Use ListView instead of ListView.builder for smaller lists
-            // to avoid potential layout issues with constraints.
             return ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              // shrinkWrap: true, // Not needed with fixed height
               children: drivers.map((driverDoc) {
                 final data = driverDoc.data() as Map<String, dynamic>;
                 final String name = data['name'] ?? 'Unnamed Driver';
-                // --- FIX: Handle int or String for phone ---
                 final String phone = data['phone']?.toString() ?? 'No phone';
                 final String vehicle =
                     data['vehicle']?['type'] ?? 'No vehicle';
@@ -491,7 +447,7 @@ class RiderSelectionDialog extends StatelessWidget {
                     ),
                     subtitle: Column(
                       crossAxisAlignment:
-                      CrossAxisAlignment.start, // Fixed typo here
+                      CrossAxisAlignment.start,
                       children: [
                         Text(
                           phone,

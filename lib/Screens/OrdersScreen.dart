@@ -538,6 +538,9 @@ class _OrdersScreenState extends State<OrdersScreen>
     );
   }
 
+  // --------------------------------------------------------------------------
+  // ✅ UPDATED QUERY LOGIC (Business Day Fix)
+  // --------------------------------------------------------------------------
   Stream<QuerySnapshot<Map<String, dynamic>>> _getOrdersStream(
       String orderType) {
     Query<Map<String, dynamic>> baseQuery = FirebaseFirestore.instance
@@ -551,14 +554,27 @@ class _OrdersScreenState extends State<OrdersScreen>
     }
 
     if (_selectedStatus == 'all') {
-      final now = DateTime.now();
-      final startOfToday = DateTime(now.year, now.month, now.day);
-      final endOfToday = startOfToday.add(const Duration(days: 1));
+      // ✅ FIX: "Business Day" Logic (Prevents orders disappearing at midnight)
+      var now = DateTime.now();
+
+      // If it is currently before 6:00 AM (e.g., 2 AM),
+      // we consider the "start of today" to be YESTERDAY at 6:00 AM.
+      if (now.hour < 6) {
+        now = now.subtract(const Duration(days: 1));
+      }
+
+      // Start of Business Day = 6:00 AM
+      final startOfBusinessDay = DateTime(now.year, now.month, now.day, 6, 0, 0);
+
+      // End of Business Day = Tomorrow 6:00 AM
+      final endOfBusinessDay = startOfBusinessDay.add(const Duration(hours: 24));
 
       baseQuery = baseQuery
-          .where('timestamp', isGreaterThanOrEqualTo: startOfToday)
-          .where('timestamp', isLessThan: endOfToday);
+          .where('timestamp', isGreaterThanOrEqualTo: startOfBusinessDay)
+          .where('timestamp', isLessThan: endOfBusinessDay);
     } else {
+      // If filtering by specific status, show ALL, regardless of date.
+      // This prevents "Ghost Orders" that are pending but old.
       baseQuery = baseQuery.where('status', isEqualTo: _selectedStatus);
     }
 

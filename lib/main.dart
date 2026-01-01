@@ -8,7 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:permission_handler/permission_handler.dart'; //
+import 'package:permission_handler/permission_handler.dart';
 
 import 'Screens/ConnectionUtils.dart';
 import 'Screens/LoginScreen.dart';
@@ -23,12 +23,70 @@ import 'Screens/OfflineScreen.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 // ---------------------------------------------------------------------------
-// ✅ TOP-LEVEL BACKGROUND HANDLER
+// ✅ UPDATED TOP-LEVEL BACKGROUND HANDLER
 // ---------------------------------------------------------------------------
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // 1. Initialize Firebase (Required for background isolate)
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   debugPrint("Handling a background message: ${message.messageId}");
+
+  // 2. Initialize Local Notifications
+  // Since this runs in a separate isolate, we must re-initialize the plugin here.
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+  FlutterLocalNotificationsPlugin();
+
+  const AndroidInitializationSettings initializationSettingsAndroid =
+  AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  // iOS background handling is largely managed by the OS, but this setup ensures
+  // consistency if you add iOS-specific logic later.
+  const InitializationSettings initializationSettings =
+  InitializationSettings(android: initializationSettingsAndroid);
+
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+
+  // 3. Create the Notification Channel
+  // This MUST match the channel ID in AndroidManifest.xml and your Cloud Functions
+  const AndroidNotificationChannel channel = AndroidNotificationChannel(
+    'high_importance_channel', // id
+    'New Order Notifications', // title
+    description: 'This channel is used for important order notifications.',
+    importance: Importance.max, // Max importance forces a popup/sound
+    playSound: true,
+  );
+
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+      AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
+
+  // 4. Parse Content
+  // We prioritize 'data' because your updated backend sends Data-Only messages.
+  String title = message.data['title'] ?? message.notification?.title ?? "New Order Received";
+  String body = message.data['body'] ?? message.notification?.body ?? "Open app to view details";
+
+  // 5. Show the Notification Manually
+  // This forces the phone to ring/vibrate even if the app is killed.
+  await flutterLocalNotificationsPlugin.show(
+    message.hashCode,
+    title,
+    body,
+    NotificationDetails(
+      android: AndroidNotificationDetails(
+        channel.id,
+        channel.name,
+        channelDescription: channel.description,
+        icon: '@mipmap/ic_launcher',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+        // To use a custom sound, place 'notification.mp3' in android/app/src/main/res/raw/
+        // and uncomment the line below:
+        // sound: RawResourceAndroidNotificationSound('notification'),
+      ),
+    ),
+  );
 }
 
 // ✅ HELPER: Consistent ID Generator
@@ -47,6 +105,7 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  // Register the background handler immediately
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   runApp(const MyApp());
@@ -82,7 +141,6 @@ class MyApp extends StatelessWidget {
               fontWeight: FontWeight.bold,
             ),
           ),
-          // ... (rest of the theme config remains the same)
           bottomNavigationBarTheme: const BottomNavigationBarThemeData(
             backgroundColor: Colors.white,
             selectedItemColor: Colors.deepPurple,
@@ -187,7 +245,7 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
   }
 
   // -------------------------------------------------------------------------
-  // 🔔 PERMISSION LOGIC (Fix for Issue 3.1)
+  // 🔔 PERMISSION LOGIC
   // -------------------------------------------------------------------------
 
   /// Requests permissions initially. If denied, sets the banner flag.

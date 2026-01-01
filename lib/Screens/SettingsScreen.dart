@@ -13,6 +13,7 @@ import 'AnalyticsScreen.dart';
 import 'BranchManagement.dart';
 import 'CouponsScreen.dart';
 import 'OrderHistory.dart';
+import 'RestaurantTimingScreen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -115,6 +116,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             // Administration Section
             buildSectionHeader('Administration', Icons.admin_panel_settings),
             const SizedBox(height: 16),
+            // Inside SettingsScreen build method, under Administration section:
+
+            if (userScope.isSuperAdmin)
+              buildSettingsCard(
+                icon: Icons.access_time_rounded,
+                title: 'Restaurant Timings',
+                subtitle: 'Manage opening hours and shifts',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (context) => const RestaurantTimingScreen()),
+                ),
+              ),
+            const SizedBox(height: 12),
 
             // --- Order History ---
             if (userScope.isSuperAdmin || userScope.role == 'branchadmin') ...[
