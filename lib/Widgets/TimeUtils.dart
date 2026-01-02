@@ -21,6 +21,11 @@ class TimeUtils {
     return getBusinessStartDateTime().add(const Duration(hours: 24));
   }
 
+  /// ✅ ADDED: Returns the Business End Time as a Firestore Timestamp
+  static Timestamp getBusinessEndTimestamp() {
+    return Timestamp.fromDate(getBusinessEndDateTime());
+  }
+
   /// Converts Device/Server Time -> Restaurant Time (e.g., UTC+3 for Qatar)
   static DateTime getRestaurantTime(DateTime date) {
     // 1. Convert to UTC to remove device timezone bias
