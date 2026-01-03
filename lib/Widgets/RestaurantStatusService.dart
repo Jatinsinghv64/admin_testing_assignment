@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
+import '../constants.dart'; // ✅ Added import for Constants
 
 class RestaurantStatusService with ChangeNotifier {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -71,7 +72,13 @@ class RestaurantStatusService with ChangeNotifier {
     notifyListeners();
 
     _branchSubscription?.cancel();
-    _branchSubscription = _db.collection('Branch').doc(_restaurantId).snapshots().listen((doc) {
+
+    // ✅ Updated to use AppConstants.collectionBranch
+    _branchSubscription = _db
+        .collection(AppConstants.collectionBranch)
+        .doc(_restaurantId)
+        .snapshots()
+        .listen((doc) {
       if (doc.exists) {
         final data = doc.data()!;
         _isManualOpen = data['isOpen'] ?? false;
@@ -104,11 +111,6 @@ class RestaurantStatusService with ChangeNotifier {
       final now = tz.TZDateTime.now(location);
 
       bool openNow = _checkDaySchedule(now, 0) || _checkDaySchedule(now, -1);
-
-      // --- INDUSTRY LEVEL UPDATE ---
-      // We removed the logic that calls 'toggleRestaurantStatus(false)'.
-      // The Cloud Function now handles the database write.
-      // We only update the local variable so the UI reflects the schedule immediately.
 
       if (_isScheduleOpen != openNow) {
         _isScheduleOpen = openNow;
@@ -233,7 +235,8 @@ class RestaurantStatusService with ChangeNotifier {
     notifyListeners();
 
     try {
-      await _db.collection('Branch').doc(_restaurantId!).set({
+      // ✅ Updated to use AppConstants.collectionBranch
+      await _db.collection(AppConstants.collectionBranch).doc(_restaurantId!).set({
         'isOpen': newStatus,
         'lastStatusUpdate': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));

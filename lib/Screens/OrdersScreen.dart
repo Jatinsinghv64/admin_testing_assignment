@@ -3,13 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:connectivity_plus/connectivity_plus.dart'; // ✅ Added
 
 import '../Widgets/OrderService.dart';
 import '../Widgets/PrintingService.dart';
 import '../Widgets/RiderAssignment.dart';
 import '../Widgets/TimeUtils.dart';
 import '../main.dart';
-
+import '../constants.dart'; // ✅ Added
 
 // Service for handling cross-screen order selection/highlighting
 class OrderSelectionService {
@@ -144,14 +145,14 @@ class _OrdersScreenState extends State<OrdersScreen>
   List<String> _getStatusValues() {
     return [
       'all',
-      'pending',
-      'preparing',
-      'prepared',
-      'rider_assigned',
-      'pickedUp',
-      'delivered',
-      'cancelled',
-      'needs_rider_assignment',
+      AppConstants.statusPending,
+      AppConstants.statusPreparing,
+      AppConstants.statusPrepared,
+      AppConstants.statusRiderAssigned,
+      AppConstants.statusPickedUp,
+      AppConstants.statusDelivered,
+      AppConstants.statusCancelled,
+      AppConstants.statusNeedsAssignment,
     ];
   }
 
@@ -307,21 +308,21 @@ class _OrdersScreenState extends State<OrdersScreen>
               children: [
                 _buildEnhancedStatusChip('All', 'all', Icons.apps_rounded),
                 _buildEnhancedStatusChip(
-                    'Placed', 'pending', Icons.schedule_rounded),
+                    'Placed', AppConstants.statusPending, Icons.schedule_rounded),
                 _buildEnhancedStatusChip(
-                    'Preparing', 'preparing', Icons.restaurant_rounded),
+                    'Preparing', AppConstants.statusPreparing, Icons.restaurant_rounded),
                 _buildEnhancedStatusChip(
-                    'Prepared', 'prepared', Icons.done_all_rounded),
+                    'Prepared', AppConstants.statusPrepared, Icons.done_all_rounded),
                 _buildEnhancedStatusChip('Needs Assign',
-                    'needs_rider_assignment', Icons.person_pin_circle_outlined),
-                _buildEnhancedStatusChip('Rider Assigned', 'rider_assigned',
+                    AppConstants.statusNeedsAssignment, Icons.person_pin_circle_outlined),
+                _buildEnhancedStatusChip('Rider Assigned', AppConstants.statusRiderAssigned,
                     Icons.delivery_dining_rounded),
                 _buildEnhancedStatusChip(
-                    'Picked Up', 'pickedUp', Icons.local_shipping_rounded),
+                    'Picked Up', AppConstants.statusPickedUp, Icons.local_shipping_rounded),
                 _buildEnhancedStatusChip(
-                    'Delivered', 'delivered', Icons.check_circle_rounded),
+                    'Delivered', AppConstants.statusDelivered, Icons.check_circle_rounded),
                 _buildEnhancedStatusChip(
-                    'Cancelled', 'cancelled', Icons.cancel_rounded),
+                    'Cancelled', AppConstants.statusCancelled, Icons.cancel_rounded),
               ],
             ),
           ),
@@ -334,26 +335,26 @@ class _OrdersScreenState extends State<OrdersScreen>
     final bool isSelected = _selectedStatus == value;
     Color chipColor;
     switch (value) {
-      case 'pending':
-      case 'needs_rider_assignment':
+      case AppConstants.statusPending:
+      case AppConstants.statusNeedsAssignment:
         chipColor = Colors.orange;
         break;
-      case 'preparing':
+      case AppConstants.statusPreparing:
         chipColor = Colors.teal;
         break;
-      case 'prepared':
+      case AppConstants.statusPrepared:
         chipColor = Colors.blueAccent;
         break;
-      case 'rider_assigned':
+      case AppConstants.statusRiderAssigned:
         chipColor = Colors.purple;
         break;
-      case 'pickedUp':
+      case AppConstants.statusPickedUp:
         chipColor = Colors.deepPurple;
         break;
-      case 'delivered':
+      case AppConstants.statusDelivered:
         chipColor = Colors.green;
         break;
-      case 'cancelled':
+      case AppConstants.statusCancelled:
         chipColor = Colors.red;
         break;
       default:
@@ -529,14 +530,30 @@ class _OrderCardState extends State<_OrderCard> {
     }
   }
 
+  // ✅ FIX: Check Connectivity before Cancel
   Future<void> _handleCancelPress(BuildContext context) async {
+    final List<ConnectivityResult> connectivityResult =
+    await (Connectivity().checkConnectivity());
+
+    if (connectivityResult.contains(ConnectivityResult.none)) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("⚠️ Internet connection required to cancel orders."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
     final String? reason = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => const CancellationReasonDialog(),
     );
 
     if (reason != null && reason.isNotEmpty) {
-      widget.onStatusChange(widget.order.id, 'cancelled', reason: reason);
+      widget.onStatusChange(widget.order.id, AppConstants.statusCancelled, reason: reason);
     }
   }
 
@@ -553,7 +570,6 @@ class _OrderCardState extends State<_OrderCard> {
     if (riderId != null && riderId.isNotEmpty) {
       setState(() => _isAssigning = true);
 
-      // Using the RiderAssignmentService for manual assignment
       await RiderAssignmentService.manualAssignRider(
         orderId: widget.order.id,
         riderId: riderId,
@@ -597,7 +613,7 @@ class _OrderCardState extends State<_OrderCard> {
 
     final bool isAutoAssigning =
         data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
-    final bool needsManualAssignment = status == 'needs_rider_assignment';
+    final bool needsManualAssignment = status == AppConstants.statusNeedsAssignment;
 
     const EdgeInsets btnPadding =
     EdgeInsets.symmetric(horizontal: 14, vertical: 10);
@@ -605,12 +621,12 @@ class _OrderCardState extends State<_OrderCard> {
 
     // --- BUTTON GENERATION LOGIC ---
 
-    if (status == 'pending') {
+    if (status == AppConstants.statusPending) {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.check, size: 16),
           label: const Text('Accept Order'),
-          onPressed: () => widget.onStatusChange(widget.order.id, 'preparing'),
+          onPressed: () => widget.onStatusChange(widget.order.id, AppConstants.statusPreparing),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.green,
             foregroundColor: Colors.white,
@@ -623,12 +639,12 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
-    if (status == 'preparing') {
+    if (status == AppConstants.statusPreparing) {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.done_all, size: 16),
           label: const Text('Mark as Prepared'),
-          onPressed: () => widget.onStatusChange(widget.order.id, 'prepared'),
+          onPressed: () => widget.onStatusChange(widget.order.id, AppConstants.statusPrepared),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.blue,
             foregroundColor: Colors.white,
@@ -642,13 +658,12 @@ class _OrderCardState extends State<_OrderCard> {
     }
 
     // --- REPRINT RECEIPT ---
-    if (status != 'pending' && status != 'cancelled') {
+    if (status != AppConstants.statusPending && status != AppConstants.statusCancelled) {
       buttons.add(
         OutlinedButton.icon(
           icon: const Icon(Icons.print, size: 16),
           label: const Text('Reprint Receipt'),
           onPressed: () async {
-            // Updated to use PrintingService
             await PrintingService.printReceipt(context, widget.order);
           },
           style: OutlinedButton.styleFrom(
@@ -667,7 +682,7 @@ class _OrderCardState extends State<_OrderCard> {
     if (orderTypeLower == 'pickup' ||
         orderTypeLower == 'takeaway' ||
         orderTypeLower == 'dine_in') {
-      if (status == 'prepared') {
+      if (status == AppConstants.statusPrepared) {
         String label = 'Mark as Completed';
         IconData icon = Icons.task_alt;
 
@@ -684,7 +699,7 @@ class _OrderCardState extends State<_OrderCard> {
             icon: Icon(icon, size: 16),
             label: Text(label),
             onPressed: () =>
-                widget.onStatusChange(widget.order.id, 'delivered'),
+                widget.onStatusChange(widget.order.id, AppConstants.statusDelivered),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -699,8 +714,8 @@ class _OrderCardState extends State<_OrderCard> {
     }
     // --- DELIVERY LOGIC ---
     else if (orderTypeLower == 'delivery') {
-      final bool canAssign = (status == 'prepared' ||
-          status == 'preparing' ||
+      final bool canAssign = (status == AppConstants.statusPrepared ||
+          status == AppConstants.statusPreparing ||
           needsManualAssignment);
 
       if (canAssign && !isAutoAssigning) {
@@ -723,13 +738,13 @@ class _OrderCardState extends State<_OrderCard> {
         );
       }
 
-      if (status == 'pickedUp') {
+      if (status == AppConstants.statusPickedUp) {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.task_alt, size: 16),
             label: const Text('Mark as Delivered'),
             onPressed: () =>
-                widget.onStatusChange(widget.order.id, 'delivered'),
+                widget.onStatusChange(widget.order.id, AppConstants.statusDelivered),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -796,7 +811,7 @@ class _OrderCardState extends State<_OrderCard> {
       }
     }
 
-    if (status != 'cancelled' && status != 'delivered') {
+    if (status != AppConstants.statusCancelled && status != AppConstants.statusDelivered) {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.cancel, size: 16),
@@ -945,7 +960,6 @@ class _OrderCardState extends State<_OrderCard> {
     final status = data['status']?.toString() ?? 'pending';
     final String orderTypeLower = widget.orderType.toLowerCase();
 
-    // Updated to use TimeUtils
     final DateTime? rawTimestamp = (data['timestamp'] as Timestamp?)?.toDate();
     final DateTime? timestamp = rawTimestamp != null
         ? TimeUtils.getRestaurantTime(rawTimestamp)
@@ -959,7 +973,7 @@ class _OrderCardState extends State<_OrderCard> {
 
     final bool isAutoAssigning = data.containsKey('autoAssignStarted') &&
         orderTypeLower == 'delivery';
-    final bool needsManualAssignment = status == 'needs_rider_assignment';
+    final bool needsManualAssignment = status == AppConstants.statusNeedsAssignment;
 
     return Container(
       decoration: BoxDecoration(
@@ -1436,7 +1450,7 @@ class _RiderSelectionDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Query query = FirebaseFirestore.instance
-        .collection('Drivers')
+        .collection(AppConstants.collectionDrivers)
         .where('isAvailable', isEqualTo: true)
         .where('status', isEqualTo: 'online');
 

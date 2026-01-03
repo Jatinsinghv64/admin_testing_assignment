@@ -1,17 +1,47 @@
+// lib/Widgets/TimeUtils.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest.dart' as tz_data;
 
 class TimeUtils {
-  /// Calculates the start of the "Business Day" (e.g., 6:00 AM).
-  /// If the current time is before 6 AM (e.g., 2 AM), it belongs to the previous day's shift.
-  static DateTime getBusinessStartDateTime() {
-    var now = DateTime.now();
-    if (now.hour < 6) {
-      now = now.subtract(const Duration(days: 1));
+  static const String _qatarLocation = 'Asia/Qatar';
+  static bool _isInitialized = false;
+
+  /// Ensures timezones are loaded. Call this in main.dart
+  static void initialize() {
+    if (!_isInitialized) {
+      tz_data.initializeTimeZones();
+      _isInitialized = true;
     }
-    return DateTime(now.year, now.month, now.day, 6, 0, 0);
   }
 
-  /// Returns the Business Start Time as a Firestore Timestamp
+  /// Gets the current time in Qatar (Professional Standard)
+  static tz.TZDateTime nowQatar() {
+    if (!_isInitialized) initialize();
+    final qatar = tz.getLocation(_qatarLocation);
+    return tz.TZDateTime.now(qatar);
+  }
+
+  /// Calculates the start of the "Business Day" (6:00 AM Qatar Time)
+  /// If now is 2 AM, it returns 6 AM of the *previous* day.
+  static DateTime getBusinessStartDateTime() {
+    final now = nowQatar();
+
+    // If it's before 6 AM, the business day started yesterday at 6 AM
+    final effectiveDate = now.hour < 6
+        ? now.subtract(const Duration(days: 1))
+        : now;
+
+    return tz.TZDateTime(
+      now.location,
+      effectiveDate.year,
+      effectiveDate.month,
+      effectiveDate.day,
+      6, 0, 0, // 6:00 AM Start
+    );
+  }
+
   static Timestamp getBusinessStartTimestamp() {
     return Timestamp.fromDate(getBusinessStartDateTime());
   }
@@ -21,17 +51,14 @@ class TimeUtils {
     return getBusinessStartDateTime().add(const Duration(hours: 24));
   }
 
-  /// ✅ ADDED: Returns the Business End Time as a Firestore Timestamp
   static Timestamp getBusinessEndTimestamp() {
     return Timestamp.fromDate(getBusinessEndDateTime());
   }
 
-  /// Converts Device/Server Time -> Restaurant Time (e.g., UTC+3 for Qatar)
+  /// Converts any Date (Server/Device) to Qatar Time for Display
   static DateTime getRestaurantTime(DateTime date) {
-    // 1. Convert to UTC to remove device timezone bias
-    DateTime utc = date.toUtc();
-    // 2. Add the Restaurant's Offset (e.g., +3 hours for Qatar/Saudi)
-    // TODO: Ideally, fetch this offset from a configuration/remote config
-    return utc.add(const Duration(hours: 3));
+    if (!_isInitialized) initialize();
+    final qatar = tz.getLocation(_qatarLocation);
+    return tz.TZDateTime.from(date, qatar);
   }
 }

@@ -19,6 +19,8 @@ import 'Widgets/notification.dart';
 import 'Widgets/FCM_Service.dart';
 import 'firebase_options.dart';
 import 'Screens/OfflineScreen.dart';
+import 'constants.dart'; // ✅ Added
+import 'Widgets/AccessDeniedWidget.dart'; // ✅ Added
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -27,32 +29,25 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 // ---------------------------------------------------------------------------
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // 1. Initialize Firebase (Required for background isolate)
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   debugPrint("Handling a background message: ${message.messageId}");
 
-  // 2. Initialize Local Notifications
-  // Since this runs in a separate isolate, we must re-initialize the plugin here.
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
   FlutterLocalNotificationsPlugin();
 
   const AndroidInitializationSettings initializationSettingsAndroid =
   AndroidInitializationSettings('@mipmap/ic_launcher');
 
-  // iOS background handling is largely managed by the OS, but this setup ensures
-  // consistency if you add iOS-specific logic later.
   const InitializationSettings initializationSettings =
   InitializationSettings(android: initializationSettingsAndroid);
 
   await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 
-  // 3. Create the Notification Channel
-  // This MUST match the channel ID in AndroidManifest.xml and your Cloud Functions
   const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'high_importance_channel', // id
-    'New Order Notifications', // title
+    'high_importance_channel',
+    'New Order Notifications',
     description: 'This channel is used for important order notifications.',
-    importance: Importance.max, // Max importance forces a popup/sound
+    importance: Importance.max,
     playSound: true,
   );
 
@@ -61,13 +56,11 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
 
-  // 4. Parse Content
-  // We prioritize 'data' because your updated backend sends Data-Only messages.
-  String title = message.data['title'] ?? message.notification?.title ?? "New Order Received";
-  String body = message.data['body'] ?? message.notification?.body ?? "Open app to view details";
+  String title =
+      message.data['title'] ?? message.notification?.title ?? "New Order Received";
+  String body =
+      message.data['body'] ?? message.notification?.body ?? "Open app to view details";
 
-  // 5. Show the Notification Manually
-  // This forces the phone to ring/vibrate even if the app is killed.
   await flutterLocalNotificationsPlugin.show(
     message.hashCode,
     title,
@@ -81,15 +74,11 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         importance: Importance.max,
         priority: Priority.high,
         playSound: true,
-        // To use a custom sound, place 'notification.mp3' in android/app/src/main/res/raw/
-        // and uncomment the line below:
-        // sound: RawResourceAndroidNotificationSound('notification'),
       ),
     ),
   );
 }
 
-// ✅ HELPER: Consistent ID Generator
 int getStableId(String id) {
   int hash = 5381;
   for (int i = 0; i < id.length; i++) {
@@ -105,7 +94,6 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Register the background handler immediately
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   runApp(const MyApp());
@@ -120,8 +108,10 @@ class MyApp extends StatelessWidget {
       providers: [
         Provider<AuthService>(create: (_) => AuthService()),
         ChangeNotifierProvider<UserScopeService>(create: (_) => UserScopeService()),
-        ChangeNotifierProvider<OrderNotificationService>(create: (_) => OrderNotificationService()),
-        ChangeNotifierProvider<RestaurantStatusService>(create: (_) => RestaurantStatusService()),
+        ChangeNotifierProvider<OrderNotificationService>(
+            create: (_) => OrderNotificationService()),
+        ChangeNotifierProvider<RestaurantStatusService>(
+            create: (_) => RestaurantStatusService()),
         ChangeNotifierProvider(create: (_) => BadgeCountProvider()),
       ],
       child: MaterialApp(
@@ -191,7 +181,7 @@ class ScopeLoader extends StatefulWidget {
 }
 
 class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
-  bool _showPermissionBanner = false; // State to toggle the banner
+  bool _showPermissionBanner = false;
 
   @override
   void initState() {
@@ -208,7 +198,6 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // ✅ App Lifecycle Listener: Re-checks status silently when app resumes
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -222,35 +211,30 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     final statusService = context.read<RestaurantStatusService>();
     final authService = context.read<AuthService>();
 
-    final bool isSuccess = await scopeService.loadUserScope(widget.user, authService);
+    final bool isSuccess =
+    await scopeService.loadUserScope(widget.user, authService);
 
     if (isSuccess && mounted) {
       if (scopeService.branchId.isNotEmpty) {
         String restaurantName = "Branch ${scopeService.branchId}";
         if (scopeService.userEmail.isNotEmpty) {
-          restaurantName = "Restaurant (${scopeService.userEmail.split('@').first})";
+          restaurantName =
+          "Restaurant (${scopeService.userEmail.split('@').first})";
         }
-        statusService.initialize(scopeService.branchId, restaurantName: restaurantName);
+        statusService.initialize(scopeService.branchId,
+            restaurantName: restaurantName);
       }
 
-      // 1. Initialize FCM
       notificationService.init(scopeService, navigatorKey);
       await FcmService().init(scopeService.userEmail);
 
-      // 2. CHECK PERMISSIONS (Request if needed)
       await _requestInitialPermissions();
 
       debugPrint('🎯 SYSTEM READY: FCM-Only Mode Active');
     }
   }
 
-  // -------------------------------------------------------------------------
-  // 🔔 PERMISSION LOGIC
-  // -------------------------------------------------------------------------
-
-  /// Requests permissions initially. If denied, sets the banner flag.
   Future<void> _requestInitialPermissions() async {
-    // We use permission_handler for granular status
     PermissionStatus status = await Permission.notification.status;
 
     if (status.isGranted) {
@@ -258,20 +242,17 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
       return;
     }
 
-    // If not determined or denied (but not permanently), request it.
     if (!status.isPermanentlyDenied) {
       status = await Permission.notification.request();
     }
 
     if (mounted) {
-      // Show banner if still not granted
       setState(() {
         _showPermissionBanner = !status.isGranted;
       });
     }
   }
 
-  /// Checks status without requesting (prevents loops on Resume)
   Future<void> _checkPermissionsStatusOnly() async {
     final status = await Permission.notification.status;
     if (mounted) {
@@ -313,6 +294,16 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final scopeService = context.watch<UserScopeService>();
+
+    // ✅ FIX: Handle missing account cleanly without infinite logout loops
+    if (scopeService.isAccountMissing) {
+      return const Scaffold(
+        body: AccessDeniedWidget(
+          permission: "Account Record Missing. Please contact Admin.",
+        ),
+      );
+    }
+
     if (!scopeService.isLoaded) {
       return const Scaffold(
         body: Center(
@@ -328,7 +319,6 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
       );
     }
 
-    // Wrap HomeScreen with a Column to show the banner if needed
     return Scaffold(
       body: Column(
         children: [
@@ -341,7 +331,6 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
   }
 }
 
-// ... (Rest of UserScopeService remains unchanged) ...
 class UserScopeService with ChangeNotifier {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   StreamSubscription? _scopeSubscription;
@@ -350,6 +339,7 @@ class UserScopeService with ChangeNotifier {
   List<String> _branchIds = [];
   Map<String, bool> _permissions = {};
   bool _isLoaded = false;
+  bool _isAccountMissing = false; // ✅ New state
   String _userEmail = '';
 
   String get role => _role;
@@ -357,6 +347,7 @@ class UserScopeService with ChangeNotifier {
   String get branchId => _branchIds.isNotEmpty ? _branchIds.first : '';
   String get userEmail => _userEmail;
   bool get isLoaded => _isLoaded;
+  bool get isAccountMissing => _isAccountMissing; // ✅ Getter
   bool get isSuperAdmin => _role == 'super_admin';
   Map<String, bool> get permissions => _permissions;
 
@@ -374,14 +365,21 @@ class UserScopeService with ChangeNotifier {
       _userEmail = user.email ?? '';
       if (_userEmail.isEmpty) throw Exception('User email is null.');
 
-      final staffSnap = await _db.collection('staff').doc(_userEmail).get();
+      final staffSnap = await _db
+          .collection(AppConstants.collectionStaff)
+          .doc(_userEmail)
+          .get();
+
       if (!staffSnap.exists) {
-        await clearScope();
+        _isAccountMissing = true;
+        notifyListeners();
         return false;
       }
+
       final data = staffSnap.data();
       if (data?['isActive'] != true) {
-        await clearScope();
+        _isAccountMissing = true;
+        notifyListeners();
         return false;
       }
 
@@ -389,9 +387,10 @@ class UserScopeService with ChangeNotifier {
       _branchIds = List<String>.from(data?['branchIds'] ?? []);
       _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
       _isLoaded = true;
+      _isAccountMissing = false;
 
       _scopeSubscription = _db
-          .collection('staff')
+          .collection(AppConstants.collectionStaff)
           .doc(_userEmail)
           .snapshots()
           .listen(
@@ -409,22 +408,28 @@ class UserScopeService with ChangeNotifier {
 
   void _handleScopeUpdate(DocumentSnapshot snapshot, AuthService authService) {
     if (!snapshot.exists) {
-      authService.signOut();
+      _isAccountMissing = true;
+      _isLoaded = false;
+      notifyListeners();
       return;
     }
     final data = snapshot.data() as Map<String, dynamic>?;
     if (data?['isActive'] != true) {
-      authService.signOut();
+      _isAccountMissing = true;
+      _isLoaded = false;
+      notifyListeners();
       return;
     }
+    _isAccountMissing = false;
     _role = data?['role'] as String? ?? 'unknown';
     _branchIds = List<String>.from(data?['branchIds'] ?? []);
     _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
+    _isLoaded = true;
     notifyListeners();
   }
 
   void _handleScopeError(Object error, AuthService authService) {
-    authService.signOut();
+    debugPrint("Scope Error: $error");
   }
 
   Future<void> clearScope() async {
@@ -434,6 +439,7 @@ class UserScopeService with ChangeNotifier {
     _branchIds = [];
     _permissions = {};
     _isLoaded = false;
+    _isAccountMissing = false;
     _userEmail = '';
     notifyListeners();
   }

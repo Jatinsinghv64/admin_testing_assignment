@@ -1,123 +1,93 @@
 import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import '../constants.dart'; // ✅ Added
 
 class RiderAssignmentService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  // ========== MAIN ASSIGNMENT METHODS ==========
 
   static Future<bool> autoAssignRider({
     required String orderId,
     required String branchId,
   }) async {
-    print('🚀 AUTO-ASSIGNMENT REQUESTED FOR ORDER: $orderId');
-
     try {
-      final orderDoc = await _firestore.collection('Orders').doc(orderId).get();
-      if (!orderDoc.exists) {
-        print('❌ Order $orderId not found');
-        return false;
-      }
+      // ✅ Use Constant
+      final orderDoc = await _firestore.collection(AppConstants.collectionOrders).doc(orderId).get();
+      if (!orderDoc.exists) return false;
 
       final data = orderDoc.data() as Map<String, dynamic>;
       final status = data['status'] as String? ?? '';
       final currentRider = data['riderId'] as String? ?? '';
 
-      // 1. Validation
-      if (currentRider.isNotEmpty) {
-        print('⚠️ Order already has a rider: $currentRider');
+      if (currentRider.isNotEmpty) return false;
+
+      if ([AppConstants.statusPickedUp, 'on_the_way', AppConstants.statusDelivered, AppConstants.statusCancelled].contains(status)) {
         return false;
       }
 
-      // ✅ FIX: Prevent auto-assign if order is already advanced (picked up, etc.)
-      if (['picked_up', 'on_the_way', 'delivered', 'cancelled'].contains(status)) {
-        print('🛑 Order is $status. Auto-assignment blocked.');
-        return false;
-      }
-
-      // 2. Trigger Logic
-      if (status == 'pending') {
-        await _firestore.collection('Orders').doc(orderId).update({
-          'status': 'preparing',
+      if (status == AppConstants.statusPending) {
+        await _firestore.collection(AppConstants.collectionOrders).doc(orderId).update({
+          'status': AppConstants.statusPreparing,
           'autoAssignStarted': FieldValue.serverTimestamp(),
           'lastAssignmentUpdate': FieldValue.serverTimestamp(),
         });
-        print('✅ Order status updated to "preparing". Server workflow triggered.');
         return true;
       }
 
-      // 3. If already preparing/prepared
-      if (status == 'preparing' || status == 'prepared') {
-        print('ℹ️ Order is already in "$status" state. Server should be handling it.');
-        await _firestore.collection('Orders').doc(orderId).update({
+      if (status == AppConstants.statusPreparing || status == AppConstants.statusPrepared) {
+        await _firestore.collection(AppConstants.collectionOrders).doc(orderId).update({
           'lastAssignmentAttempt': FieldValue.serverTimestamp(),
         });
         return true;
       }
-
-      print('⚠️ Order status "$status" is not valid for auto-assignment start.');
       return false;
 
     } catch (e) {
-      print('❌ Error in autoAssignRider: $e');
       return false;
     }
   }
 
-  /// Manually assigns a specific rider to an order.
   static Future<bool> manualAssignRider({
     required String orderId,
     required String riderId,
     required BuildContext context,
   }) async {
     try {
-      // 1. Fetch Order Data FIRST to validate status
-      final orderDoc = await _firestore.collection('Orders').doc(orderId).get();
+      final orderDoc = await _firestore.collection(AppConstants.collectionOrders).doc(orderId).get();
       if (!orderDoc.exists) throw Exception("Order not found");
 
       final orderData = orderDoc.data() as Map<String, dynamic>;
       final String currentStatus = orderData['status'] ?? '';
 
-      // ✅ FIX: "Picked Up" Bug Protection
-      // Do not allow assigning a rider if the order is already picked up, delivered, or cancelled.
-      if (['picked_up', 'on_the_way', 'delivered', 'cancelled'].contains(currentStatus)) {
+      if ([AppConstants.statusPickedUp, 'on_the_way', AppConstants.statusDelivered, AppConstants.statusCancelled].contains(currentStatus)) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Cannot assign rider. Order is already $currentStatus.'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cannot assign rider. Order is already $currentStatus.'), backgroundColor: Colors.red));
         }
         return false;
       }
 
-      // 2. Clean up any running auto-assignments
       await _cleanupAssignment(orderId);
 
-      // 3. Fetch Rider Data
-      final riderDoc = await _firestore.collection('Drivers').doc(riderId).get();
+      // ✅ Use Constant
+      final riderDoc = await _firestore.collection(AppConstants.collectionDrivers).doc(riderId).get();
       final riderData = riderDoc.data() as Map<String, dynamic>? ?? {};
       final String? riderFcmToken = riderData['fcmToken'];
       final String riderName = riderData['name'] ?? 'Rider';
 
-      // 4. Perform Updates (Batch)
       final batch = _firestore.batch();
+      final orderRef = _firestore.collection(AppConstants.collectionOrders).doc(orderId);
 
-      final orderRef = _firestore.collection('Orders').doc(orderId);
       batch.update(orderRef, {
         'riderId': riderId,
-        'status': 'rider_assigned', // Only safe because we checked status above
+        'status': AppConstants.statusRiderAssigned,
         'timestamps.riderAssigned': FieldValue.serverTimestamp(),
         'assignmentNotes': 'Manually assigned by admin',
         'autoAssignStarted': FieldValue.delete(),
         'lastAssignmentUpdate': FieldValue.serverTimestamp(),
       });
 
-      final riderRef = _firestore.collection('Drivers').doc(riderId);
+      final riderRef = _firestore.collection(AppConstants.collectionDrivers).doc(riderId);
       batch.update(riderRef, {
         'assignedOrderId': orderId,
         'isAvailable': false,
@@ -125,7 +95,6 @@ class RiderAssignmentService {
 
       await batch.commit();
 
-      // 5. Send Notification
       if (riderFcmToken != null && riderFcmToken.isNotEmpty) {
         await _sendRiderAssignmentNotification(
           fcmToken: riderFcmToken,
@@ -137,47 +106,31 @@ class RiderAssignmentService {
       }
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Rider $riderName assigned successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Rider $riderName assigned successfully'), backgroundColor: Colors.green));
       }
-
-      print('✅ MANUAL ASSIGNMENT SUCCESSFUL: Rider $riderId assigned to order $orderId');
       return true;
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to assign rider: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to assign rider: $e'), backgroundColor: Colors.red));
       }
-      print('❌ MANUAL ASSIGNMENT FAILED: $e');
       return false;
     }
   }
 
-  // ========== UTILITY METHODS ==========
-
   static Stream<QuerySnapshot> getOrdersNeedingAssignment() {
     return _firestore
-        .collection('Orders')
-        .where('status', isEqualTo: 'needs_rider_assignment')
+        .collection(AppConstants.collectionOrders)
+        .where('status', isEqualTo: AppConstants.statusNeedsAssignment)
         .snapshots();
   }
 
   static Future<void> cancelAutoAssignment(String orderId) async {
     try {
-      await _firestore.collection('Orders').doc(orderId).update({
+      await _firestore.collection(AppConstants.collectionOrders).doc(orderId).update({
         'autoAssignStarted': FieldValue.delete(),
         'assignmentNotes': 'Auto-assignment cancelled by admin',
       });
       await _cleanupAssignment(orderId);
-      print('🛑 AUTO-ASSIGNMENT CANCELLED: Order $orderId');
     } catch (e) {
       print('❌ ERROR cancelling auto-assignment: $e');
     }
@@ -185,7 +138,7 @@ class RiderAssignmentService {
 
   static Future<bool> isAutoAssigning(String orderId) async {
     try {
-      final orderDoc = await _firestore.collection('Orders').doc(orderId).get();
+      final orderDoc = await _firestore.collection(AppConstants.collectionOrders).doc(orderId).get();
       final orderData = orderDoc.data() as Map<String, dynamic>?;
       return orderData != null && orderData.containsKey('autoAssignStarted');
     } catch (e) {
@@ -195,12 +148,14 @@ class RiderAssignmentService {
 
   static Future<void> _cleanupAssignment(String orderId) async {
     try {
-      await _firestore.collection('rider_assignments').doc(orderId).delete();
+      // ✅ Use Constant
+      await _firestore.collection(AppConstants.collectionRiderAssignments).doc(orderId).delete();
     } catch (e) {
       print('❌ ERROR during cleanup: $e');
     }
   }
 
+  // ... (_sendRiderAssignmentNotification remains unchanged) ...
   static Future<void> _sendRiderAssignmentNotification({
     required String fcmToken,
     required String orderId,
@@ -208,6 +163,7 @@ class RiderAssignmentService {
     required Map<String, dynamic> orderData,
     required bool isManualAssignment,
   }) async {
+    // ... (Code same as original) ...
     try {
       final String orderNumber = orderData['dailyOrderNumber']?.toString() ?? orderId.substring(0, 6).toUpperCase();
       final double totalAmount = (orderData['totalAmount'] as num?)?.toDouble() ?? 0.0;
