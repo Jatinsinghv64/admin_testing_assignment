@@ -4,8 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../main.dart'; // For UserScopeService
-import '../Widgets/PrintingService.dart'; // ✅ Functional Printing
-import '../Widgets/TimeUtils.dart'; // ✅ Timezone Consistency
+import '../Widgets/PrintingService.dart';
+import '../Widgets/TimeUtils.dart';
 
 class DashboardScreen extends StatelessWidget {
   final Function(int) onTabChange;
@@ -13,35 +13,25 @@ class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key, required this.onTabChange});
 
   /// ✅ ROBUSTNESS: Calculates the start of the "Business Day" (6:00 AM)
-  /// This ensures that orders placed at 1 AM count towards the "previous" day's shift.
   Timestamp _getBusinessStartTimestamp() {
-    // 1. Get current time (Preferably from TimeUtils if available, else local safe fallback)
     final now = DateTime.now();
-
-    // 2. Shift logic: If it's before 6:00 AM, subtract a day.
     DateTime effectiveDate = now;
     if (now.hour < 6) {
       effectiveDate = now.subtract(const Duration(days: 1));
     }
-
-    // 3. Create the 6:00 AM cutoff time
     final startOfBusinessDay = DateTime(
-        effectiveDate.year,
-        effectiveDate.month,
-        effectiveDate.day,
-        6, 0, 0
-    );
+        effectiveDate.year, effectiveDate.month, effectiveDate.day, 6, 0, 0);
 
     return Timestamp.fromDate(startOfBusinessDay);
   }
 
   /// ✅ SECURITY: Filters queries by Branch ID (unless Super Admin)
-  Query<Map<String, dynamic>> _applyBranchFilter(Query<Map<String, dynamic>> query, BuildContext context) {
+  Query<Map<String, dynamic>> _applyBranchFilter(
+      Query<Map<String, dynamic>> query, BuildContext context) {
     final userScope = context.read<UserScopeService>();
     if (userScope.isSuperAdmin) {
-      return query; // Super Admin sees all data
+      return query;
     }
-    // Standard Admin: Only see data containing their assigned branchId
     return query.where('branchIds', arrayContains: userScope.branchId);
   }
 
@@ -62,10 +52,8 @@ class DashboardScreen extends StatelessWidget {
           ),
         ),
       ),
-      // ✅ UX: RefreshIndicator allows recovering from network glitches
       body: RefreshIndicator(
         onRefresh: () async {
-          // Add a slight delay to simulate/allow stream reconnection
           await Future.delayed(const Duration(milliseconds: 500));
         },
         child: SingleChildScrollView(
@@ -80,7 +68,7 @@ class DashboardScreen extends StatelessWidget {
                   'Recent Orders (Current Shift)', Icons.receipt_long_outlined),
               const SizedBox(height: 16),
               _buildEnhancedRecentOrdersSection(context),
-              const SizedBox(height: 40), // Extra scrolling space
+              const SizedBox(height: 40),
             ],
           ),
         ),
@@ -121,7 +109,6 @@ class DashboardScreen extends StatelessWidget {
   Widget _buildEnhancedStatCardsGrid(BuildContext context) {
     final Timestamp startOfShift = _getBusinessStartTimestamp();
 
-    // 1. Prepare Base Queries
     Query<Map<String, dynamic>> ordersQuery = FirebaseFirestore.instance
         .collection('Orders')
         .where('timestamp', isGreaterThanOrEqualTo: startOfShift);
@@ -129,12 +116,11 @@ class DashboardScreen extends StatelessWidget {
     Query<Map<String, dynamic>> driversQuery = FirebaseFirestore.instance
         .collection('Drivers')
         .where('isAvailable', isEqualTo: true)
-        .where('status', isEqualTo: 'online'); // Only show ONLINE drivers
+        .where('status', isEqualTo: 'online');
 
-    Query<Map<String, dynamic>> menuQuery = FirebaseFirestore.instance
-        .collection('menu_items'); // Assuming global menu, modify if branch-specific
+    Query<Map<String, dynamic>> menuQuery =
+    FirebaseFirestore.instance.collection('menu_items');
 
-    // 2. Apply Branch Security
     ordersQuery = _applyBranchFilter(ordersQuery, context);
     driversQuery = _applyBranchFilter(driversQuery, context);
 
@@ -155,36 +141,35 @@ class DashboardScreen extends StatelessWidget {
         children: [
           Row(
             children: [
-              // --- STAT 1: TODAY'S ORDERS ---
               Expanded(
                 child: _buildStatCardWrapper(
                   stream: ordersQuery.snapshots(),
                   builder: (context, snapshot) {
-                    final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                    final count =
+                    snapshot.hasData ? snapshot.data!.docs.length : 0;
                     return _EnhancedStatCard(
                       title: "Today's Orders",
                       value: count.toString(),
                       icon: Icons.shopping_bag_outlined,
                       color: Colors.blueAccent,
-                      onTap: () => onTabChange(2), // Navigate to Orders Tab
+                      onTap: () => onTabChange(2),
                     );
                   },
                 ),
               ),
               const SizedBox(width: 16),
-
-              // --- STAT 2: ACTIVE RIDERS ---
               Expanded(
                 child: _buildStatCardWrapper(
                   stream: driversQuery.snapshots(),
                   builder: (context, snapshot) {
-                    final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                    final count =
+                    snapshot.hasData ? snapshot.data!.docs.length : 0;
                     return _EnhancedStatCard(
                       title: 'Active Riders',
                       value: count.toString(),
                       icon: Icons.delivery_dining_outlined,
                       color: Colors.green,
-                      onTap: () => onTabChange(3), // Navigate to Riders Tab
+                      onTap: () => onTabChange(3),
                     );
                   },
                 ),
@@ -194,31 +179,30 @@ class DashboardScreen extends StatelessWidget {
           const SizedBox(height: 16),
           Row(
             children: [
-              // --- STAT 3: REVENUE ---
               Expanded(
                 child: _buildStatCardWrapper(
-                  stream: ordersQuery.snapshots(), // Reuse orders query for revenue
+                  stream: ordersQuery.snapshots(),
                   builder: (context, snapshot) {
                     double totalRevenue = 0;
                     if (snapshot.hasData) {
-                      // Statuses that count as "Money Earned"
                       final billableStatuses = {
                         'delivered',
                         'pickedup',
                         'completed',
                         'paid',
-                        'prepared' // Includes served items in dine-in
+                        'prepared'
                       };
 
                       for (var doc in snapshot.data!.docs) {
                         final data = doc.data();
                         final status = (data['status'] ?? '').toString();
 
-                        // Safe Calculation
+                        // Exclude refunded/cancelled orders
                         if (billableStatuses.contains(status.toLowerCase()) ||
-                            (status == 'served' && data['Order_type'] == 'dine_in')
-                        ) {
-                          totalRevenue += (data['totalAmount'] as num? ?? 0).toDouble();
+                            (status == 'served' &&
+                                data['Order_type'] == 'dine_in')) {
+                          totalRevenue +=
+                              (data['totalAmount'] as num? ?? 0).toDouble();
                         }
                       }
                     }
@@ -233,19 +217,18 @@ class DashboardScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 16),
-
-              // --- STAT 4: MENU ITEMS ---
               Expanded(
                 child: _buildStatCardWrapper(
                   stream: menuQuery.snapshots(),
                   builder: (context, snapshot) {
-                    final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                    final count =
+                    snapshot.hasData ? snapshot.data!.docs.length : 0;
                     return _EnhancedStatCard(
                       title: 'Menu Items',
                       value: count.toString(),
                       icon: Icons.restaurant_menu,
                       color: Colors.purpleAccent,
-                      onTap: () => onTabChange(1), // Navigate to Menu Tab
+                      onTap: () => onTabChange(1),
                     );
                   },
                 ),
@@ -259,7 +242,9 @@ class DashboardScreen extends StatelessWidget {
 
   Widget _buildStatCardWrapper({
     required Stream<QuerySnapshot<Map<String, dynamic>>> stream,
-    required Widget Function(BuildContext, AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>>) builder,
+    required Widget Function(
+        BuildContext, AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>>)
+    builder,
   }) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: stream,
@@ -268,7 +253,6 @@ class DashboardScreen extends StatelessWidget {
           return const _EnhancedLoadingStatCard();
         }
         if (snapshot.hasError) {
-          // Log error but don't crash UI
           debugPrint("Dashboard Stream Error: ${snapshot.error}");
           return const _EnhancedErrorStatCard(errorMessage: 'Data Error');
         }
@@ -283,12 +267,10 @@ class DashboardScreen extends StatelessWidget {
   Widget _buildEnhancedRecentOrdersSection(BuildContext context) {
     final Timestamp startOfShift = _getBusinessStartTimestamp();
 
-    // 1. Base Query
     Query<Map<String, dynamic>> recentOrdersQuery = FirebaseFirestore.instance
         .collection('Orders')
         .where('timestamp', isGreaterThanOrEqualTo: startOfShift);
 
-    // 2. Apply Branch Filter
     recentOrdersQuery = _applyBranchFilter(recentOrdersQuery, context);
 
     return Container(
@@ -309,12 +291,16 @@ class DashboardScreen extends StatelessWidget {
             padding: const EdgeInsets.all(20),
             child: Row(
               children: [
-                Icon(Icons.access_time_rounded, color: Colors.deepPurple.shade400, size: 20),
+                Icon(Icons.access_time_rounded,
+                    color: Colors.deepPurple.shade400, size: 20),
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
                     'Latest Activity',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87),
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87),
                   ),
                 ),
                 TextButton(
@@ -325,7 +311,6 @@ class DashboardScreen extends StatelessWidget {
             ),
           ),
           Divider(height: 1, color: Colors.grey[200]),
-
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 400, minHeight: 100),
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -338,7 +323,9 @@ class DashboardScreen extends StatelessWidget {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (snapshot.hasError) {
-                  return Center(child: Text("Error: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
+                  return Center(
+                      child: Text("Error: ${snapshot.error}",
+                          style: const TextStyle(color: Colors.red)));
                 }
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return _buildEmptyState();
@@ -346,12 +333,14 @@ class DashboardScreen extends StatelessWidget {
 
                 return ListView.separated(
                   shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(), // Let parent scroll
+                  physics: const NeverScrollableScrollPhysics(),
                   padding: const EdgeInsets.all(16),
                   itemCount: snapshot.data!.docs.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 12),
+                  separatorBuilder: (context, index) =>
+                  const SizedBox(height: 12),
                   itemBuilder: (context, index) {
-                    return _EnhancedOrderListItem(order: snapshot.data!.docs[index]);
+                    return _EnhancedOrderListItem(
+                        order: snapshot.data!.docs[index]);
                   },
                 );
               },
@@ -380,10 +369,6 @@ class DashboardScreen extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// SUB-WIDGETS (UI Components)
-// ---------------------------------------------------------------------------
-
 class _EnhancedStatCard extends StatelessWidget {
   final String title;
   final String value;
@@ -411,7 +396,10 @@ class _EnhancedStatCard extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(color: color.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4)),
+          BoxShadow(
+              color: color.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 4)),
         ],
       ),
       child: Material(
@@ -430,7 +418,9 @@ class _EnhancedStatCard extends StatelessWidget {
                   children: [
                     Container(
                       padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(8)),
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(8)),
                       child: Icon(icon, size: 20, color: Colors.white),
                     ),
                   ],
@@ -442,13 +432,17 @@ class _EnhancedStatCard extends StatelessWidget {
                       fit: BoxFit.scaleDown,
                       child: Text(
                         value,
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                        style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white),
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       title,
-                      style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.9)),
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.white.withOpacity(0.9)),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -469,7 +463,8 @@ class _EnhancedLoadingStatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 130,
-      decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+          color: Colors.grey[200], borderRadius: BorderRadius.circular(16)),
       child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
     );
   }
@@ -493,7 +488,8 @@ class _EnhancedErrorStatCard extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.warning_amber_rounded, color: Colors.red[300]),
-            Text(errorMessage, style: TextStyle(color: Colors.red[400], fontSize: 10)),
+            Text(errorMessage,
+                style: TextStyle(color: Colors.red[400], fontSize: 10)),
           ],
         ),
       ),
@@ -515,13 +511,16 @@ class _EnhancedOrderListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ✅ ROBUSTNESS: Safe parsing of optional fields
     final data = order.data() as Map<String, dynamic>? ?? {};
 
-    final String displayId = data['dailyOrderNumber']?.toString() ?? order.id.substring(0, 4).toUpperCase();
+    final String displayId = data['dailyOrderNumber']?.toString() ??
+        order.id.substring(0, 4).toUpperCase();
     final String status = data['status']?.toString() ?? 'unknown';
     final double amount = (data['totalAmount'] as num? ?? 0.0).toDouble();
-    final String type = (data['Order_type'] as String?)?.toUpperCase().replaceAll('_', ' ') ?? 'ORDER';
+    final String type = (data['Order_type'] as String?)
+        ?.toUpperCase()
+        .replaceAll('_', ' ') ??
+        'ORDER';
 
     String timeString = "Just now";
     if (data['timestamp'] != null) {
@@ -553,34 +552,47 @@ class _EnhancedOrderListItem extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          Text("#$displayId", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          Text("#$displayId",
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 14)),
                           const SizedBox(width: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                            decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(4)),
-                            child: Text(type, style: const TextStyle(fontSize: 9, color: Colors.black54)),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: Colors.grey[200],
+                                borderRadius: BorderRadius.circular(4)),
+                            child: Text(type,
+                                style: const TextStyle(
+                                    fontSize: 9, color: Colors.black54)),
                           )
                         ],
                       ),
-                      Text(timeString, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                      Text(timeString,
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey[600])),
                     ],
                   ),
                 ),
-
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text("QAR ${amount.toStringAsFixed(0)}", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+                    Text("QAR ${amount.toStringAsFixed(0)}",
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.deepPurple)),
                     Text(
                       status.toUpperCase(),
-                      style: TextStyle(fontSize: 10, color: _getStatusColor(status), fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: _getStatusColor(status),
+                          fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -594,20 +606,25 @@ class _EnhancedOrderListItem extends StatelessWidget {
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'pending': return Colors.orange;
-      case 'preparing': return Colors.teal;
-      case 'prepared': return Colors.blue;
-      case 'delivered': return Colors.green;
-      case 'pickedup': return Colors.green;
-      case 'cancelled': return Colors.red;
-      default: return Colors.grey;
+      case 'pending':
+        return Colors.orange;
+      case 'preparing':
+        return Colors.teal;
+      case 'prepared':
+        return Colors.blue;
+      case 'delivered':
+        return Colors.green;
+      case 'pickedup':
+        return Colors.green;
+      case 'cancelled':
+        return Colors.red;
+      case 'refunded':
+        return Colors.pink; // ✅ Added support for refund color
+      default:
+        return Colors.grey;
     }
   }
 }
-
-// ---------------------------------------------------------------------------
-// ORDER DETAILS POPUP (With Functional Print)
-// ---------------------------------------------------------------------------
 
 class _OrderPopupDialog extends StatelessWidget {
   final DocumentSnapshot order;
@@ -618,7 +635,8 @@ class _OrderPopupDialog extends StatelessWidget {
     final data = order.data() as Map<String, dynamic>? ?? {};
     final double total = (data['totalAmount'] as num? ?? 0).toDouble();
     final items = List.from(data['items'] ?? []);
-    final String orderId = data['dailyOrderNumber']?.toString() ?? order.id.substring(0, 6);
+    final String orderId =
+        data['dailyOrderNumber']?.toString() ?? order.id.substring(0, 6);
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -632,16 +650,22 @@ class _OrderPopupDialog extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text("Order #$orderId", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.deepPurple)),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+                  Text("Order #$orderId",
+                      style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.deepPurple)),
+                  IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints()),
                 ],
               ),
               const Divider(),
-
-              // Items List
               if (items.isEmpty)
-                const Padding(padding: EdgeInsets.all(8), child: Text("No items found.")),
-
+                const Padding(
+                    padding: EdgeInsets.all(8), child: Text("No items found.")),
               ...items.map((item) {
                 final i = item as Map<String, dynamic>;
                 return Padding(
@@ -649,8 +673,14 @@ class _OrderPopupDialog extends StatelessWidget {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Expanded(child: Text("${i['name']} x${i['quantity'] ?? 1}", style: const TextStyle(fontSize: 14))),
-                      Text("QAR ${((i['price'] ?? 0) * (i['quantity'] ?? 1)).toStringAsFixed(2)}", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                      Expanded(
+                          child: Text(
+                              "${i['name']} x${i['quantity'] ?? 1}",
+                              style: const TextStyle(fontSize: 14))),
+                      Text(
+                          "QAR ${((i['price'] ?? 0) * (i['quantity'] ?? 1)).toStringAsFixed(2)}",
+                          style: const TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.w500)),
                     ],
                   ),
                 );
@@ -659,13 +689,13 @@ class _OrderPopupDialog extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text("Total", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text("QAR ${total.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const Text("Total",
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text("QAR ${total.toStringAsFixed(2)}",
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 ],
               ),
               const SizedBox(height: 24),
-
-              // ✅ FUNCTIONAL PRINT BUTTON
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -675,12 +705,14 @@ class _OrderPopupDialog extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     backgroundColor: Colors.deepPurple,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () async {
-                    // Call the Printing Service safely
-                    Navigator.pop(context); // Close popup first
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Preparing Receipt..."), duration: Duration(seconds: 1)));
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text("Preparing Receipt..."),
+                        duration: Duration(seconds: 1)));
                     await PrintingService.printReceipt(context, order);
                   },
                 ),
@@ -689,198 +721,6 @@ class _OrderPopupDialog extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-
-
-
-class _RiderSelectionDialog extends StatelessWidget {
-  final String? currentBranchId;
-
-  const _RiderSelectionDialog({required this.currentBranchId});
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text(
-        'Select Driver',
-        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-      ),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('Drivers')
-              .where('isAvailable', isEqualTo: true)
-              .snapshots(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (snapshot.hasError) {
-              return Center(child: Text('Error: ${snapshot.error}'));
-            }
-
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-              return const Center(child: Text('No available drivers found.'));
-            }
-
-            final filteredDrivers = snapshot.data!.docs.where((driver) {
-              final data = driver.data() as Map<String, dynamic>;
-              final driverBranchIds =
-              List<String>.from(data['branchIds'] ?? []);
-              if (currentBranchId == null) return true;
-              return driverBranchIds.contains(currentBranchId);
-            }).toList();
-
-            if (filteredDrivers.isEmpty) {
-              return const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.person_off, size: 48, color: Colors.grey),
-                    SizedBox(height: 8),
-                    Text('No drivers available\nfor your branch',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.grey)),
-                  ],
-                ),
-              );
-            }
-
-            return ListView.separated(
-              shrinkWrap: true,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemCount: filteredDrivers.length,
-              itemBuilder: (context, index) {
-                var driver = filteredDrivers[index];
-                var data = driver.data() as Map<String, dynamic>;
-                final driverId = driver.id;
-                final String name = data['name'] ?? 'Unnamed Driver';
-                final String status = data['status'] ?? 'offline';
-
-                return Card(
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  elevation: 2,
-                  color: Colors.grey.shade50,
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
-                    leading: CircleAvatar(child: Icon(Icons.person)),
-                    title: Text(name,
-                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(status),
-                    onTap: () => Navigator.pop(context, driverId),
-                  ),
-                );
-              },
-            );
-          },
-        ),
-      ),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.red))),
-      ],
-    );
-  }
-}
-
-class _CancellationReasonDialog extends StatefulWidget {
-  const _CancellationReasonDialog();
-
-  @override
-  State<_CancellationReasonDialog> createState() =>
-      _CancellationReasonDialogState();
-}
-
-class _CancellationReasonDialogState extends State<_CancellationReasonDialog> {
-  String? _selectedReason;
-  final TextEditingController _otherReasonController = TextEditingController();
-  final List<String> _reasons = [
-    'Items Out of Stock',
-    'Kitchen Too Busy',
-    'Closing Soon / Closed',
-    'Invalid Address',
-    'Customer Request',
-    'Other'
-  ];
-
-  @override
-  void dispose() {
-    _otherReasonController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bool isOther = _selectedReason == 'Other';
-    final bool isValid = _selectedReason != null &&
-        (!isOther || _otherReasonController.text.trim().isNotEmpty);
-
-    return AlertDialog(
-      title: const Text('Cancel Order',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Please select a reason for cancellation:'),
-            const SizedBox(height: 10),
-            ..._reasons.map((reason) => RadioListTile<String>(
-              title: Text(reason),
-              value: reason,
-              groupValue: _selectedReason,
-              onChanged: (value) {
-                setState(() {
-                  _selectedReason = value;
-                });
-              },
-              contentPadding: EdgeInsets.zero,
-              activeColor: Colors.red,
-            )),
-            if (isOther)
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: TextField(
-                  controller: _otherReasonController,
-                  decoration: const InputDecoration(
-                    labelText: 'Enter reason',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, null),
-          child: const Text('Close', style: TextStyle(color: Colors.grey)),
-        ),
-        ElevatedButton(
-          onPressed: isValid
-              ? () {
-            String finalReason = _selectedReason!;
-            if (finalReason == 'Other') {
-              finalReason = _otherReasonController.text.trim();
-            }
-            Navigator.pop(context, finalReason);
-          }
-              : null,
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-          child: const Text('Confirm Cancel'),
-        ),
-      ],
     );
   }
 }
