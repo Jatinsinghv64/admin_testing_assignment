@@ -506,7 +506,7 @@ class _OrderCard extends StatefulWidget {
 
 class _OrderCardState extends State<_OrderCard> {
   bool _isAssigning = false;
-  bool _isProcessingRefund = false; // ✅ Added
+  bool _isProcessingRefund = false;
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
@@ -525,7 +525,7 @@ class _OrderCardState extends State<_OrderCard> {
       case 'cancelled':
         return Colors.red;
       case 'refunded':
-        return Colors.pink; // ✅ Added
+        return Colors.pink;
       case 'needs_rider_assignment':
         return Colors.orange;
       default:
@@ -533,7 +533,74 @@ class _OrderCardState extends State<_OrderCard> {
     }
   }
 
-  // ✅ NEW: Refund Logic from Uploaded File
+  // ✅ NEW: Alert Dialog for Refund Confirmation
+  Future<void> _showRefundConfirmationDialog(BuildContext context, bool isApprove, String? imageUrl) async {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false, // User must tap a button to close
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(
+                isApprove ? Icons.check_circle_outline : Icons.highlight_off,
+                color: isApprove ? Colors.green : Colors.red,
+                size: 28,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                isApprove ? 'Approve Refund' : 'Reject Refund',
+                style: TextStyle(
+                  color: isApprove ? Colors.green[800] : Colors.red[800],
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: <Widget>[
+                Text(
+                  isApprove
+                      ? 'Are you sure you want to APPROVE this refund request?'
+                      : 'Are you sure you want to REJECT this refund request?',
+                  style: const TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  isApprove
+                      ? 'This will mark the order as "Refunded" and update the timestamps.'
+                      : 'The refund request will be marked as "Rejected".',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+              onPressed: () {
+                Navigator.of(context).pop(); // Dismiss dialog
+              },
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isApprove ? Colors.green : Colors.red,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Confirm', style: TextStyle(color: Colors.white)),
+              onPressed: () {
+                Navigator.of(context).pop(); // Dismiss dialog
+                _handleRefundAction(isApprove, imageUrl); // Proceed with action
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _handleRefundAction(bool approved, String? imageUrl) async {
     setState(() => _isProcessingRefund = true);
     try {
@@ -586,7 +653,6 @@ class _OrderCardState extends State<_OrderCard> {
     }
   }
 
-  // ✅ NEW: Refund Widget from Uploaded File
   Widget _buildRefundManagementSection(Map<String, dynamic> data) {
     final refund = data['refundRequest'] as Map<String, dynamic>?;
     if (refund == null || refund['status'] != 'pending') {
@@ -661,8 +727,8 @@ class _OrderCardState extends State<_OrderCard> {
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.close, size: 16),
                     label: const Text('Reject'),
-                    onPressed: () =>
-                        _handleRefundAction(false, refund['imageUrl']),
+                    // ✅ MODIFIED: Calls confirmation dialog
+                    onPressed: () => _showRefundConfirmationDialog(context, false, refund['imageUrl']),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.grey.shade700,
                       side: BorderSide(color: Colors.grey.shade400),
@@ -674,8 +740,8 @@ class _OrderCardState extends State<_OrderCard> {
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.check, size: 16),
                     label: const Text('Approve'),
-                    onPressed: () =>
-                        _handleRefundAction(true, refund['imageUrl']),
+                    // ✅ MODIFIED: Calls confirmation dialog
+                    onPressed: () => _showRefundConfirmationDialog(context, true, refund['imageUrl']),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.red,
                       foregroundColor: Colors.white,
@@ -1131,7 +1197,6 @@ class _OrderCardState extends State<_OrderCard> {
     final bool needsManualAssignment =
         status == AppConstants.statusNeedsAssignment;
 
-    // ✅ NEW: Check for refund request
     final refundRequest = data['refundRequest'] as Map<String, dynamic>?;
     final bool hasPendingRefund =
         refundRequest != null && refundRequest['status'] == 'pending';
@@ -1249,7 +1314,6 @@ class _OrderCardState extends State<_OrderCard> {
                                 fontWeight: FontWeight.w500)),
                       ),
                     ],
-                    // ✅ NEW: Refund Badge
                     if (hasPendingRefund) ...[
                       const SizedBox(height: 4),
                       Container(
@@ -1312,7 +1376,6 @@ class _OrderCardState extends State<_OrderCard> {
             ),
           ),
           children: [
-            // ✅ NEW: Insert Refund Section at top of details
             _buildRefundManagementSection(data),
 
             _buildSectionHeader('Customer Details', Icons.person_outline),
