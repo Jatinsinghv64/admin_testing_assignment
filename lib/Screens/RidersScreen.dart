@@ -36,9 +36,14 @@ class _RidersScreenState extends State<RidersScreen> {
     Query<Map<String, dynamic>> query =
     FirebaseFirestore.instance.collection('Drivers').orderBy('name');
 
-    if (!userScope.isSuperAdmin) {
-      // If not super_admin, filter by their assigned branches.
+    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
+      // Show ALL drivers if SuperAdmin has no specific branch selection
+    } else if (userScope.branchIds.isNotEmpty) {
+      // Filter by assigned branches
       query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+    } else {
+      // Force empty result if no access
+       query = query.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
     }
 
     return Scaffold(

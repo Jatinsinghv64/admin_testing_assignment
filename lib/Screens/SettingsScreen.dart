@@ -1388,7 +1388,7 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
 
-  String _selectedRole = 'branchadmin';
+  String _selectedRole = 'branch_admin';
   bool _isActive = true;
   List<String> _selectedBranches = [];
 
@@ -1409,14 +1409,14 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
       _nameController.text = widget.currentData!['name'] ?? '';
       _emailController.text = widget.currentData!['email'] ?? '';
 
-      String rawRole = widget.currentData!['role'] ?? 'branchadmin';
-      if (rawRole == 'super_admin') rawRole = 'superadmin';
-      if (rawRole == 'branch_admin') rawRole = 'branchadmin';
+      String rawRole = widget.currentData!['role'] ?? 'branch_admin';
+      if (rawRole == 'superadmin') rawRole = 'super_admin';
+      if (rawRole == 'branchadmin') rawRole = 'branch_admin';
 
-      if (['superadmin', 'branchadmin'].contains(rawRole)) {
+      if (['super_admin', 'branch_admin'].contains(rawRole)) {
         _selectedRole = rawRole;
       } else {
-        _selectedRole = 'branchadmin';
+        _selectedRole = 'branch_admin';
       }
 
       _isActive = widget.currentData!['isActive'] ?? true;
@@ -1508,8 +1508,8 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                         },
                         decoration: _inputDecoration('Select Role', Icons.security),
                         items: const [
-                          DropdownMenuItem(value: 'branchadmin', child: Text('Branch Admin')),
-                          DropdownMenuItem(value: 'superadmin', child: Text('Super Admin')),
+                          DropdownMenuItem(value: 'branch_admin', child: Text('Branch Admin')),
+                          DropdownMenuItem(value: 'super_admin', child: Text('Super Admin')),
                         ],
                       ),
                       if (widget.isSelf)
@@ -1590,7 +1590,7 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
 
   void _validateAndSave() {
     if (_formKey.currentState!.validate()) {
-      if (_selectedRole == 'branchadmin' && _selectedBranches.isEmpty) {
+      if (_selectedRole == 'branch_admin' && _selectedBranches.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('⚠️ Branch Admins must be assigned to at least one branch.'),

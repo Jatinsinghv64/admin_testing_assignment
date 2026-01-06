@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import '../constants.dart';
 
 class RiderAssignmentService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
 
   /// Starts the auto-assignment workflow by updating the order.
   /// This triggers the Cloud Function 'startAssignmentWorkflowV2'.
@@ -14,25 +15,39 @@ class RiderAssignmentService {
     required String branchId,
   }) async {
     try {
-      final orderDoc = await _firestore.collection(AppConstants.collectionOrders).doc(orderId).get();
+      final orderDoc = await _firestore
+          .collection(AppConstants.collectionOrders)
+          .doc(orderId)
+          .get()
+          .timeout(AppConstants.firestoreTimeout);
+      
       if (!orderDoc.exists) return false;
 
       final data = orderDoc.data() as Map<String, dynamic>;
-      final status = data['status'] as String? ?? '';
+      final status = AppConstants.normalizeStatus(data['status'] as String? ?? '');
       final currentRider = data['riderId'] as String? ?? '';
 
       // Prevent triggering if already assigned or in a terminal state
       if (currentRider.isNotEmpty) return false;
-      if ([AppConstants.statusPickedUp, AppConstants.statusDelivered, AppConstants.statusCancelled].contains(status)) {
+      if (AppConstants.isTerminalStatus(status) ||
+          status == AppConstants.statusRiderAssigned) {
         return false;
       }
 
       // Mark the order to start the background search loop in Cloud Functions
-      await _firestore.collection(AppConstants.collectionOrders).doc(orderId).update({
-        'autoAssignStarted': FieldValue.serverTimestamp(),
-        'lastAssignmentUpdate': FieldValue.serverTimestamp(),
-      });
+      await _firestore
+          .collection(AppConstants.collectionOrders)
+          .doc(orderId)
+          .update({
+            'autoAssignStarted': FieldValue.serverTimestamp(),
+            'lastAssignmentUpdate': FieldValue.serverTimestamp(),
+          })
+          .timeout(AppConstants.firestoreWriteTimeout);
+      
       return true;
+    } on TimeoutException {
+      debugPrint("Timeout starting auto-assignment for order $orderId");
+      return false;
     } catch (e) {
       debugPrint("Error starting auto-assignment: $e");
       return false;
@@ -59,42 +74,38 @@ class RiderAssignmentService {
         if (!riderDoc.exists) throw Exception("Rider not found");
 
         final orderData = orderDoc.data() as Map<String, dynamic>;
-        final String currentStatus = orderData['status'] ?? '';
+        final String currentStatus = AppConstants.normalizeStatus(orderData['status'] ?? '');
 
         // Block assignment if the order is already finished or cancelled
-        if ([
-          AppConstants.statusPickedUp,
-          AppConstants.statusDelivered,
-          AppConstants.statusCancelled
-        ].contains(currentStatus)) {
+        if (AppConstants.isTerminalStatus(currentStatus)) {
           throw Exception("Order is already $currentStatus. Assignment blocked.");
         }
 
-        // ROBUSTNESS FIX: Do not skip the kitchen state.
-        // Rider assignment should NOT override kitchen preparation status.
-        // Only set to "Rider Assigned" if the food is already "Prepared".
+        // Simplified status flow: pending -> preparing -> rider_assigned
+        // When a rider is manually assigned, advance to rider_assigned
         String statusToSet;
         if (currentStatus == AppConstants.statusPending) {
-          // If pending, at minimum move to preparing (order is being worked on)
-          statusToSet = AppConstants.statusPreparing;
-        } else if (currentStatus == AppConstants.statusPreparing) {
-          // Keep as preparing - kitchen staff will mark as prepared when ready
-          statusToSet = AppConstants.statusPreparing;
-        } else if (currentStatus == AppConstants.statusPrepared) {
-          // Food is ready, now we can advance to rider_assigned
+          // If pending, move to rider_assigned (rider will wait for food)
           statusToSet = AppConstants.statusRiderAssigned;
+        } else if (currentStatus == AppConstants.statusPreparing ||
+                   currentStatus == AppConstants.statusNeedsAssignment) {
+          // Preparing or needs assignment - advance to rider_assigned
+          statusToSet = AppConstants.statusRiderAssigned;
+        } else if (currentStatus == AppConstants.statusRiderAssigned) {
+          // Already assigned - don't change status
+          statusToSet = currentStatus;
         } else {
-          // For any other status (rider_assigned, pickedUp, etc.), don't change it
+          // For any other status, don't change it
           statusToSet = currentStatus;
         }
 
-        // 1. Update Order: Attach rider without necessarily changing preparation status
+        // 1. Update Order: Attach rider
         transaction.update(orderRef, {
           'riderId': riderId,
           'status': statusToSet,
           'timestamps.riderAssigned': FieldValue.serverTimestamp(),
           'assignmentNotes': 'Manually assigned by admin',
-          'autoAssignStarted': FieldValue.delete(), // Stop any active auto-search
+          'autoAssignStarted': FieldValue.delete(),
           'lastAssignmentUpdate': FieldValue.serverTimestamp(),
         });
 
@@ -104,12 +115,15 @@ class RiderAssignmentService {
           'isAvailable': false,
         });
 
-        // 3. Cleanup: Remove any pending auto-assignment records
-        transaction.delete(assignmentRef);
-      });
+        // 3. Cleanup: Check if assignment record exists before deleting
+        final assignmentDoc = await transaction.get(assignmentRef);
+        if (assignmentDoc.exists) {
+          transaction.delete(assignmentRef);
+        }
+      }).timeout(AppConstants.firestoreWriteTimeout);
 
-      // Send notifications to the rider after the DB update succeeds
-      _notifyRider(orderId, riderId);
+      // Send notification to the rider after the DB update succeeds
+      _notifyRiderViaCloudFunction(orderId, riderId);
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -117,6 +131,13 @@ class RiderAssignmentService {
         );
       }
       return true;
+    } on TimeoutException {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Request timed out. Please check and retry.'), backgroundColor: Colors.orange),
+        );
+      }
+      return false;
     } catch (e) {
       if (context.mounted) {
         final String errorMsg = e.toString().replaceAll("Exception: ", "");
@@ -128,29 +149,24 @@ class RiderAssignmentService {
     }
   }
 
-  /// Internal helper to fetch data and send FCM
-  static Future<void> _notifyRider(String orderId, String riderId) async {
+  /// Send FCM notification via Cloud Function (correct approach)
+  /// Client-side FirebaseMessaging.sendMessage is for UPSTREAM messages only
+  static Future<void> _notifyRiderViaCloudFunction(String orderId, String riderId) async {
     try {
-      final riderDoc = await _firestore.collection(AppConstants.collectionDrivers).doc(riderId).get();
-      final orderDoc = await _firestore.collection(AppConstants.collectionOrders).doc(orderId).get();
-
-      if (riderDoc.exists && orderDoc.exists) {
-        final riderData = riderDoc.data()!;
-        final orderData = orderDoc.data()!;
-        final String? token = riderData['fcmToken'];
-
-        if (token != null && token.isNotEmpty) {
-          await _sendRiderAssignmentNotification(
-            fcmToken: token,
-            orderId: orderId,
-            riderName: riderData['name'] ?? 'Rider',
-            orderData: orderData,
-            isManualAssignment: true,
-          );
-        }
-      }
+      final callable = _functions.httpsCallable('sendRiderNotification');
+      await callable.call({
+        'riderId': riderId,
+        'orderId': orderId,
+        'title': '🎯 Order Assigned',
+        'body': 'You have been assigned a new order. Tap to view details.',
+      }).timeout(const Duration(seconds: 10));
+      
+      debugPrint('FCM notification sent via Cloud Function for order $orderId');
+    } on TimeoutException {
+      debugPrint('FCM notification call timed out for order $orderId');
     } catch (e) {
-      debugPrint("Notification failed: $e");
+      // Don't fail the assignment if notification fails
+      debugPrint('FCM notification via Cloud Function failed: $e');
     }
   }
 
@@ -163,38 +179,34 @@ class RiderAssignmentService {
 
   static Future<void> cancelAutoAssignment(String orderId) async {
     try {
-      await _firestore.collection(AppConstants.collectionOrders).doc(orderId).update({
-        'autoAssignStarted': FieldValue.delete(),
-        'assignmentNotes': 'Auto-assignment cancelled by admin',
-      });
-      await _firestore.collection(AppConstants.collectionRiderAssignments).doc(orderId).delete();
+      // Update order first
+      await _firestore
+          .collection(AppConstants.collectionOrders)
+          .doc(orderId)
+          .update({
+            'autoAssignStarted': FieldValue.delete(),
+            'assignmentNotes': 'Auto-assignment cancelled by admin',
+          })
+          .timeout(AppConstants.firestoreWriteTimeout);
+      
+      // Check if assignment record exists before deleting
+      final assignmentDoc = await _firestore
+          .collection(AppConstants.collectionRiderAssignments)
+          .doc(orderId)
+          .get()
+          .timeout(AppConstants.firestoreTimeout);
+      
+      if (assignmentDoc.exists) {
+        await _firestore
+            .collection(AppConstants.collectionRiderAssignments)
+            .doc(orderId)
+            .delete()
+            .timeout(AppConstants.firestoreWriteTimeout);
+      }
+    } on TimeoutException {
+      debugPrint('Timeout cancelling auto-assignment for order $orderId');
     } catch (e) {
       debugPrint('Error cancelling auto-assignment: $e');
-    }
-  }
-
-  static Future<void> _sendRiderAssignmentNotification({
-    required String fcmToken,
-    required String orderId,
-    required String riderName,
-    required Map<String, dynamic> orderData,
-    required bool isManualAssignment,
-  }) async {
-    try {
-      final String orderNumber = orderData['dailyOrderNumber']?.toString() ?? orderId.substring(0, 6).toUpperCase();
-      final String title = isManualAssignment ? '🎯 Order Assigned' : '📦 New Order Available';
-
-      // Since this is standard FCM logic, we use standard message structure
-      await FirebaseMessaging.instance.sendMessage(
-        data: {
-          'type': isManualAssignment ? 'manual_assignment' : 'auto_assignment',
-          'orderId': orderId,
-          'orderNumber': orderNumber,
-          'click_action': 'FLUTTER_NOTIFICATION_CLICK',
-        },
-      );
-    } catch (e) {
-      debugPrint('FCM Error: $e');
     }
   }
 }

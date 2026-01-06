@@ -146,7 +146,6 @@ class _OrdersScreenState extends State<OrdersScreen>
       'all',
       AppConstants.statusPending,
       AppConstants.statusPreparing,
-      AppConstants.statusPrepared,
       AppConstants.statusRiderAssigned,
       AppConstants.statusPickedUp,
       AppConstants.statusDelivered,
@@ -310,8 +309,6 @@ class _OrdersScreenState extends State<OrdersScreen>
                     Icons.schedule_rounded),
                 _buildEnhancedStatusChip('Preparing',
                     AppConstants.statusPreparing, Icons.restaurant_rounded),
-                _buildEnhancedStatusChip('Prepared', AppConstants.statusPrepared,
-                    Icons.done_all_rounded),
                 _buildEnhancedStatusChip('Needs Assign',
                     AppConstants.statusNeedsAssignment, Icons.person_pin_circle_outlined),
                 _buildEnhancedStatusChip('Rider Assigned',
@@ -340,9 +337,6 @@ class _OrdersScreenState extends State<OrdersScreen>
         break;
       case AppConstants.statusPreparing:
         chipColor = Colors.teal;
-        break;
-      case AppConstants.statusPrepared:
-        chipColor = Colors.blueAccent;
         break;
       case AppConstants.statusRiderAssigned:
         chipColor = Colors.purple;
@@ -513,8 +507,6 @@ class _OrderCardState extends State<_OrderCard> {
         return Colors.orange;
       case 'preparing':
         return Colors.teal;
-      case 'prepared':
-        return Colors.blueAccent;
       case 'rider_assigned':
         return Colors.purple;
       case 'pickedup':
@@ -861,24 +853,27 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
-    // 2. Mark Prepared (ROBUSTNESS FIX: Keep visible if preparing even if rider is attached)
+    // 2. Ready for Pickup/Delivery - show completion for non-delivery, handled below for delivery
     if (status == AppConstants.statusPreparing) {
-      buttons.add(
-        ElevatedButton.icon(
-          icon: const Icon(Icons.done_all, size: 16),
-          label: Text(riderId != null ? 'Prepared & Notify Rider' : 'Mark as Prepared'),
-          onPressed: () => widget.onStatusChange(
-              widget.order.id, AppConstants.statusPrepared),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue,
-            foregroundColor: Colors.white,
-            padding: btnPadding,
-            minimumSize: btnMinSize,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      if (orderTypeLower != 'delivery') {
+        // For non-delivery orders, show completion button
+        buttons.add(
+          ElevatedButton.icon(
+            icon: Icon(orderTypeLower == 'dine_in' ? Icons.restaurant_menu : Icons.local_mall, size: 16),
+            label: Text(orderTypeLower == 'dine_in' ? 'Served to Table' : 'Handed to Customer'),
+            onPressed: () => widget.onStatusChange(
+                widget.order.id, AppConstants.statusDelivered),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green.shade700,
+              foregroundColor: Colors.white,
+              padding: btnPadding,
+              minimumSize: btnMinSize,
+              shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
           ),
-        ),
-      );
+        );
+      }
     }
 
     // 3. Reprint Receipt (Not for Cancelled/Refunded)
@@ -903,39 +898,8 @@ class _OrderCardState extends State<_OrderCard> {
     }
 
     // 4. Order Completion and Assignment Logic
-    if (orderTypeLower == 'pickup' ||
-        orderTypeLower == 'takeaway' ||
-        orderTypeLower == 'dine_in') {
-      if (status == AppConstants.statusPrepared) {
-        String label = 'Mark as Completed';
-        IconData icon = Icons.task_alt;
-        if (orderTypeLower == 'dine_in') {
-          label = 'Served to Table';
-          icon = Icons.restaurant_menu;
-        } else if (orderTypeLower == 'pickup' || orderTypeLower == 'takeaway') {
-          label = 'Handed to Customer';
-          icon = Icons.local_mall;
-        }
-        buttons.add(
-          ElevatedButton.icon(
-            icon: Icon(icon, size: 16),
-            label: Text(label),
-            onPressed: () => widget.onStatusChange(
-                widget.order.id, AppConstants.statusDelivered),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green.shade700,
-              foregroundColor: Colors.white,
-              padding: btnPadding,
-              minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        );
-      }
-    } else if (orderTypeLower == 'delivery') {
-      final bool canAssign = (status == AppConstants.statusPrepared ||
-          status == AppConstants.statusPreparing ||
+    if (orderTypeLower == 'delivery') {
+      final bool canAssign = (status == AppConstants.statusPreparing ||
           needsManualAssignment);
 
       // Only show assignment buttons if no rider is currently assigned
@@ -1783,64 +1747,29 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
 
     if (status == AppConstants.statusPreparing) {
-      buttons.add(
-        ElevatedButton.icon(
-          icon: const Icon(Icons.done_all, size: 16),
-          label: const Text('Mark as Prepared'),
-          onPressed: () => updateOrderStatus(
-              orderId, AppConstants.statusPrepared),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue,
-            foregroundColor: Colors.white,
-            padding: btnPadding,
-            minimumSize: btnMinSize,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      // Show completion buttons for non-delivery orders
+      if (orderTypeLower != 'delivery') {
+        buttons.add(
+          ElevatedButton.icon(
+            icon: Icon(orderTypeLower == 'dine_in' ? Icons.restaurant_menu : Icons.local_mall, size: 16),
+            label: Text(orderTypeLower == 'dine_in' ? 'Served to Table' : 'Handed to Customer'),
+            onPressed: () => updateOrderStatus(
+                orderId, AppConstants.statusDelivered),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green.shade700,
+              foregroundColor: Colors.white,
+              padding: btnPadding,
+              minimumSize: btnMinSize,
+              shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
           ),
-        ),
-      );
+        );
+      }
     }
 
-    if (orderTypeLower == 'pickup') {
-      if (status == AppConstants.statusPrepared) {
-        buttons.add(
-          ElevatedButton.icon(
-            icon: const Icon(Icons.task_alt, size: 16),
-            label: const Text('Mark as Delivered'),
-            onPressed: () => updateOrderStatus(
-                orderId, AppConstants.statusDelivered),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green.shade700,
-              foregroundColor: Colors.white,
-              padding: btnPadding,
-              minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        );
-      }
-    } else if (orderTypeLower == 'takeaway' || orderTypeLower == 'dine_in') {
-      if (status == AppConstants.statusPrepared) {
-        buttons.add(
-          ElevatedButton.icon(
-            icon: const Icon(Icons.task_alt, size: 16),
-            label: const Text('Mark as Picked Up'),
-            onPressed: () => updateOrderStatus(
-                orderId, AppConstants.statusDelivered),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green.shade700,
-              foregroundColor: Colors.white,
-              padding: btnPadding,
-              minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        );
-      }
-    } else if (orderTypeLower == 'delivery') {
-      if ((status == AppConstants.statusPrepared || needsManualAssignment) &&
+    if (orderTypeLower == 'delivery') {
+      if ((status == AppConstants.statusPreparing || needsManualAssignment) &&
           !isAutoAssigning) {
         buttons.add(
           ElevatedButton.icon(
@@ -1919,11 +1848,9 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       }
     }
 
-    // ✅ FIX: Explicitly exclude 'refunded' along with 'cancelled' and 'delivered'
     if (status != AppConstants.statusCancelled &&
         status != AppConstants.statusDelivered &&
         status != 'refunded' &&
-        status != AppConstants.statusPrepared && // Generally don't cancel prepared without extra logic, but allowing here for now unless specified
         status != AppConstants.statusPickedUp // Don't cancel after picked up usually
     ) {
       // NOTE: The previous condition was looser. Here is the strict "Terminal State" check logic you requested:
@@ -2258,8 +2185,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
         return Colors.orange;
       case 'preparing':
         return Colors.teal;
-      case 'prepared':
-        return Colors.blueAccent;
       case 'rider_assigned':
         return Colors.purple;
       case 'pickedup':

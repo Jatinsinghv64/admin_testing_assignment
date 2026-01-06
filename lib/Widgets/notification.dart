@@ -222,6 +222,7 @@ class OrderNotificationService with ChangeNotifier {
                 }
               } catch (e) {
                 debugPrint("❌ Failed to auto-accept order: $e");
+                // If auto-accept fails (e.g., already accepted by someone else), just close dialog
               }
             },
           );
@@ -309,39 +310,50 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   double get totalAmount => double.tryParse(_orderData?['totalAmount']?.toString() ?? '0') ?? 0.0;
   String get specialInstructions => _orderData?['specialInstructions']?.toString() ?? '';
 
+  // Duplicate initState removed
+  StreamSubscription? _orderSubscription;
+
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _fetchAndVerifyOrder();
+    _startListeningToOrder();
   }
 
-  Future<void> _fetchAndVerifyOrder() async {
-    try {
-      final doc = await FirebaseFirestore.instance.collection('Orders').doc(widget.orderId).get();
-
-      if (!doc.exists) {
-        _handleError("Order not found.");
+  void _startListeningToOrder() {
+    _orderSubscription = FirebaseFirestore.instance
+        .collection('Orders')
+        .doc(widget.orderId)
+        .snapshots()
+        .listen((snapshot) {
+      if (!snapshot.exists) {
+        _handleError("Order not found or deleted.");
         return;
       }
 
-      final data = doc.data();
-      if (data == null) {
-        _handleError("Order data is empty.");
-        return;
-      }
-
+      final data = snapshot.data();
+      if (data == null) return;
       data['orderId'] = widget.orderId;
 
+      // Access Control
       if (!_isUserAuthorized(data)) {
-        debugPrint("⛔ ACCESS DENIED: User cannot view this order.");
         if (mounted) Navigator.of(context).pop();
         return;
       }
 
-      if (data['status'] != 'pending') {
-        debugPrint("⚠️ Order ${widget.orderId} is no longer pending (Status: ${data['status']})");
-        _handleError("No New Order To handle.");
+      // Live Status Check
+      final status = data['status'];
+      if (status != 'pending') {
+        if (mounted) {
+           // If accepted by someone else, close silently or with toast
+           // But check who accepted it?
+           final acceptedBy = data['acceptedBy'] ?? 'another user';
+           ScaffoldMessenger.of(context).showSnackBar(
+             SnackBar(content: Text('Order handled by $acceptedBy'), backgroundColor: Colors.blue),
+           );
+           Navigator.of(context).pop(); 
+        }
         return;
       }
 
@@ -350,16 +362,19 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
           _orderData = data;
           _isLoading = false;
         });
-
-        _initializeCountdown();
-        startTimer();
-        _startAlarm();
+        
+        // Initialize countdown only once or on changes? 
+        // We only need to start once.
+        if (_timer == null) {
+           _initializeCountdown();
+           startTimer();
+           _startAlarm();
+        }
       }
-
-    } catch (e) {
-      debugPrint("❌ Error fetching order: $e");
-      _handleError("Failed to load order.");
-    }
+    }, onError: (e) {
+      debugPrint("❌ Error listening to order: $e");
+      _handleError("Connection Error");
+    });
   }
 
   bool _isUserAuthorized(Map<String, dynamic> data) {
@@ -535,8 +550,8 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async => false,
+    return PopScope(
+      canPop: false,
       child: Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         elevation: 10,

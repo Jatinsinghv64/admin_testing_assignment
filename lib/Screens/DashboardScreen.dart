@@ -140,10 +140,7 @@ class DashboardScreen extends StatelessWidget {
               // 2. Active Riders
               Expanded(
                 child: _buildStatCardWrapper(
-                  stream: FirebaseFirestore.instance
-                      .collection('Drivers')
-                      .where('isAvailable', isEqualTo: true)
-                      .snapshots(),
+                  stream: _getFilteredDriversStream(context),
                   builder: (context, snapshot) {
                     final count =
                     snapshot.hasData ? snapshot.data!.docs.length : 0;
@@ -165,8 +162,7 @@ class DashboardScreen extends StatelessWidget {
               // 3. Revenue (EXCLUDING REFUNDED)
               Expanded(
                 child: _buildStatCardWrapper(
-                  stream: FirebaseFirestore.instance
-                      .collection('Orders')
+                  stream: _getBaseOrderQuery(context)
                       .where('timestamp', isGreaterThanOrEqualTo: startOfShift)
                       .snapshots(),
                   builder: (context, snapshot) {
@@ -322,8 +318,7 @@ class DashboardScreen extends StatelessWidget {
           SizedBox(
             height: 320,
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance
-                  .collection('Orders')
+              stream: _getBaseOrderQuery(context)
                   .where('timestamp', isGreaterThanOrEqualTo: startOfShift)
                   .orderBy('timestamp', descending: true)
                   .limit(5)
@@ -421,6 +416,39 @@ class DashboardScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+  // --- Helper Methods for Branch Filtering ---
+
+  Query<Map<String, dynamic>> _getBaseOrderQuery(BuildContext context) {
+    final userScope = Provider.of<UserScopeService>(context, listen: false);
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('Orders');
+
+    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
+      // Show ALL orders if SuperAdmin has no specific branch selection
+    } else if (userScope.branchIds.isNotEmpty) {
+      // Filter by assigned branches
+      query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+    } else {
+      // Force empty result if no access
+      query = query.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
+    }
+    return query;
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> _getFilteredDriversStream(BuildContext context) {
+    final userScope = Provider.of<UserScopeService>(context, listen: false);
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('Drivers')
+        .where('isAvailable', isEqualTo: true);
+
+    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
+      // Show ALL drivers
+    } else if (userScope.branchIds.isNotEmpty) {
+      query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+    } else {
+       // Force empty result
+       return const Stream<QuerySnapshot<Map<String, dynamic>>>.empty();
+    }
+    return query.snapshots();
   }
 }
 
@@ -584,6 +612,7 @@ class _EnhancedErrorStatCard extends StatelessWidget {
       ),
     );
   }
+
 }
 
 class _EnhancedOrderListItem extends StatelessWidget {
@@ -777,8 +806,6 @@ class _EnhancedOrderListItem extends StatelessWidget {
         return Colors.orange;
       case 'preparing':
         return Colors.teal;
-      case 'prepared':
-        return Colors.blueAccent;
       case 'rider_assigned':
         return Colors.purple;
       case 'pickedup':
@@ -795,6 +822,7 @@ class _EnhancedOrderListItem extends StatelessWidget {
         return Colors.grey;
     }
   }
+
 }
 
 class _OrderPopupDialog extends StatefulWidget {
@@ -950,68 +978,30 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
 
     if (status == AppConstants.statusPreparing) {
-      buttons.add(
-        ElevatedButton.icon(
-          icon: const Icon(Icons.done_all, size: 16),
-          label: const Text('Mark as Prepared'),
-          onPressed: () => updateOrderStatus(orderId, AppConstants.statusPrepared),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue,
-            foregroundColor: Colors.white,
-            padding: btnPadding,
-            minimumSize: btnMinSize,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        ),
-      );
-    }
-
-    // --- ORDER-TYPE SPECIFIC ACTIONS ---
-
-    // PICKUP
-    if (orderTypeLower == 'pickup') {
-      if (status == AppConstants.statusPrepared) {
+      // For non-delivery orders, show completion button
+      // For delivery orders, show assign rider button (handled below)
+      if (orderTypeLower != 'delivery') {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.task_alt, size: 16),
-            label: const Text('Mark as Delivered'),
+            label: Text(orderTypeLower == 'dine_in' ? 'Served to Table' : 'Handed to Customer'),
             onPressed: () => updateOrderStatus(orderId, AppConstants.statusDelivered),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+              shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
         );
       }
     }
-    // TAKEWAY & DINE-IN
-    else if (orderTypeLower == 'takeaway' || orderTypeLower == 'dine_in') {
-      if (status == AppConstants.statusPrepared) {
-        buttons.add(
-          ElevatedButton.icon(
-            icon: const Icon(Icons.task_alt, size: 16),
-            label: const Text('Mark as Picked Up'),
-            onPressed: () => updateOrderStatus(orderId, AppConstants.statusDelivered),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green.shade700,
-              foregroundColor: Colors.white,
-              padding: btnPadding,
-              minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        );
-      }
-    }
+
     // DELIVERY
-    else if (orderTypeLower == 'delivery') {
-      if ((status == AppConstants.statusPrepared || needsManualAssignment) && !isAutoAssigning) {
+    if (orderTypeLower == 'delivery') {
+      if ((status == AppConstants.statusPreparing || needsManualAssignment) && !isAutoAssigning) {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.delivery_dining, size: 16),
@@ -1412,8 +1402,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
         return Colors.orange;
       case 'preparing':
         return Colors.teal;
-      case 'prepared':
-        return Colors.blueAccent;
       case 'rider_assigned':
         return Colors.purple;
       case 'pickedup':

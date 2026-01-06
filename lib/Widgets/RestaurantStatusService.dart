@@ -3,9 +3,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
-import '../constants.dart'; // ✅ Added import for Constants
+import '../constants.dart';
 
-class RestaurantStatusService with ChangeNotifier {
+/// Service to manage restaurant open/closed status based on manual override and schedule.
+/// Uses lifecycle-aware timer to reduce resource usage when app is in background.
+class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
+  // Timer interval - reduced to 30 seconds to save resources
+  static const Duration _timerInterval = Duration(seconds: 30);
+  static const Duration _closingWarningThreshold = Duration(minutes: 30);
+  static const Duration _closingPopupThreshold = Duration(minutes: 2);
+
+  bool _isActive = true;  // Lifecycle tracking
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   StreamSubscription<DocumentSnapshot>? _branchSubscription;
@@ -33,7 +41,7 @@ class RestaurantStatusService with ChangeNotifier {
   String? get restaurantName => _restaurantName;
   bool get isManualOpen => _isManualOpen;
   bool get isScheduleOpen => _isScheduleOpen;
-  bool get isOpen => _isManualOpen && _isScheduleOpen;
+  bool get isOpen => _isManualOpen; // ✅ FIXED: Manual override takes precedence
   Duration? get timeUntilClose => _timeUntilClose;
 
   String get statusText {
@@ -53,13 +61,30 @@ class RestaurantStatusService with ChangeNotifier {
     _startListeningToRestaurantStatus();
 
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _recalculateScheduleStatus();
+    // Timer runs every 30 seconds instead of every second to save battery
+    _timer = Timer.periodic(_timerInterval, (timer) {
+      if (_isActive) {
+        _recalculateScheduleStatus();
+      }
     });
+
+    // Register for lifecycle events
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// Handle app lifecycle changes to pause timer in background
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _isActive = state == AppLifecycleState.resumed;
+    if (_isActive) {
+      // Recalculate immediately when returning to foreground
+      _recalculateScheduleStatus();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _branchSubscription?.cancel();
     _timer?.cancel();
     _closingPopupController.close();
@@ -166,8 +191,8 @@ class RestaurantStatusService with ChangeNotifier {
         _popupShownToday = false;
       }
 
-      // Update Banner (Show if <= 30 mins)
-      if (difference.inMinutes <= 30 && difference.inSeconds > 0) {
+      // Update Banner (Show if within threshold)
+      if (difference <= _closingWarningThreshold && difference.inSeconds > 0) {
         _timeUntilClose = difference;
         notifyListeners();
       } else {
@@ -177,8 +202,8 @@ class RestaurantStatusService with ChangeNotifier {
         }
       }
 
-      // Trigger Popup (Show if <= 2 mins)
-      if (difference.inMinutes <= 2 && difference.inSeconds > 0 && !_popupShownToday) {
+      // Trigger Popup (Show if within popup threshold)
+      if (difference <= _closingPopupThreshold && difference.inSeconds > 0 && !_popupShownToday) {
         _popupShownToday = true;
         _closingPopupController.add(true);
       }

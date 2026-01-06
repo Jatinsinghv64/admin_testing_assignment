@@ -1,8 +1,10 @@
 // lib/Screens/LoginScreen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../Widgets/Authorization.dart';
-import 'package:url_launcher/url_launcher.dart'; // Add to pubspec if missing
+import '../constants.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -19,7 +21,72 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isPasswordVisible = false;
   String? _errorMessage;
 
+  // --- RATE LIMITING STATE ---
+  int _failedAttempts = 0;
+  DateTime? _lockoutEndTime;
+  static const String _lockoutEndKey = 'login_lockout_end';
+  static const String _failedAttemptsKey = 'login_failed_attempts';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRateLimitState();
+  }
+
+  Future<void> _loadRateLimitState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final lockoutEndMs = prefs.getInt(_lockoutEndKey);
+    final attempts = prefs.getInt(_failedAttemptsKey) ?? 0;
+    
+    setState(() {
+      _failedAttempts = attempts;
+      if (lockoutEndMs != null) {
+        _lockoutEndTime = DateTime.fromMillisecondsSinceEpoch(lockoutEndMs);
+        // Clear lockout if expired
+        if (_lockoutEndTime!.isBefore(DateTime.now())) {
+          _lockoutEndTime = null;
+          _failedAttempts = 0;
+          _clearRateLimitState();
+        }
+      }
+    });
+  }
+
+  Future<void> _saveRateLimitState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_failedAttemptsKey, _failedAttempts);
+    if (_lockoutEndTime != null) {
+      await prefs.setInt(_lockoutEndKey, _lockoutEndTime!.millisecondsSinceEpoch);
+    }
+  }
+
+  Future<void> _clearRateLimitState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_lockoutEndKey);
+    await prefs.remove(_failedAttemptsKey);
+  }
+
+  bool get _isLockedOut {
+    if (_lockoutEndTime == null) return false;
+    return _lockoutEndTime!.isAfter(DateTime.now());
+  }
+
+  String get _lockoutRemainingTime {
+    if (_lockoutEndTime == null) return '';
+    final remaining = _lockoutEndTime!.difference(DateTime.now());
+    if (remaining.isNegative) return '';
+    final minutes = remaining.inMinutes;
+    final seconds = remaining.inSeconds % 60;
+    return '${minutes}m ${seconds}s';
+  }
+
   Future<void> _login() async {
+    // Check lockout first
+    if (_isLockedOut) {
+      setState(() => _errorMessage = 'Too many failed attempts. Please try again in $_lockoutRemainingTime');
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
     setState(() { _isLoading = true; _errorMessage = null; });
 
@@ -31,7 +98,22 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (error != null && mounted) {
-        setState(() => _errorMessage = error);
+        // Increment failed attempts
+        _failedAttempts++;
+        
+        // Check if we should lockout
+        if (_failedAttempts >= AppConstants.maxLoginAttempts) {
+          _lockoutEndTime = DateTime.now().add(AppConstants.loginLockoutDuration);
+          await _saveRateLimitState();
+          setState(() => _errorMessage = 'Too many failed attempts. Account locked for ${AppConstants.loginLockoutDuration.inMinutes} minutes.');
+        } else {
+          await _saveRateLimitState();
+          final remaining = AppConstants.maxLoginAttempts - _failedAttempts;
+          setState(() => _errorMessage = '$error ($remaining attempts remaining)');
+        }
+      } else if (error == null) {
+        // Successful login - clear rate limit state
+        await _clearRateLimitState();
       }
     } catch (e) {
       if (mounted) setState(() => _errorMessage = "An unexpected error occurred.");

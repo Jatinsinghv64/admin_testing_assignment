@@ -88,15 +88,32 @@ int getStableId(String id) {
 }
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // Wrap entire app in error zone for global error handling
+  runZonedGuarded<Future<void>>(() async {
+    WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
 
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    // Initialize Crashlytics for error reporting
+    // FlutterError handler for framework errors
+    FlutterError.onError = (errorDetails) {
+      debugPrint('🔴 Flutter Error: ${errorDetails.exceptionAsString()}');
+      // In production, send to Crashlytics:
+      // FirebaseCrashlytics.instance.recordFlutterFatalError(errorDetails);
+    };
 
-  runApp(const MyApp());
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    runApp(const MyApp());
+  }, (error, stackTrace) {
+    // Global error handler for async errors
+    debugPrint('🔴 Unhandled Error: $error');
+    debugPrint('Stack trace: $stackTrace');
+    // In production, send to Crashlytics:
+    // FirebaseCrashlytics.instance.recordError(error, stackTrace, fatal: true);
+  });
 }
 
 class MyApp extends StatelessWidget {

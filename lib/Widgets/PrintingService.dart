@@ -8,11 +8,26 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import 'TimeUtils.dart';
+import '../constants.dart';
+
+/// Helper class to track cache expiration for branch data
+class _CachedBranch {
+  final Map<String, dynamic> data;
+  final DateTime cachedAt;
+
+  _CachedBranch(this.data) : cachedAt = DateTime.now();
+
+  bool get isExpired => 
+    DateTime.now().difference(cachedAt) > AppConstants.branchCacheExpiration;
+}
 
 class PrintingService {
   static ByteData? _cachedArabicFont;
   static ByteData? _cachedLogo;
-  static final Map<String, Map<String, dynamic>> _branchCache = {};
+  static bool _logoLoadAttempted = false; // Track if we tried loading the logo
+  
+  // Cache with expiration tracking
+  static final Map<String, _CachedBranch> _branchCache = {};
 
   static Future<void> _loadAssets() async {
     // 1. Load Font
@@ -23,14 +38,33 @@ class PrintingService {
         debugPrint("⚠️ Error loading font: $e");
       }
     }
-    // 2. Load Logo
-    if (_cachedLogo == null) {
+    // 2. Load Logo (only attempt once to avoid repeated errors)
+    if (_cachedLogo == null && !_logoLoadAttempted) {
+      _logoLoadAttempted = true;
       try {
         // Ensure this file exists in your assets folder and pubspec.yaml
         _cachedLogo = await rootBundle.load("assets/mitranlogo.jpg");
       } catch (e) {
-        debugPrint("⚠️ Error loading logo: $e");
+        debugPrint("⚠️ Logo asset not found - receipts will print without logo. "
+            "Add 'assets/mitranlogo.jpg' to pubspec.yaml to fix.");
       }
+    }
+  }
+
+  /// Clear expired branch cache entries
+  static void _clearExpiredCache() {
+    final now = DateTime.now();
+    _branchCache.removeWhere((key, cached) => 
+      now.difference(cached.cachedAt) > AppConstants.branchCacheExpiration
+    );
+  }
+
+  /// Force clear the branch cache (useful when branch data is updated)
+  static void clearBranchCache([String? branchId]) {
+    if (branchId != null) {
+      _branchCache.remove(branchId);
+    } else {
+      _branchCache.clear();
     }
   }
 
@@ -94,11 +128,22 @@ class PrintingService {
             String branchAddress = "Doha, Qatar";
 
             if (primaryBranchId.isNotEmpty) {
-              if (!_branchCache.containsKey(primaryBranchId)) {
-                final branchSnap = await FirebaseFirestore.instance.collection('Branch').doc(primaryBranchId).get();
-                if (branchSnap.exists) _branchCache[primaryBranchId] = branchSnap.data()!;
+              // Clear expired cache entries
+              PrintingService._clearExpiredCache();
+              
+              // Check cache or fetch from Firestore
+              final cached = PrintingService._branchCache[primaryBranchId];
+              if (cached == null || cached.isExpired) {
+                final branchSnap = await FirebaseFirestore.instance
+                    .collection('Branch')
+                    .doc(primaryBranchId)
+                    .get()
+                    .timeout(AppConstants.firestoreTimeout);
+                if (branchSnap.exists) {
+                  PrintingService._branchCache[primaryBranchId] = _CachedBranch(branchSnap.data()!);
+                }
               }
-              final branchData = _branchCache[primaryBranchId];
+              final branchData = PrintingService._branchCache[primaryBranchId]?.data;
               if (branchData != null) {
                 branchName = branchData['name'] ?? branchName;
                 branchNameAr = branchData['name_ar'] ?? branchNameAr;
