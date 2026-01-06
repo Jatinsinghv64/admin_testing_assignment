@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:firebase_storage/firebase_storage.dart'; // ✅ Added for Refund Images
+import 'package:firebase_storage/firebase_storage.dart';
 
 import '../Widgets/OrderService.dart';
 import '../Widgets/PrintingService.dart';
@@ -533,11 +533,10 @@ class _OrderCardState extends State<_OrderCard> {
     }
   }
 
-  // ✅ NEW: Alert Dialog for Refund Confirmation
   Future<void> _showRefundConfirmationDialog(BuildContext context, bool isApprove, String? imageUrl) async {
     return showDialog<void>(
       context: context,
-      barrierDismissible: false, // User must tap a button to close
+      barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -581,7 +580,7 @@ class _OrderCardState extends State<_OrderCard> {
             TextButton(
               child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
               onPressed: () {
-                Navigator.of(context).pop(); // Dismiss dialog
+                Navigator.of(context).pop();
               },
             ),
             ElevatedButton(
@@ -591,8 +590,8 @@ class _OrderCardState extends State<_OrderCard> {
               ),
               child: const Text('Confirm', style: TextStyle(color: Colors.white)),
               onPressed: () {
-                Navigator.of(context).pop(); // Dismiss dialog
-                _handleRefundAction(isApprove, imageUrl); // Proceed with action
+                Navigator.of(context).pop();
+                _handleRefundAction(isApprove, imageUrl);
               },
             ),
           ],
@@ -727,7 +726,6 @@ class _OrderCardState extends State<_OrderCard> {
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.close, size: 16),
                     label: const Text('Reject'),
-                    // ✅ MODIFIED: Calls confirmation dialog
                     onPressed: () => _showRefundConfirmationDialog(context, false, refund['imageUrl']),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.grey.shade700,
@@ -740,7 +738,6 @@ class _OrderCardState extends State<_OrderCard> {
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.check, size: 16),
                     label: const Text('Approve'),
-                    // ✅ MODIFIED: Calls confirmation dialog
                     onPressed: () => _showRefundConfirmationDialog(context, true, refund['imageUrl']),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.red,
@@ -795,6 +792,7 @@ class _OrderCardState extends State<_OrderCard> {
     if (riderId != null && riderId.isNotEmpty) {
       setState(() => _isAssigning = true);
 
+      // ✅ FIX: Use Robust Transaction-based Assignment
       await RiderAssignmentService.manualAssignRider(
         orderId: widget.order.id,
         riderId: riderId,
@@ -807,6 +805,7 @@ class _OrderCardState extends State<_OrderCard> {
     }
   }
 
+  // ✅ FULLY UPDATED: Excludes 'refunded' orders from showing 'Cancel' button
   Widget _buildActionButtons(BuildContext context, String status) {
     if (widget.isProcessing || _isAssigning) {
       return const SizedBox(
@@ -844,6 +843,7 @@ class _OrderCardState extends State<_OrderCard> {
     EdgeInsets.symmetric(horizontal: 14, vertical: 10);
     const Size btnMinSize = Size(0, 40);
 
+    // 1. Accept Order
     if (status == AppConstants.statusPending) {
       buttons.add(
         ElevatedButton.icon(
@@ -863,6 +863,7 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
+    // 2. Mark Prepared
     if (status == AppConstants.statusPreparing) {
       buttons.add(
         ElevatedButton.icon(
@@ -882,8 +883,8 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
-    if (status != AppConstants.statusPending &&
-        status != AppConstants.statusCancelled) {
+    // 3. Reprint Receipt (Not for Cancelled/Refunded)
+    if (status != AppConstants.statusCancelled && status != 'refunded') {
       buttons.add(
         OutlinedButton.icon(
           icon: const Icon(Icons.print, size: 16),
@@ -903,6 +904,7 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
+    // 4. Order Completion Logic
     if (orderTypeLower == 'pickup' ||
         orderTypeLower == 'takeaway' ||
         orderTypeLower == 'dine_in') {
@@ -1031,8 +1033,10 @@ class _OrderCardState extends State<_OrderCard> {
       }
     }
 
+    // 5. Cancel Order Logic (Explicitly exclude 'refunded', 'cancelled', 'delivered')
     if (status != AppConstants.statusCancelled &&
-        status != AppConstants.statusDelivered) {
+        status != AppConstants.statusDelivered &&
+        status != 'refunded') {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.cancel, size: 16),
@@ -1176,7 +1180,7 @@ class _OrderCardState extends State<_OrderCard> {
 
   @override
   Widget build(BuildContext context) {
-    final data = widget.order.data();
+    final data = widget.order.data() as Map<String, dynamic>? ?? {};
     final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
     final status = data['status']?.toString() ?? 'pending';
     final String orderTypeLower = widget.orderType.toLowerCase();
@@ -1482,7 +1486,6 @@ class _OrderPopupDialog extends StatefulWidget {
 class _OrderPopupDialogState extends State<_OrderPopupDialog> {
   bool _isLoading = false;
 
-  // ✅ NEW: Added Refund Handling for Popup
   Future<void> _handleRefundAction(bool approved, String? imageUrl) async {
     setState(() => _isLoading = true);
     try {
@@ -1536,7 +1539,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
   }
 
-  // ✅ NEW: Added Refund Widget for Popup
   Widget _buildRefundManagementSection(Map<String, dynamic> data) {
     final refund = data['refundRequest'] as Map<String, dynamic>?;
     if (refund == null || refund['status'] != 'pending') {
@@ -1631,6 +1633,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     );
   }
 
+  // ✅ UPDATED: Now uses centralized OrderService for Atomic Updates
   Future<void> updateOrderStatus(String orderId, String newStatus,
       {String? cancellationReason}) async {
     setState(() {
@@ -1638,81 +1641,17 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     });
 
     try {
-      final Map<String, dynamic> updateData = {
-        'status': newStatus,
-      };
+      final userScope = context.read<UserScopeService>();
 
-      if (newStatus == 'prepared') {
-        updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
-      } else if (newStatus == 'delivered') {
-        updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
-        final orderDoc = await FirebaseFirestore.instance
-            .collection('Orders')
-            .doc(orderId)
-            .get();
-        final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-        final String orderType =
-            (data['Order_type'] as String?)?.toLowerCase() ?? '';
-        final String? riderId =
-        data.containsKey('riderId') ? data['riderId'] as String? : null;
-
-        if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
-          await FirebaseFirestore.instance
-              .collection('Drivers')
-              .doc(riderId)
-              .update({
-            'assignedOrderId': '',
-            'isAvailable': true,
-          });
-        }
-      } else if (newStatus == 'cancelled') {
-        updateData['timestamps.cancelled'] = FieldValue.serverTimestamp();
-        updateData['autoAssignStarted'] = FieldValue.delete();
-
-        FirebaseFirestore.instance
-            .collection('rider_assignments')
-            .doc(orderId)
-            .delete();
-
-        if (cancellationReason != null) {
-          updateData['cancellationReason'] = cancellationReason;
-          try {
-            final userScope = context.read<UserScopeService>();
-            updateData['rejectedBy'] =
-            userScope.userEmail.isNotEmpty ? userScope.userEmail : 'Admin';
-          } catch (_) {
-            updateData['rejectedBy'] = 'Admin';
-          }
-          updateData['rejectedAt'] = FieldValue.serverTimestamp();
-        }
-
-        final orderDoc = await FirebaseFirestore.instance
-            .collection('Orders')
-            .doc(orderId)
-            .get();
-        final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-        final String? riderId = data['riderId'] as String?;
-
-        if (riderId != null && riderId.isNotEmpty) {
-          await FirebaseFirestore.instance
-              .collection('Drivers')
-              .doc(riderId)
-              .update({
-            'assignedOrderId': '',
-            'isAvailable': true,
-          });
-          updateData['riderId'] = FieldValue.delete();
-        }
-      } else if (newStatus == 'pickedUp') {
-        updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
-      } else if (newStatus == 'rider_assigned') {
-        updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
-      }
-
-      await FirebaseFirestore.instance
-          .collection('Orders')
-          .doc(orderId)
-          .update(updateData);
+      // ✅ FIX: Use the OrderService which handles Batches correctly
+      // This ensures Driver and Order are updated at the exact same time.
+      await OrderService().updateOrderStatus(
+        context,
+        orderId,
+        newStatus,
+        reason: cancellationReason,
+        currentUserEmail: userScope.userEmail,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1727,7 +1666,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to update order status: $e'),
+            content: Text('Failed to update: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1741,62 +1680,33 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
   }
 
+  // ✅ UPDATED: Now uses robust RiderAssignmentService
   Future<void> _assignRider(String orderId) async {
     final userScope = context.read<UserScopeService>();
     final currentBranchId = userScope.branchId;
 
-    final rider = await showDialog<String>(
+    final riderId = await showDialog<String>(
       context: context,
       builder: (context) =>
           _RiderSelectionDialog(currentBranchId: currentBranchId),
     );
 
-    if (rider != null && rider.isNotEmpty) {
+    if (riderId != null && riderId.isNotEmpty) {
       setState(() {
         _isLoading = true;
       });
 
-      try {
-        final updateMap = {
-          'status': 'rider_assigned',
-          'riderId': rider,
-          'timestamps.riderAssigned': FieldValue.serverTimestamp(),
-          'timestamp': FieldValue.serverTimestamp(),
-        };
+      // ✅ FIX: Uses Transaction-based assignment to prevent Double-Assign bug
+      final success = await RiderAssignmentService.manualAssignRider(
+        orderId: orderId,
+        riderId: riderId,
+        context: context,
+      );
 
-        await FirebaseFirestore.instance
-            .collection('Orders')
-            .doc(orderId)
-            .update(updateMap);
-
-        await FirebaseFirestore.instance
-            .collection('Drivers')
-            .doc(rider)
-            .update({'assignedOrderId': orderId, 'isAvailable': false});
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Rider "$rider" assigned to order!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-          Navigator.of(context).pop();
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to assign rider: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
+      if (mounted) {
+        setState(() => _isLoading = false);
+        if (success) {
+          Navigator.of(context).pop(); // Close popup only on success
         }
       }
     }
@@ -1828,7 +1738,9 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     const Size btnMinSize = Size(0, 40);
 
     final statusLower = status.toLowerCase();
-    if (statusLower != 'pending' && statusLower != 'cancelled') {
+
+    // ✅ Updated to check for refunded
+    if (statusLower != 'pending' && statusLower != 'cancelled' && statusLower != 'refunded') {
       buttons.add(
         OutlinedButton.icon(
           icon: const Icon(Icons.print, size: 16),
@@ -2006,9 +1918,23 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       }
     }
 
-    if (status == AppConstants.statusPending ||
-        status == AppConstants.statusPreparing ||
-        status == AppConstants.statusNeedsAssignment) {
+    // ✅ FIX: Explicitly exclude 'refunded' along with 'cancelled' and 'delivered'
+    if (status != AppConstants.statusCancelled &&
+        status != AppConstants.statusDelivered &&
+        status != 'refunded' &&
+        status != AppConstants.statusPrepared && // Generally don't cancel prepared without extra logic, but allowing here for now unless specified
+        status != AppConstants.statusPickedUp // Don't cancel after picked up usually
+    ) {
+      // NOTE: The previous condition was looser. Here is the strict "Terminal State" check logic you requested:
+      // Show Cancel button ONLY if NOT terminal.
+      // Terminal states: Cancelled, Delivered, Refunded.
+      // Also usually you don't cancel after Picked Up easily, but sticking to your core request.
+    }
+
+    // Re-applying the simplified logic from the specific fix request:
+    if (status != AppConstants.statusCancelled &&
+        status != AppConstants.statusDelivered &&
+        status != 'refunded') {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.cancel, size: 16),
@@ -2236,7 +2162,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               ),
               const SizedBox(height: 20),
 
-              // ✅ NEW: Refund Section in Popup
               _buildRefundManagementSection(data),
 
               _buildSectionHeader('Customer Details', Icons.person_outline),
@@ -2343,7 +2268,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       case 'cancelled':
         return Colors.red;
       case 'refunded':
-        return Colors.pink; // ✅ Added
+        return Colors.pink;
       case 'needs_rider_assignment':
         return Colors.orange;
       default:
@@ -2644,6 +2569,7 @@ class _RiderSelectionDialog extends StatelessWidget {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
+                  // ✅ FIXED: textAlign moved to Text widget
                   Text(
                     'All riders are currently busy or offline.',
                     style: TextStyle(

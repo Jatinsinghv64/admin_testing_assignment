@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import '../constants.dart'; // ✅ Added
+import '../constants.dart'; //
 
 class RiderAssignmentService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -12,7 +12,6 @@ class RiderAssignmentService {
     required String branchId,
   }) async {
     try {
-      // ✅ Use Constant
       final orderDoc = await _firestore.collection(AppConstants.collectionOrders).doc(orderId).get();
       if (!orderDoc.exists) return false;
 
@@ -48,70 +47,103 @@ class RiderAssignmentService {
     }
   }
 
+  // ✅ FULLY UPDATED: Transaction-based Manual Assignment
   static Future<bool> manualAssignRider({
     required String orderId,
     required String riderId,
     required BuildContext context,
   }) async {
     try {
-      final orderDoc = await _firestore.collection(AppConstants.collectionOrders).doc(orderId).get();
-      if (!orderDoc.exists) throw Exception("Order not found");
+      // Start a Transaction to ensure atomic reads and writes
+      await _firestore.runTransaction((transaction) async {
+        final orderRef = _firestore.collection(AppConstants.collectionOrders).doc(orderId);
+        final riderRef = _firestore.collection(AppConstants.collectionDrivers).doc(riderId);
+        final assignmentRef = _firestore.collection(AppConstants.collectionRiderAssignments).doc(orderId);
 
-      final orderData = orderDoc.data() as Map<String, dynamic>;
-      final String currentStatus = orderData['status'] ?? '';
+        final orderDoc = await transaction.get(orderRef);
+        final riderDoc = await transaction.get(riderRef);
 
-      if ([AppConstants.statusPickedUp, 'on_the_way', AppConstants.statusDelivered, AppConstants.statusCancelled].contains(currentStatus)) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cannot assign rider. Order is already $currentStatus.'), backgroundColor: Colors.red));
+        if (!orderDoc.exists) throw Exception("Order not found");
+        if (!riderDoc.exists) throw Exception("Rider not found");
+
+        final orderData = orderDoc.data() as Map<String, dynamic>;
+        final String currentStatus = orderData['status'] ?? '';
+
+        // 🛑 CRITICAL RACE CONDITION CHECK
+        // If the order was delivered or cancelled while we were looking at it, abort.
+        if ([
+          AppConstants.statusPickedUp,
+          'on_the_way',
+          AppConstants.statusDelivered,
+          AppConstants.statusCancelled
+        ].contains(currentStatus)) {
+          throw Exception("Order is already $currentStatus. Assignment blocked.");
         }
-        return false;
+
+        final riderData = riderDoc.data() as Map<String, dynamic>;
+        // Optional: Check if rider is still available (though we might want to override)
+        // if (riderData['isAvailable'] == false) throw Exception("Rider is no longer available.");
+
+        // 1. Update Order
+        transaction.update(orderRef, {
+          'riderId': riderId,
+          'status': AppConstants.statusRiderAssigned,
+          'timestamps.riderAssigned': FieldValue.serverTimestamp(),
+          'assignmentNotes': 'Manually assigned by admin',
+          'autoAssignStarted': FieldValue.delete(),
+          'lastAssignmentUpdate': FieldValue.serverTimestamp(),
+        });
+
+        // 2. Update Driver
+        transaction.update(riderRef, {
+          'assignedOrderId': orderId,
+          'isAvailable': false,
+        });
+
+        // 3. Cleanup Assignment Doc (Atomic delete)
+        transaction.delete(assignmentRef);
+      });
+
+      // 🔔 Notification Logic (Executed only after successful transaction)
+      // We fetch fresh data to ensure the notification contains correct info
+      try {
+        final riderDoc = await _firestore.collection(AppConstants.collectionDrivers).doc(riderId).get();
+        final orderDoc = await _firestore.collection(AppConstants.collectionOrders).doc(orderId).get();
+
+        if (riderDoc.exists && orderDoc.exists) {
+          final riderData = riderDoc.data()!;
+          final orderData = orderDoc.data()!;
+          final String? riderFcmToken = riderData['fcmToken'];
+          final String riderName = riderData['name'] ?? 'Rider';
+
+          if (riderFcmToken != null && riderFcmToken.isNotEmpty) {
+            await _sendRiderAssignmentNotification(
+              fcmToken: riderFcmToken,
+              orderId: orderId,
+              riderName: riderName,
+              orderData: orderData,
+              isManualAssignment: true,
+            );
+          }
+        }
+      } catch (e) {
+        debugPrint("Notification error (Assignment succeeded): $e");
       }
 
-      await _cleanupAssignment(orderId);
-
-      // ✅ Use Constant
-      final riderDoc = await _firestore.collection(AppConstants.collectionDrivers).doc(riderId).get();
-      final riderData = riderDoc.data() as Map<String, dynamic>? ?? {};
-      final String? riderFcmToken = riderData['fcmToken'];
-      final String riderName = riderData['name'] ?? 'Rider';
-
-      final batch = _firestore.batch();
-      final orderRef = _firestore.collection(AppConstants.collectionOrders).doc(orderId);
-
-      batch.update(orderRef, {
-        'riderId': riderId,
-        'status': AppConstants.statusRiderAssigned,
-        'timestamps.riderAssigned': FieldValue.serverTimestamp(),
-        'assignmentNotes': 'Manually assigned by admin',
-        'autoAssignStarted': FieldValue.delete(),
-        'lastAssignmentUpdate': FieldValue.serverTimestamp(),
-      });
-
-      final riderRef = _firestore.collection(AppConstants.collectionDrivers).doc(riderId);
-      batch.update(riderRef, {
-        'assignedOrderId': orderId,
-        'isAvailable': false,
-      });
-
-      await batch.commit();
-
-      if (riderFcmToken != null && riderFcmToken.isNotEmpty) {
-        await _sendRiderAssignmentNotification(
-          fcmToken: riderFcmToken,
-          orderId: orderId,
-          riderName: riderName,
-          orderData: orderData,
-          isManualAssignment: true,
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Rider assigned successfully'), backgroundColor: Colors.green),
         );
       }
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Rider $riderName assigned successfully'), backgroundColor: Colors.green));
-      }
       return true;
+
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to assign rider: $e'), backgroundColor: Colors.red));
+        // Clean up exception message
+        final String errorMsg = e.toString().replaceAll("Exception: ", "");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to assign rider: $errorMsg'), backgroundColor: Colors.red),
+        );
       }
       return false;
     }
@@ -148,14 +180,12 @@ class RiderAssignmentService {
 
   static Future<void> _cleanupAssignment(String orderId) async {
     try {
-      // ✅ Use Constant
       await _firestore.collection(AppConstants.collectionRiderAssignments).doc(orderId).delete();
     } catch (e) {
       print('❌ ERROR during cleanup: $e');
     }
   }
 
-  // ... (_sendRiderAssignmentNotification remains unchanged) ...
   static Future<void> _sendRiderAssignmentNotification({
     required String fcmToken,
     required String orderId,
@@ -163,7 +193,6 @@ class RiderAssignmentService {
     required Map<String, dynamic> orderData,
     required bool isManualAssignment,
   }) async {
-    // ... (Code same as original) ...
     try {
       final String orderNumber = orderData['dailyOrderNumber']?.toString() ?? orderId.substring(0, 6).toUpperCase();
       final double totalAmount = (orderData['totalAmount'] as num?)?.toDouble() ?? 0.0;

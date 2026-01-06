@@ -1,24 +1,29 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 import '../main.dart';
+import '../constants.dart';
+import '../Widgets/OrderService.dart'; // ✅ Added for atomic updates
+import '../Widgets/RiderAssignment.dart'; // ✅ Added for transaction-based assignment
+import '../Widgets/PrintingService.dart';
+import '../Widgets/TimeUtils.dart';
 
 class DashboardScreen extends StatelessWidget {
   final Function(int) onTabChange;
 
   const DashboardScreen({super.key, required this.onTabChange});
 
-  // ✅ HELPER: Calculates 6:00 AM cut-off for "Business Day"
   Timestamp _getBusinessStartTimestamp() {
     var now = DateTime.now();
-    // If it's early morning (e.g., 00:00 - 05:59), shift back to yesterday
-    // so we count it as part of the previous night's shift.
+    // If before 6 AM, consider it part of the previous business day
     if (now.hour < 6) {
       now = now.subtract(const Duration(days: 1));
     }
-    // Set start time to 6:00 AM of the calculated "business day"
     final startOfBusinessDay = DateTime(now.year, now.month, now.day, 6, 0, 0);
     return Timestamp.fromDate(startOfBusinessDay);
   }
@@ -92,7 +97,6 @@ class DashboardScreen extends StatelessWidget {
   }
 
   Widget _buildEnhancedStatCardsGrid(BuildContext context) {
-    // ✅ Use Business Day Timestamp (6:00 AM cut-off)
     final Timestamp startOfShift = _getBusinessStartTimestamp();
 
     return Container(
@@ -112,6 +116,7 @@ class DashboardScreen extends StatelessWidget {
         children: [
           Row(
             children: [
+              // 1. Today's Orders
               Expanded(
                 child: _buildStatCardWrapper(
                   stream: FirebaseFirestore.instance
@@ -132,6 +137,7 @@ class DashboardScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 16),
+              // 2. Active Riders
               Expanded(
                 child: _buildStatCardWrapper(
                   stream: FirebaseFirestore.instance
@@ -156,6 +162,7 @@ class DashboardScreen extends StatelessWidget {
           const SizedBox(height: 16),
           Row(
             children: [
+              // 3. Revenue (EXCLUDING REFUNDED)
               Expanded(
                 child: _buildStatCardWrapper(
                   stream: FirebaseFirestore.instance
@@ -165,18 +172,20 @@ class DashboardScreen extends StatelessWidget {
                   builder: (context, snapshot) {
                     double totalRevenue = 0;
                     if (snapshot.hasData) {
+                      // ✅ ROBUST REVENUE LOGIC
                       final billableStatuses = {
-                        'delivered',
+                        AppConstants.statusDelivered,
                         'completed',
                         'paid'
                       };
+
                       for (var doc in snapshot.data!.docs) {
                         final data = doc.data() as Map<String, dynamic>;
-                        final status =
-                        (data['status'] ?? '').toString().toLowerCase();
-                        if (billableStatuses.contains(status)) {
-                          totalRevenue +=
-                              (data['totalAmount'] as num? ?? 0).toDouble();
+                        final status = (data['status'] ?? '').toString().toLowerCase();
+
+                        // Strict check: Must be in billable list AND NOT refunded
+                        if (billableStatuses.contains(status) && status != 'refunded') {
+                          totalRevenue += (data['totalAmount'] as num? ?? 0).toDouble();
                         }
                       }
                     }
@@ -185,13 +194,13 @@ class DashboardScreen extends StatelessWidget {
                       value: 'QAR ${totalRevenue.toStringAsFixed(2)}',
                       icon: Icons.attach_money_outlined,
                       color: Colors.orangeAccent,
-                      // ✅ CHANGED: Navigates to Orders Screen instead of Analytics
                       onTap: () => _navigateToOrders(context),
                     );
                   },
                 ),
               ),
               const SizedBox(width: 16),
+              // 4. Menu Items
               Expanded(
                 child: _buildStatCardWrapper(
                   stream: FirebaseFirestore.instance
@@ -219,19 +228,15 @@ class DashboardScreen extends StatelessWidget {
   }
 
   void _navigateToOrders(BuildContext context) {
-    onTabChange(2); // Index 2 is usually Orders
+    onTabChange(2);
   }
 
   void _navigateToRiders(BuildContext context) {
-    onTabChange(3); // Index 3 is usually Riders
-  }
-
-  void _navigateToAnalytics(BuildContext context) {
-    onTabChange(4); // Keep for reference, even if Revenue now points to Orders
+    onTabChange(3);
   }
 
   void _navigateToMenuManagement(BuildContext context) {
-    onTabChange(1); // Index 1 is usually Inventory/Menu
+    onTabChange(1);
   }
 
   Widget _buildStatCardWrapper({
@@ -256,7 +261,6 @@ class DashboardScreen extends StatelessWidget {
   }
 
   Widget _buildEnhancedRecentOrdersSection(BuildContext context) {
-    // ✅ Use Business Day Timestamp
     final Timestamp startOfShift = _getBusinessStartTimestamp();
 
     return Container(
@@ -775,8 +779,10 @@ class _EnhancedOrderListItem extends StatelessWidget {
         return Colors.teal;
       case 'prepared':
         return Colors.blueAccent;
-      case 'pickedup':
+      case 'rider_assigned':
         return Colors.purple;
+      case 'pickedup':
+        return Colors.deepPurple;
       case 'delivered':
         return Colors.green;
       case 'cancelled':
@@ -803,6 +809,7 @@ class _OrderPopupDialog extends StatefulWidget {
 class _OrderPopupDialogState extends State<_OrderPopupDialog> {
   bool _isLoading = false;
 
+  // ✅ ROBUST: Uses OrderService for atomic updates
   Future<void> updateOrderStatus(String orderId, String newStatus,
       {String? cancellationReason}) async {
     setState(() {
@@ -810,83 +817,15 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     });
 
     try {
-      final Map<String, dynamic> updateData = {
-        'status': newStatus,
-      };
+      final userScope = context.read<UserScopeService>();
 
-      if (newStatus == 'prepared') {
-        updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
-      } else if (newStatus == 'delivered') {
-        updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
-        final orderDoc = await FirebaseFirestore.instance
-            .collection('Orders')
-            .doc(orderId)
-            .get();
-        final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-        final String orderType =
-            (data['Order_type'] as String?)?.toLowerCase() ?? '';
-        final String? riderId =
-        data.containsKey('riderId') ? data['riderId'] as String? : null;
-
-        if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
-          await FirebaseFirestore.instance
-              .collection('Drivers')
-              .doc(riderId)
-              .update({
-            'assignedOrderId': '',
-            'isAvailable': true,
-          });
-        }
-      } else if (newStatus == 'cancelled') {
-        updateData['timestamps.cancelled'] = FieldValue.serverTimestamp();
-
-        // 🛑 Stop Auto-Assignment
-        updateData['autoAssignStarted'] = FieldValue.delete();
-
-        FirebaseFirestore.instance
-            .collection('rider_assignments')
-            .doc(orderId)
-            .delete();
-
-        if (cancellationReason != null) {
-          updateData['cancellationReason'] = cancellationReason;
-          try {
-            final userScope = context.read<UserScopeService>();
-            updateData['rejectedBy'] =
-            userScope.userEmail.isNotEmpty ? userScope.userEmail : 'Admin';
-          } catch (_) {
-            updateData['rejectedBy'] = 'Admin';
-          }
-          updateData['rejectedAt'] = FieldValue.serverTimestamp();
-        }
-
-        final orderDoc = await FirebaseFirestore.instance
-            .collection('Orders')
-            .doc(orderId)
-            .get();
-        final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-        final String? riderId = data['riderId'] as String?;
-
-        if (riderId != null && riderId.isNotEmpty) {
-          await FirebaseFirestore.instance
-              .collection('Drivers')
-              .doc(riderId)
-              .update({
-            'assignedOrderId': '',
-            'isAvailable': true,
-          });
-          updateData['riderId'] = FieldValue.delete();
-        }
-      } else if (newStatus == 'pickedUp') {
-        updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
-      } else if (newStatus == 'rider_assigned') {
-        updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
-      }
-
-      await FirebaseFirestore.instance
-          .collection('Orders')
-          .doc(orderId)
-          .update(updateData);
+      await OrderService().updateOrderStatus(
+        context,
+        orderId,
+        newStatus,
+        reason: cancellationReason,
+        currentUserEmail: userScope.userEmail,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -901,7 +840,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to update order status: $e'),
+            content: Text('Failed to update: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -915,6 +854,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
   }
 
+  // ✅ ROBUST: Uses RiderAssignmentService for transaction-based assignment
   Future<void> _assignRider(String orderId) async {
     final userScope = context.read<UserScopeService>();
     final currentBranchId = userScope.branchId;
@@ -930,48 +870,15 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
         _isLoading = true;
       });
 
-      try {
-        final updateMap = {
-          'status': 'rider_assigned',
-          'riderId': rider,
-          'timestamps.riderAssigned': FieldValue.serverTimestamp(),
-          'timestamp': FieldValue.serverTimestamp(),
-        };
+      final success = await RiderAssignmentService.manualAssignRider(
+          orderId: orderId,
+          riderId: rider,
+          context: context
+      );
 
-        await FirebaseFirestore.instance
-            .collection('Orders')
-            .doc(orderId)
-            .update(updateMap);
-
-        await FirebaseFirestore.instance
-            .collection('Drivers')
-            .doc(rider)
-            .update({'assignedOrderId': orderId, 'isAvailable': false});
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Rider "$rider" assigned to order!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-          Navigator.of(context).pop();
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to assign rider: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
+      if (mounted) {
+        setState(() => _isLoading = false);
+        if (success) Navigator.of(context).pop();
       }
     }
   }
@@ -995,23 +902,21 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     // Check Auto-Assignment
     final bool isAutoAssigning =
         data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
-    final bool needsManualAssignment = status == 'needs_rider_assignment';
+    final bool needsManualAssignment = status == AppConstants.statusNeedsAssignment;
 
     const EdgeInsets btnPadding =
     EdgeInsets.symmetric(horizontal: 14, vertical: 10);
     const Size btnMinSize = Size(0, 40);
 
-    // --- UNIVERSAL ACTIONS ---
+    // --- UNIVERSAL ACTIONS (Exclude cancelled/refunded) ---
     final statusLower = status.toLowerCase();
-    if (statusLower != 'pending' && statusLower != 'cancelled') {
+    if (statusLower != 'pending' && statusLower != 'cancelled' && statusLower != 'refunded') {
       buttons.add(
         OutlinedButton.icon(
           icon: const Icon(Icons.print, size: 16),
           label: const Text('Reprint Receipt'),
-          onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Printer service not connected.')),
-            );
+          onPressed: () async {
+            await PrintingService.printReceipt(context, widget.order);
           },
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.deepPurple,
@@ -1026,12 +931,12 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
 
     // --- STATUS-BASED ACTIONS ---
-    if (status == 'pending') {
+    if (status == AppConstants.statusPending) {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.check, size: 16),
           label: const Text('Accept Order'),
-          onPressed: () => updateOrderStatus(orderId, 'preparing'),
+          onPressed: () => updateOrderStatus(orderId, AppConstants.statusPreparing),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.green,
             foregroundColor: Colors.white,
@@ -1044,12 +949,12 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       );
     }
 
-    if (status == 'preparing') {
+    if (status == AppConstants.statusPreparing) {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.done_all, size: 16),
           label: const Text('Mark as Prepared'),
-          onPressed: () => updateOrderStatus(orderId, 'prepared'),
+          onPressed: () => updateOrderStatus(orderId, AppConstants.statusPrepared),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.blue,
             foregroundColor: Colors.white,
@@ -1066,12 +971,12 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
 
     // PICKUP
     if (orderTypeLower == 'pickup') {
-      if (status == 'prepared') {
+      if (status == AppConstants.statusPrepared) {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.task_alt, size: 16),
             label: const Text('Mark as Delivered'),
-            onPressed: () => updateOrderStatus(orderId, 'delivered'),
+            onPressed: () => updateOrderStatus(orderId, AppConstants.statusDelivered),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -1086,12 +991,12 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
     // TAKEWAY & DINE-IN
     else if (orderTypeLower == 'takeaway' || orderTypeLower == 'dine_in') {
-      if (status == 'prepared') {
+      if (status == AppConstants.statusPrepared) {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.task_alt, size: 16),
             label: const Text('Mark as Picked Up'),
-            onPressed: () => updateOrderStatus(orderId, 'delivered'),
+            onPressed: () => updateOrderStatus(orderId, AppConstants.statusDelivered),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -1106,7 +1011,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
     // DELIVERY
     else if (orderTypeLower == 'delivery') {
-      if ((status == 'prepared' || needsManualAssignment) && !isAutoAssigning) {
+      if ((status == AppConstants.statusPrepared || needsManualAssignment) && !isAutoAssigning) {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.delivery_dining, size: 16),
@@ -1126,12 +1031,12 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
         );
       }
 
-      if (status == 'pickedUp') {
+      if (status == AppConstants.statusPickedUp) {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.task_alt, size: 16),
             label: const Text('Mark as Delivered'),
-            onPressed: () => updateOrderStatus(orderId, 'delivered'),
+            onPressed: () => updateOrderStatus(orderId, AppConstants.statusDelivered),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -1144,7 +1049,6 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
         );
       }
 
-      // Auto-assigning indicator (Only for Delivery)
       if (isAutoAssigning) {
         buttons.add(
           ConstrainedBox(
@@ -1185,9 +1089,10 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
 
     // --- CANCEL ACTIONS ---
-    if (status == 'pending' ||
-        status == 'preparing' ||
-        status == 'needs_rider_assignment') {
+    // ✅ FIX: Strict Terminal State Check (exclude Cancelled, Delivered, Refunded)
+    if (status != AppConstants.statusCancelled &&
+        status != AppConstants.statusDelivered &&
+        status != 'refunded') {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.cancel, size: 16),
@@ -1198,7 +1103,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
               builder: (context) => const _CancellationReasonDialog(),
             );
             if (reason != null && reason.trim().isNotEmpty) {
-              updateOrderStatus(orderId, 'cancelled',
+              updateOrderStatus(orderId, AppConstants.statusCancelled,
                   cancellationReason: reason);
             }
           },
@@ -1534,6 +1439,15 @@ class _RiderSelectionDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    Query query = FirebaseFirestore.instance
+        .collection(AppConstants.collectionDrivers)
+        .where('isAvailable', isEqualTo: true)
+        .where('status', isEqualTo: 'online');
+
+    if (currentBranchId != null && currentBranchId!.isNotEmpty) {
+      query = query.where('branchIds', arrayContains: currentBranchId);
+    }
+
     return AlertDialog(
       backgroundColor: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1544,10 +1458,7 @@ class _RiderSelectionDialog extends StatelessWidget {
       content: SizedBox(
         width: double.maxFinite,
         child: StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('Drivers')
-              .where('isAvailable', isEqualTo: true)
-              .snapshots(),
+          stream: query.snapshots(),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
@@ -1561,35 +1472,12 @@ class _RiderSelectionDialog extends StatelessWidget {
               return const Center(child: Text('No available drivers found.'));
             }
 
-            final filteredDrivers = snapshot.data!.docs.where((driver) {
-              final data = driver.data() as Map<String, dynamic>;
-              final driverBranchIds =
-              List<String>.from(data['branchIds'] ?? []);
-              if (currentBranchId == null) return true;
-              return driverBranchIds.contains(currentBranchId);
-            }).toList();
-
-            if (filteredDrivers.isEmpty) {
-              return const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.person_off, size: 48, color: Colors.grey),
-                    SizedBox(height: 8),
-                    Text('No drivers available\nfor your branch',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.grey)),
-                  ],
-                ),
-              );
-            }
-
             return ListView.separated(
               shrinkWrap: true,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemCount: filteredDrivers.length,
+              itemCount: snapshot.data!.docs.length,
               itemBuilder: (context, index) {
-                var driver = filteredDrivers[index];
+                var driver = snapshot.data!.docs[index];
                 var data = driver.data() as Map<String, dynamic>;
                 final driverId = driver.id;
                 final String name = data['name'] ?? 'Unnamed Driver';
@@ -1603,7 +1491,7 @@ class _RiderSelectionDialog extends StatelessWidget {
                   child: ListTile(
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 10),
-                    leading: CircleAvatar(child: Icon(Icons.person)),
+                    leading: const CircleAvatar(child: Icon(Icons.person)),
                     title: Text(name,
                         style: const TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: Text(status),
