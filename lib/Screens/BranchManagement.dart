@@ -650,7 +650,12 @@ class _BranchCard extends StatelessWidget {
                                   await FirebaseFirestore.instance
                                       .collection('Branch')
                                       .doc(doc.id)
-                                      .update({'isOpen': value});
+                                      .update({
+                                        'isOpen': value,
+                                        'manuallyClosed': !value, // Set when closing
+                                        'manuallyOpened': value,   // Set when opening
+                                        'lastStatusUpdate': FieldValue.serverTimestamp(),
+                                      });
 
                                   if (context.mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(

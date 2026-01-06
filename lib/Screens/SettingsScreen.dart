@@ -8,6 +8,7 @@ import '../Widgets/Authorization.dart';
 import '../Widgets/Permissions.dart';
 import '../Widgets/RestaurantStatusService.dart';
 import '../Widgets/notification.dart';
+import '../Widgets/BranchFilterService.dart';
 import '../main.dart';
 import 'AnalyticsScreen.dart';
 import 'BranchManagement.dart';
@@ -345,55 +346,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildRestaurantStatusCard(
       RestaurantStatusService status, UserScopeService scope) {
-    if (scope.isSuperAdmin) {
-      return const SizedBox.shrink();
-    }
-
-    return _SettingsCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                status.isOpen
-                    ? Icons.storefront
-                    : Icons.no_food_rounded,
-                color: status.isOpen ? Colors.green : Colors.red,
-              ),
-              const SizedBox(width: 12),
-              const Text(
-                'Restaurant Status',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.deepPurple,
-                ),
-              ),
-              const Spacer(),
-              Switch(
-                value: status.isOpen,
-                onChanged: (value) async {
-                  await status.toggleRestaurantStatus(value);
-                },
-                activeColor: Colors.green,
-                inactiveThumbColor: Colors.red,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            status.isOpen
-                ? 'Your restaurant is OPEN and accepting new orders.'
-                : 'Your restaurant is CLOSED. You will not receive new orders.',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-            ),
-          ),
-        ],
-      ),
-    );
+    // ✅ Show for both SuperAdmin and Branch Admin
+    return _SuperAdminStatusCard(userScope: scope);
   }
 
   Widget _buildUserProfileCard(
@@ -986,6 +940,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
   @override
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
+    final branchFilter = context.watch<BranchFilterService>(); // ✅ Added branch filter
 
     if (!userScope.isSuperAdmin || !userScope.can(Permissions.canManageStaff)) {
       return Scaffold(
@@ -1001,7 +956,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.white,
-        centerTitle: true,
+        centerTitle: !(userScope.branchIds.length > 1), // Center if no selector
         iconTheme: const IconThemeData(color: Colors.deepPurple),
         title: const Text(
           'Manage Staff',
@@ -1012,6 +967,12 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
           ),
         ),
         actions: [
+          if (userScope.branchIds.length > 1)
+             // Reuse the selector widget logic or extract it. 
+             // Since it's private in other files, I'll inline a simple version or use a shared widget?
+             // Ideally I should have made it a shared widget. I'll duplicate for safety now to avoid wide refactor.
+             _buildBranchSelector(userScope, branchFilter),
+
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: IconButton(
@@ -1030,7 +991,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
         ],
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _db.collection('staff').snapshots(),
+        stream: _getStaffQuery(userScope, branchFilter),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -1040,33 +1001,71 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
             return Center(child: Text('Error: ${snapshot.error}'));
           }
 
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
-              child: Text(
-                'No staff members found',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
+          final staffMembers = snapshot.data?.docs ?? [];
+          
+          // Separate list logic
+          // 1. Fetch current user data (if not in list, we might need a separate stream, 
+          // but for now, we scan the list OR rely on the fact that SuperAdmins usually see themselves.
+          // BUT if filter excludes me, I am not in `staffMembers`.
+          
+          // To guarantee "Me" shows up, we need a separate stream for "Me" if I'm not in the query results?
+          // Or just query "Me" always.
+          
+          return CustomScrollView(
+            slivers: [
+              // 1. My Profile Section (Always Visible)
+              SliverToBoxAdapter(
+                child: StreamBuilder<DocumentSnapshot>(
+                   stream: _db.collection('staff').doc(userScope.userEmail).snapshots(),
+                   builder: (context, snapshot) {
+                      if (!snapshot.hasData || !snapshot.data!.exists) return const SizedBox.shrink();
+                      final data = snapshot.data!.data() as Map<String, dynamic>;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        child: _StaffCard(
+                          staffId: userScope.userEmail!,
+                          data: data,
+                          isSelf: true,
+                          onEdit: () => _showEditStaffDialog(userScope.userEmail!, data, true),
+                        ),
+                      );
+                   },
+                ),
               ),
-            );
-          }
-
-          final staffMembers = snapshot.data!.docs;
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(20),
-            itemCount: staffMembers.length,
-            itemBuilder: (context, index) {
-              final staff = staffMembers[index];
-              final data = staff.data() as Map<String, dynamic>;
-
-              final isSelf = staff.id == userScope.userEmail;
-
-              return _StaffCard(
-                staffId: staff.id,
-                data: data,
-                isSelf: isSelf,
-                onEdit: () => _showEditStaffDialog(staff.id, data, isSelf),
-              );
-            },
+              
+              // 2. Staff List (Filtered)
+              if (staffMembers.isEmpty)
+                const SliverFillRemaining(
+                   child: Center(
+                    child: Text(
+                      'No staff members found matching filter',
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                    ),
+                  ),
+                )
+              else
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final staff = staffMembers[index];
+                      // Skip self because it's shown at top
+                      if (staff.id == userScope.userEmail) return const SizedBox.shrink();
+                      
+                      final data = staff.data() as Map<String, dynamic>;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8), // Adjusted padding
+                        child: _StaffCard(
+                          staffId: staff.id,
+                          data: data,
+                          isSelf: false,
+                          onEdit: () => _showEditStaffDialog(staff.id, data, false),
+                        ),
+                      );
+                    },
+                    childCount: staffMembers.length,
+                  ),
+                ),
+            ],
           );
         },
       ),
@@ -1145,7 +1144,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       }
 
       if (isUpdatingSelf) {
-        _reloadCurrentUserScope();
+        await _reloadCurrentUserScope();
       }
     } catch (e) {
       if (mounted) {
@@ -1163,6 +1162,92 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       await userScope.clearScope();
       await userScope.loadUserScope(currentUser, authService);
     }
+  }
+
+  // ✅ Query definition
+  Stream<QuerySnapshot> _getStaffQuery(UserScopeService userScope, BranchFilterService branchFilter) {
+    Query query = _db.collection('staff');
+
+    // Filter by branch logic
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    
+    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
+        // Show all
+    } else if (filterBranchIds.isNotEmpty) {
+      if (filterBranchIds.length == 1) {
+        // Use simpler arrayContains for single branch filter -> fixes "nothing updates" issue
+        query = query.where('branchIds', arrayContains: filterBranchIds.first);
+      } else {
+        query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+      }
+    } else if (!userScope.isSuperAdmin) {
+      // Fallback for simple branch admin
+      query = query.where('branchIds', arrayContains: userScope.branchId);
+    }
+    
+    return query.snapshots();
+  }
+
+  // ✅ Branch Selector Widget
+  Widget _buildBranchSelector(UserScopeService userScope, BranchFilterService branchFilter) {
+    return Container(
+      margin: const EdgeInsets.only(right: 4),
+      child: PopupMenuButton<String?>(
+        offset: const Offset(0, 45),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.deepPurple.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.deepPurple.withOpacity(0.3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.store, size: 18, color: Colors.deepPurple),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 100),
+                child: Text(
+                  branchFilter.selectedBranchId == null
+                      ? 'All Branches'
+                      : branchFilter.getBranchName(branchFilter.selectedBranchId!),
+                  style: const TextStyle(
+                    color: Colors.deepPurple,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.arrow_drop_down, color: Colors.deepPurple, size: 20),
+            ],
+          ),
+        ),
+        itemBuilder: (context) => [
+          PopupMenuItem<String?>(
+            value: null,
+            child: Row(children: [
+               Icon(branchFilter.selectedBranchId == null ? Icons.check_circle : Icons.circle_outlined, size:18, color: branchFilter.selectedBranchId == null ? Colors.deepPurple : Colors.grey),
+               const SizedBox(width: 10),
+               const Text('All Branches'),
+            ]),
+          ),
+          const PopupMenuDivider(),
+          ...userScope.branchIds.map((branchId) => PopupMenuItem<String?>(
+            value: branchId,
+            child: Row(children: [
+               Icon(branchFilter.selectedBranchId == branchId ? Icons.check_circle : Icons.circle_outlined, size:18, color: branchFilter.selectedBranchId == branchId ? Colors.deepPurple : Colors.grey),
+               const SizedBox(width: 10),
+               Flexible(child: Text(branchFilter.getBranchName(branchId), overflow: TextOverflow.ellipsis)),
+            ]),
+          )),
+        ],
+        onSelected: (value) => branchFilter.selectBranch(value),
+      ),
+    );
   }
 
   void _showSnackBar(String message, {bool isError = false}) {
@@ -1685,3 +1770,297 @@ class _InfoChip extends StatelessWidget {
     );
   }
 }
+
+// ✅ NEW: SuperAdmin-aware status card with branch selector
+class _SuperAdminStatusCard extends StatefulWidget {
+  final UserScopeService userScope;
+
+  const _SuperAdminStatusCard({required this.userScope});
+
+  @override
+  State<_SuperAdminStatusCard> createState() => _SuperAdminStatusCardState();
+}
+
+class _SuperAdminStatusCardState extends State<_SuperAdminStatusCard> {
+  List<Map<String, dynamic>> _branches = [];
+  String? _selectedBranchId;
+  bool _isLoading = true;
+  bool _isToggling = false;
+  bool _isOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBranches();
+  }
+
+  Future<void> _loadBranches() async {
+    try {
+      // Check if SuperAdmin has multiple branches assigned
+      final hasMultipleBranches = widget.userScope.isSuperAdmin && widget.userScope.branchIds.length > 1;
+      
+      if (hasMultipleBranches) {
+        // SuperAdmin with multiple branches - load only their assigned branches
+        final branchIds = widget.userScope.branchIds;
+        final List<Map<String, dynamic>> loadedBranches = [];
+        
+        for (final branchId in branchIds) {
+          final doc = await FirebaseFirestore.instance.collection('Branch').doc(branchId).get();
+          if (doc.exists) {
+            final data = doc.data()!;
+            loadedBranches.add({
+              'id': doc.id,
+              'name': data['name'] ?? doc.id,
+              'isOpen': data['isOpen'] ?? false,
+            });
+          }
+        }
+        
+        setState(() {
+          _branches = loadedBranches;
+          if (_branches.isNotEmpty) {
+            _selectedBranchId = _branches.first['id'];
+            _isOpen = _branches.first['isOpen'] ?? false;
+          }
+          _isLoading = false;
+        });
+      } else {
+        // Regular admin OR SuperAdmin with single branch - use their primary branch
+        _selectedBranchId = widget.userScope.branchId;
+        final doc = await FirebaseFirestore.instance
+            .collection('Branch')
+            .doc(_selectedBranchId)
+            .get();
+        setState(() {
+          _branches = [
+            {
+              'id': doc.id,
+              'name': doc.data()?['name'] ?? doc.id,
+              'isOpen': doc.data()?['isOpen'] ?? false,
+            }
+          ];
+          _isOpen = doc.data()?['isOpen'] ?? false;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading branches: $e');
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _toggleStatus(bool newStatus) async {
+    if (_selectedBranchId == null) return;
+
+    setState(() => _isToggling = true);
+
+    try {
+      // Determine if schedule is open (simplified - just use current status context)
+      final doc = await FirebaseFirestore.instance
+          .collection('Branch')
+          .doc(_selectedBranchId)
+          .get();
+
+      final data = doc.data() ?? {};
+      final workingHours = data['workingHours'] as Map<String, dynamic>? ?? {};
+      
+      // Simple schedule check
+      bool isScheduleOpen = false;
+      if (workingHours.isNotEmpty) {
+        final now = DateTime.now();
+        final dayName = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'][now.weekday - 1];
+        final daySchedule = workingHours[dayName];
+        if (daySchedule != null && daySchedule['isOpen'] == true) {
+          isScheduleOpen = true;
+        }
+      }
+
+      // Set appropriate flags
+      Map<String, dynamic> updateData = {
+        'isOpen': newStatus,
+        'lastStatusUpdate': FieldValue.serverTimestamp(),
+      };
+
+      if (isScheduleOpen) {
+        if (!newStatus) {
+          updateData['manuallyClosed'] = true;
+          updateData['manuallyOpened'] = false;
+        } else {
+          updateData['manuallyClosed'] = false;
+          updateData['manuallyOpened'] = false;
+        }
+      } else {
+        if (newStatus) {
+          updateData['manuallyOpened'] = true;
+          updateData['manuallyClosed'] = false;
+        } else {
+          updateData['manuallyClosed'] = false;
+          updateData['manuallyOpened'] = false;
+        }
+      }
+
+      await FirebaseFirestore.instance
+          .collection('Branch')
+          .doc(_selectedBranchId)
+          .update(updateData);
+
+      setState(() {
+        _isOpen = newStatus;
+        // Update local cache
+        final index = _branches.indexWhere((b) => b['id'] == _selectedBranchId);
+        if (index >= 0) {
+          _branches[index]['isOpen'] = newStatus;
+        }
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Branch ${newStatus ? "opened" : "closed"} successfully!'),
+            backgroundColor: newStatus ? Colors.green : Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error toggling status: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      setState(() => _isToggling = false);
+    }
+  }
+
+  void _onBranchChanged(String? branchId) {
+    if (branchId == null) return;
+    final branch = _branches.firstWhere((b) => b['id'] == branchId);
+    setState(() {
+      _selectedBranchId = branchId;
+      _isOpen = branch['isOpen'] ?? false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: const Padding(
+          padding: EdgeInsets.all(20),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _isOpen ? Icons.storefront : Icons.no_food_rounded,
+                color: _isOpen ? Colors.green : Colors.red,
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Restaurant Status',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.deepPurple,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Branch selector for SuperAdmin
+          if (widget.userScope.isSuperAdmin && _branches.length > 1) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _selectedBranchId,
+                  isExpanded: true,
+                  icon: const Icon(Icons.keyboard_arrow_down),
+                  items: _branches.map((branch) {
+                    final branchIsOpen = branch['isOpen'] ?? false;
+                    return DropdownMenuItem<String>(
+                      value: branch['id'],
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.circle,
+                            size: 10,
+                            color: branchIsOpen ? Colors.green : Colors.red,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(branch['name']),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: _onBranchChanged,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // Status toggle
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _isOpen
+                      ? 'Restaurant is OPEN and accepting orders'
+                      : 'Restaurant is CLOSED',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ),
+              _isToggling
+                  ? const SizedBox(
+                      width: 48,
+                      height: 24,
+                      child: Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    )
+                  : Switch(
+                      value: _isOpen,
+                      onChanged: _toggleStatus,
+                      activeColor: Colors.green,
+                      inactiveThumbColor: Colors.red,
+                    ),
+            ],
+          ),
+        ],
+      ),
+      ), // Close Padding
+    ); // Close Card
+  }
+}
+
+

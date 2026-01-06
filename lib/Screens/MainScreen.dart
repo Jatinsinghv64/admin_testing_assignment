@@ -187,6 +187,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildRestaurantToggle(RestaurantStatusService statusService) {
+    final userScope = context.read<UserScopeService>();
+    final hasMultipleBranches = userScope.isSuperAdmin && userScope.branchIds.length > 1;
+
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -206,7 +209,38 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           )
+        else if (hasMultipleBranches)
+          // SuperAdmin with multiple branches: Show selector button
+          GestureDetector(
+            onTap: _showBranchSelectorForToggle,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: statusService.isManualOpen 
+                    ? Colors.green.withOpacity(0.15) 
+                    : Colors.red.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: statusService.isManualOpen ? Colors.green : Colors.red,
+                  width: 1.5,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    statusService.isManualOpen ? Icons.power_settings_new : Icons.power_off,
+                    color: statusService.isManualOpen ? Colors.green : Colors.red,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.arrow_drop_down, size: 18, color: Colors.grey),
+                ],
+              ),
+            ),
+          )
         else
+          // Single branch: Show normal Switch toggle
           Switch(
             value: statusService.isManualOpen,
             onChanged: (newValue) {
@@ -220,6 +254,20 @@ class _HomeScreenState extends State<HomeScreen> {
       ],
     );
   }
+
+  // ✅ NEW: Branch selector modal for SuperAdmin
+  void _showBranchSelectorForToggle() async {
+    final userScope = context.read<UserScopeService>();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _BranchStatusToggleSheet(branchIds: userScope.branchIds),
+    );
+  }
+
 
   void _showStatusChangeConfirmation(bool newValue) {
     final statusService = context.read<RestaurantStatusService>();
@@ -638,5 +686,236 @@ class BadgeCountProvider with ChangeNotifier {
   void dispose() {
     _subscription?.cancel();
     super.dispose();
+  }
+}
+
+// ✅ NEW: Branch status toggle sheet for SuperAdmin
+class _BranchStatusToggleSheet extends StatefulWidget {
+  final List<String> branchIds;
+  
+  const _BranchStatusToggleSheet({required this.branchIds});
+  
+  @override
+  State<_BranchStatusToggleSheet> createState() => _BranchStatusToggleSheetState();
+}
+
+class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
+  List<Map<String, dynamic>> _branches = [];
+  bool _isLoading = true;
+  Set<String> _togglingIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBranches();
+  }
+
+  Future<void> _loadBranches() async {
+    // Edge case: empty branchIds
+    if (widget.branchIds.isEmpty) {
+      setState(() {
+        _branches = [];
+        _isLoading = false;
+      });
+      return;
+    }
+    
+    try {
+      // Load only assigned branches
+      final List<Map<String, dynamic>> loadedBranches = [];
+      
+      for (final branchId in widget.branchIds) {
+        try {
+          final doc = await FirebaseFirestore.instance.collection('Branch').doc(branchId).get();
+          if (doc.exists) {
+            final data = doc.data()!;
+            loadedBranches.add({
+              'id': doc.id,
+              'name': data['name'] ?? doc.id,
+              'isOpen': data['isOpen'] ?? false,
+            });
+          } else {
+            // Branch document was deleted but still in branchIds
+            debugPrint('Branch $branchId not found - may have been deleted');
+          }
+        } catch (e) {
+          debugPrint('Error loading branch $branchId: $e');
+        }
+      }
+      
+      setState(() {
+        _branches = loadedBranches;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading branches: $e');
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _toggleBranch(String branchId, bool newStatus) async {
+    setState(() => _togglingIds.add(branchId));
+
+    try {
+      final doc = await FirebaseFirestore.instance.collection('Branch').doc(branchId).get();
+      final data = doc.data() ?? {};
+      final workingHours = data['workingHours'] as Map<String, dynamic>? ?? {};
+      
+      bool isScheduleOpen = false;
+      if (workingHours.isNotEmpty) {
+        final now = DateTime.now();
+        final dayName = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'][now.weekday - 1];
+        final daySchedule = workingHours[dayName];
+        if (daySchedule != null && daySchedule['isOpen'] == true) {
+          isScheduleOpen = true;
+        }
+      }
+
+      Map<String, dynamic> updateData = {
+        'isOpen': newStatus,
+        'lastStatusUpdate': FieldValue.serverTimestamp(),
+      };
+
+      if (isScheduleOpen) {
+        updateData['manuallyClosed'] = !newStatus;
+        updateData['manuallyOpened'] = false;
+      } else {
+        updateData['manuallyOpened'] = newStatus;
+        updateData['manuallyClosed'] = false;
+      }
+
+      await FirebaseFirestore.instance.collection('Branch').doc(branchId).update(updateData);
+
+      setState(() {
+        final index = _branches.indexWhere((b) => b['id'] == branchId);
+        if (index >= 0) {
+          _branches[index]['isOpen'] = newStatus;
+        }
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Branch ${newStatus ? "opened" : "closed"} successfully!'),
+          backgroundColor: newStatus ? Colors.green : Colors.orange,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error toggling branch: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      setState(() => _togglingIds.remove(branchId));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.6,
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.store, color: Colors.deepPurple),
+              const SizedBox(width: 12),
+              const Text(
+                'Branch Status Control',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.deepPurple,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+          const Divider(),
+          const SizedBox(height: 8),
+          if (_isLoading)
+            const Center(child: Padding(
+              padding: EdgeInsets.all(20),
+              child: CircularProgressIndicator(),
+            ))
+          else if (_branches.isEmpty)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.store_outlined, size: 48, color: Colors.grey),
+                    SizedBox(height: 12),
+                    Text(
+                      'No branches available',
+                      style: TextStyle(color: Colors.grey, fontSize: 16),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Contact admin to assign branches',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _branches.length,
+                itemBuilder: (context, index) {
+                  final branch = _branches[index];
+                  final isOpen = branch['isOpen'] ?? false;
+                  final isToggling = _togglingIds.contains(branch['id']);
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    child: ListTile(
+                      leading: Icon(
+                        isOpen ? Icons.storefront : Icons.store_outlined,
+                        color: isOpen ? Colors.green : Colors.red,
+                      ),
+                      title: Text(
+                        branch['name'],
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text(
+                        isOpen ? 'Currently OPEN' : 'Currently CLOSED',
+                        style: TextStyle(
+                          color: isOpen ? Colors.green : Colors.red,
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: isToggling
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Switch(
+                              value: isOpen,
+                              onChanged: (val) => _toggleBranch(branch['id'], val),
+                              activeColor: Colors.green,
+                              inactiveThumbColor: Colors.red,
+                            ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }

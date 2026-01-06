@@ -260,13 +260,45 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
     notifyListeners();
 
     try {
-      // ✅ Updated to use AppConstants.collectionBranch
-      // Also setting 'manuallyClosed' flag to help server scripts respect manual overrides
-      await _db.collection(AppConstants.collectionBranch).doc(_restaurantId!).set({
+      // ✅ FIXED: Only set manual flags when acting AGAINST the schedule
+      // - If schedule says OPEN and user is opening → no flags needed (following schedule)
+      // - If schedule says OPEN and user is closing → set manuallyClosed
+      // - If schedule says CLOSED and user is opening → set manuallyOpened
+      // - If schedule says CLOSED and user is closing → no flags needed (following schedule)
+      
+      Map<String, dynamic> updateData = {
         'isOpen': newStatus,
-        'manuallyClosed': !newStatus, // If Closing (false), set manuallyClosed = true.
         'lastStatusUpdate': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      };
+
+      if (_isScheduleOpen) {
+        // Schedule says OPEN
+        if (!newStatus) {
+          // User is closing during scheduled hours → manual override
+          updateData['manuallyClosed'] = true;
+          updateData['manuallyOpened'] = false;
+        } else {
+          // User is opening during scheduled hours → following schedule, clear flags
+          updateData['manuallyClosed'] = false;
+          updateData['manuallyOpened'] = false;
+        }
+      } else {
+        // Schedule says CLOSED
+        if (newStatus) {
+          // User is opening during off-hours → manual override
+          updateData['manuallyOpened'] = true;
+          updateData['manuallyClosed'] = false;
+        } else {
+          // User is closing during off-hours → following schedule, clear flags
+          updateData['manuallyClosed'] = false;
+          updateData['manuallyOpened'] = false;
+        }
+      }
+
+      await _db.collection(AppConstants.collectionBranch).doc(_restaurantId!).set(
+        updateData, 
+        SetOptions(merge: true),
+      );
 
       _isManualOpen = newStatus;
     } catch (e) {

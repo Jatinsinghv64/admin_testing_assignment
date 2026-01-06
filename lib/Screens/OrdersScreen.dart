@@ -12,6 +12,7 @@ import '../Widgets/RiderAssignment.dart';
 import '../Widgets/TimeUtils.dart';
 import '../main.dart';
 import '../constants.dart';
+import '../Widgets/BranchFilterService.dart'; // ✅ Added
 
 // Service for handling cross-screen order selection/highlighting
 class OrderSelectionService {
@@ -105,6 +106,15 @@ class _OrdersScreenState extends State<OrdersScreen>
       initialTabIndex = orderTypes.indexOf(_orderToScrollType!);
       if (initialTabIndex == -1) initialTabIndex = 0;
     }
+
+    // Load branch names if needed (for multi-branch users)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final userScope = context.read<UserScopeService>();
+      final branchFilter = context.read<BranchFilterService>();
+      if (userScope.branchIds.length > 1 && !branchFilter.isLoaded) {
+        branchFilter.loadBranchNames(userScope.branchIds);
+      }
+    });
 
     _tabController = TabController(
       length: _orderTypeMap.length,
@@ -202,12 +212,16 @@ class _OrdersScreenState extends State<OrdersScreen>
 
   @override
   Widget build(BuildContext context) {
+    final userScope = context.watch<UserScopeService>();
+    final branchFilter = context.watch<BranchFilterService>();
+    final bool showBranchSelector = userScope.branchIds.length > 1;
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.white,
-        centerTitle: true,
+        centerTitle: !showBranchSelector, // Left-align when selector shown
         title: const Text(
           'Orders',
           style: TextStyle(
@@ -216,6 +230,10 @@ class _OrdersScreenState extends State<OrdersScreen>
             fontSize: 24,
           ),
         ),
+        actions: [
+          if (showBranchSelector)
+             _buildBranchSelector(userScope, branchFilter),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(kToolbarHeight),
           child: _buildOrderTypeTabs(),
@@ -236,6 +254,68 @@ class _OrdersScreenState extends State<OrdersScreen>
       ),
     );
   }
+
+  // Same branch selector logic as DashboardScreen
+  Widget _buildBranchSelector(UserScopeService userScope, BranchFilterService branchFilter) {
+    return Container(
+      margin: const EdgeInsets.only(right: 12),
+      child: PopupMenuButton<String?>(
+        offset: const Offset(0, 45),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.deepPurple.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.deepPurple.withOpacity(0.3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.store, size: 18, color: Colors.deepPurple),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 100),
+                child: Text(
+                  branchFilter.selectedBranchId == null
+                      ? 'All Branches'
+                      : branchFilter.getBranchName(branchFilter.selectedBranchId!),
+                  style: const TextStyle(
+                    color: Colors.deepPurple,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.arrow_drop_down, color: Colors.deepPurple, size: 20),
+            ],
+          ),
+        ),
+        itemBuilder: (context) => [
+          PopupMenuItem<String?>(
+            value: null,
+            child: Row(children: [
+               Icon(branchFilter.selectedBranchId == null ? Icons.check_circle : Icons.circle_outlined, size:18, color: branchFilter.selectedBranchId == null ? Colors.deepPurple : Colors.grey),
+               const SizedBox(width: 10),
+               const Text('All Branches'),
+            ]),
+          ),
+          const PopupMenuDivider(),
+          ...userScope.branchIds.map((branchId) => PopupMenuItem<String?>(
+            value: branchId,
+            child: Row(children: [
+               Icon(branchFilter.selectedBranchId == branchId ? Icons.check_circle : Icons.circle_outlined, size:18, color: branchFilter.selectedBranchId == branchId ? Colors.deepPurple : Colors.grey),
+               const SizedBox(width: 10),
+               Flexible(child: Text(branchFilter.getBranchName(branchId), overflow: TextOverflow.ellipsis)),
+            ]),
+          )),
+        ],
+        onSelected: (value) => branchFilter.selectBranch(value),
+      ),
+    );
+  } 
 
   Widget _buildOrderTypeTabs() {
     return Container(
@@ -406,12 +486,14 @@ class _OrdersScreenState extends State<OrdersScreen>
 
   Widget _buildOrdersList(String orderType) {
     final userScope = context.read<UserScopeService>();
+    final branchFilter = context.watch<BranchFilterService>(); // Watch for filter changes
 
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _orderService.getOrdersStream(
         orderType: orderType,
         status: _selectedStatus,
         userScope: userScope,
+        filterBranchIds: branchFilter.getFilterBranchIds(userScope.branchIds), // Pass filter
       ),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -771,13 +853,17 @@ class _OrderCardState extends State<_OrderCard> {
   }
 
   Future<void> _assignRiderManually(BuildContext context) async {
-    final userScope = context.read<UserScopeService>();
-    final currentBranchId = userScope.branchId;
+    // data is not available here, accessing widget.order.data()
+    final data = widget.order.data();
+    final orderBranchId = data['branchId']?.toString() ?? 
+        (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty 
+            ? data['branchIds'][0].toString() 
+            : null);
 
     final riderId = await showDialog<String>(
       context: context,
       builder: (context) =>
-          _RiderSelectionDialog(currentBranchId: currentBranchId),
+          _RiderSelectionDialog(currentBranchId: orderBranchId),
     );
 
     if (riderId != null && riderId.isNotEmpty) {
@@ -1168,6 +1254,15 @@ class _OrderCardState extends State<_OrderCard> {
     final bool hasPendingRefund =
         refundRequest != null && refundRequest['status'] == 'pending';
 
+    // Get branch info for badge
+    final branchId = data['branchId']?.toString() ?? 
+        (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty 
+            ? data['branchIds'][0].toString() 
+            : null);
+    final userScope = context.read<UserScopeService>();
+    // Only show branch badge if user has access to multiple branches
+    final showBranchBadge = branchId != null && userScope.branchIds.length > 1;
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1255,6 +1350,37 @@ class _OrderCardState extends State<_OrderCard> {
                                 ? Colors.blue.shade600
                                 : Colors.grey[600],
                             fontSize: 12)),
+                    if (showBranchBadge) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.store, size: 10, color: Colors.grey[700]),
+                            const SizedBox(width: 4),
+                            // Safe name lookup
+                            Builder(builder: (context) {
+                              // We use Consumer or context.watch to ensure name updates if loaded lazily
+                              final branchFilter = context.watch<BranchFilterService>();
+                              return Text(
+                                branchFilter.getBranchName(branchId!),
+                                style: TextStyle(
+                                  color: Colors.grey[800],
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (isAutoAssigning) ...[
                       const SizedBox(height: 4),
                       const Text('Auto-assigning rider...',

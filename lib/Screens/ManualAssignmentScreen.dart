@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../Widgets/RiderAssignment.dart';
+import '../Widgets/BranchFilterService.dart'; // ✅ Added for filtering
 import '../main.dart'; // Assuming UserScopeService is here
 
 class ManualAssignmentScreen extends StatefulWidget {
@@ -35,7 +36,15 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final userScope = context.read<UserScopeService>();
+    final userScope = context.watch<UserScopeService>(); // ✅ Added userScope
+    final branchFilter = context.watch<BranchFilterService>();
+
+    // Load branch names if needed
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (userScope.branchIds.length > 1 && !branchFilter.isLoaded) {
+        branchFilter.loadBranchNames(userScope.branchIds);
+      }
+    });
 
     // ✅ FIX: REMOVED DATE FILTER
     // This ensures the screen displays ALL orders that need assignment,
@@ -44,9 +53,16 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
         .collection('Orders')
         .where('status', isEqualTo: 'needs_rider_assignment');
 
-    // Filter by branch for non-super admins
-    if (!userScope.isSuperAdmin) {
-      query = query.where('branchIds', arrayContains: userScope.branchId);
+    // Filter by branch logic (BranchAdmin OR SuperAdmin with selection)
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    
+    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
+       // Show all
+    } else if (filterBranchIds.isNotEmpty) {
+      query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+    } else if (!userScope.isSuperAdmin) {
+       // Should be covered above, but safe fallback
+       query = query.where('branchIds', arrayContains: userScope.branchId);
     }
 
     return Scaffold(
@@ -55,7 +71,11 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
         elevation: 1,
         shadowColor: Colors.deepPurple.withOpacity(0.1),
         backgroundColor: Colors.white,
-        centerTitle: true,
+        centerTitle: !(userScope.branchIds.length > 1), // Center if no selector
+        actions: [
+          if (userScope.branchIds.length > 1)
+             _buildBranchSelector(userScope, branchFilter),
+        ],
         title: const Text(
           'Manual Rider Assignment',
           style: TextStyle(
@@ -258,11 +278,19 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
                         child: ElevatedButton.icon(
                           icon: const Icon(Icons.delivery_dining, size: 18),
                           label: const Text('Assign Rider Manually'),
-                          onPressed: () => _promptAssignRider(
-                            context,
-                            orderDoc.id,
-                            userScope.branchId,
-                          ),
+                          onPressed: () {
+                            // Fix: Use order's branch ID, not user's current branch
+                            final orderBranchId = data['branchId']?.toString() ?? 
+                                (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty 
+                                    ? data['branchIds'][0].toString() 
+                                    : null);
+                            
+                            _promptAssignRider(
+                              context,
+                              orderDoc.id,
+                              orderBranchId ?? userScope.branchId ?? '',
+                            );
+                          },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.deepPurple,
                             foregroundColor: Colors.white,
@@ -312,6 +340,68 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
       ),
     );
   }
+
+  // Same branch selector logic
+  Widget _buildBranchSelector(UserScopeService userScope, BranchFilterService branchFilter) {
+    return Container(
+      margin: const EdgeInsets.only(right: 12),
+      child: PopupMenuButton<String?>(
+        offset: const Offset(0, 45),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.deepPurple.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.deepPurple.withOpacity(0.3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.store, size: 18, color: Colors.deepPurple),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 100),
+                child: Text(
+                  branchFilter.selectedBranchId == null
+                      ? 'All Branches'
+                      : branchFilter.getBranchName(branchFilter.selectedBranchId!),
+                  style: const TextStyle(
+                    color: Colors.deepPurple,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.arrow_drop_down, color: Colors.deepPurple, size: 20),
+            ],
+          ),
+        ),
+        itemBuilder: (context) => [
+          PopupMenuItem<String?>(
+            value: null,
+            child: Row(children: [
+               Icon(branchFilter.selectedBranchId == null ? Icons.check_circle : Icons.circle_outlined, size:18, color: branchFilter.selectedBranchId == null ? Colors.deepPurple : Colors.grey),
+               const SizedBox(width: 10),
+               const Text('All Branches'),
+            ]),
+          ),
+          const PopupMenuDivider(),
+          ...userScope.branchIds.map((branchId) => PopupMenuItem<String?>(
+            value: branchId,
+            child: Row(children: [
+               Icon(branchFilter.selectedBranchId == branchId ? Icons.check_circle : Icons.circle_outlined, size:18, color: branchFilter.selectedBranchId == branchId ? Colors.deepPurple : Colors.grey),
+               const SizedBox(width: 10),
+               Flexible(child: Text(branchFilter.getBranchName(branchId), overflow: TextOverflow.ellipsis)),
+            ]),
+          )),
+        ],
+        onSelected: (value) => branchFilter.selectBranch(value),
+      ),
+    );
+  } 
 }
 
 class RiderSelectionDialog extends StatelessWidget {

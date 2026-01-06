@@ -21,6 +21,7 @@ import 'firebase_options.dart';
 import 'Screens/OfflineScreen.dart';
 import 'constants.dart'; // ✅ Added
 import 'Widgets/AccessDeniedWidget.dart'; // ✅ Added
+import 'Widgets/BranchFilterService.dart'; // ✅ Branch filter for multi-branch users
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -130,6 +131,17 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider<RestaurantStatusService>(
             create: (_) => RestaurantStatusService()),
         ChangeNotifierProvider(create: (_) => BadgeCountProvider()),
+        ChangeNotifierProvider(create: (_) => BadgeCountProvider()),
+        ChangeNotifierProxyProvider<UserScopeService, BranchFilterService>(
+          create: (_) => BranchFilterService(),
+          update: (_, userScope, branchFilter) {
+            branchFilter ??= BranchFilterService();
+            if (userScope.isLoaded) {
+              branchFilter.validateSelection(userScope.branchIds);
+            }
+            return branchFilter;
+          },
+        ),
       ],
       child: MaterialApp(
         navigatorKey: navigatorKey,

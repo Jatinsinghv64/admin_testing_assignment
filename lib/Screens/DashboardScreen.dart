@@ -12,11 +12,36 @@ import '../Widgets/OrderService.dart'; // ✅ Added for atomic updates
 import '../Widgets/RiderAssignment.dart'; // ✅ Added for transaction-based assignment
 import '../Widgets/PrintingService.dart';
 import '../Widgets/TimeUtils.dart';
+import '../Widgets/BranchFilterService.dart'; // ✅ Branch filter
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   final Function(int) onTabChange;
 
   const DashboardScreen({super.key, required this.onTabChange});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Load branch names when widget initializes
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initBranchFilter();
+    });
+  }
+
+  void _initBranchFilter() {
+    final userScope = context.read<UserScopeService>();
+    final branchFilter = context.read<BranchFilterService>();
+    
+    // Only load if user has multiple branches
+    if (userScope.branchIds.length > 1 && !branchFilter.isLoaded) {
+      branchFilter.loadBranchNames(userScope.branchIds);
+    }
+  }
 
   Timestamp _getBusinessStartTimestamp() {
     var now = DateTime.now();
@@ -30,12 +55,16 @@ class DashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final userScope = context.watch<UserScopeService>();
+    final branchFilter = context.watch<BranchFilterService>();
+    final bool showBranchSelector = userScope.branchIds.length > 1;
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.white,
-        centerTitle: true,
+        centerTitle: !showBranchSelector, // Left-align when selector shown
         title: const Text(
           'Dashboard',
           style: TextStyle(
@@ -44,6 +73,11 @@ class DashboardScreen extends StatelessWidget {
             fontSize: 24,
           ),
         ),
+        actions: [
+          // Branch selector - only shown for multi-branch users
+          if (showBranchSelector)
+            _buildBranchSelector(userScope, branchFilter),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
@@ -58,6 +92,96 @@ class DashboardScreen extends StatelessWidget {
             _buildEnhancedRecentOrdersSection(context),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildBranchSelector(UserScopeService userScope, BranchFilterService branchFilter) {
+    return Container(
+      margin: const EdgeInsets.only(right: 12),
+      child: PopupMenuButton<String?>(
+        offset: const Offset(0, 45),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.deepPurple.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.deepPurple.withOpacity(0.3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.store, size: 18, color: Colors.deepPurple),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 100),
+                child: Text(
+                  branchFilter.selectedBranchId == null
+                      ? 'All Branches'
+                      : branchFilter.getBranchName(branchFilter.selectedBranchId!),
+                  style: const TextStyle(
+                    color: Colors.deepPurple,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.arrow_drop_down, color: Colors.deepPurple, size: 20),
+            ],
+          ),
+        ),
+        itemBuilder: (context) => [
+          // "All Branches" option
+          PopupMenuItem<String?>(
+            value: null,
+            child: Row(
+              children: [
+                Icon(
+                  branchFilter.selectedBranchId == null 
+                      ? Icons.check_circle 
+                      : Icons.circle_outlined,
+                  size: 18,
+                  color: branchFilter.selectedBranchId == null 
+                      ? Colors.deepPurple 
+                      : Colors.grey,
+                ),
+                const SizedBox(width: 10),
+                const Text('All Branches'),
+              ],
+            ),
+          ),
+          const PopupMenuDivider(),
+          // Individual branch options
+          ...userScope.branchIds.map((branchId) => PopupMenuItem<String?>(
+            value: branchId,
+            child: Row(
+              children: [
+                Icon(
+                  branchFilter.selectedBranchId == branchId 
+                      ? Icons.check_circle 
+                      : Icons.circle_outlined,
+                  size: 18,
+                  color: branchFilter.selectedBranchId == branchId 
+                      ? Colors.deepPurple 
+                      : Colors.grey,
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    branchFilter.getBranchName(branchId),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          )),
+        ],
+        onSelected: (value) {
+          branchFilter.selectBranch(value);
+        },
       ),
     );
   }
@@ -224,15 +348,15 @@ class DashboardScreen extends StatelessWidget {
   }
 
   void _navigateToOrders(BuildContext context) {
-    onTabChange(2);
+    widget.onTabChange(2);
   }
 
   void _navigateToRiders(BuildContext context) {
-    onTabChange(3);
+    widget.onTabChange(3);
   }
 
   void _navigateToMenuManagement(BuildContext context) {
-    onTabChange(1);
+    widget.onTabChange(1);
   }
 
   Widget _buildStatCardWrapper({
@@ -421,13 +545,17 @@ class DashboardScreen extends StatelessWidget {
 
   Query<Map<String, dynamic>> _getBaseOrderQuery(BuildContext context) {
     final userScope = Provider.of<UserScopeService>(context, listen: false);
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('Orders');
+
+    // Get branch IDs to filter by (respects branch selector)
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
     if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
       // Show ALL orders if SuperAdmin has no specific branch selection
-    } else if (userScope.branchIds.isNotEmpty) {
-      // Filter by assigned branches
-      query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+    } else if (filterBranchIds.isNotEmpty) {
+      // Filter by selected branch(es)
+      query = query.where('branchIds', arrayContainsAny: filterBranchIds);
     } else {
       // Force empty result if no access
       query = query.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
@@ -437,13 +565,17 @@ class DashboardScreen extends StatelessWidget {
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _getFilteredDriversStream(BuildContext context) {
     final userScope = Provider.of<UserScopeService>(context, listen: false);
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('Drivers')
         .where('isAvailable', isEqualTo: true);
 
+    // Get branch IDs to filter by (respects branch selector)
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
     if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
       // Show ALL drivers
-    } else if (userScope.branchIds.isNotEmpty) {
-      query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+    } else if (filterBranchIds.isNotEmpty) {
+      query = query.where('branchIds', arrayContainsAny: filterBranchIds);
     } else {
        // Force empty result
        return const Stream<QuerySnapshot<Map<String, dynamic>>>.empty();

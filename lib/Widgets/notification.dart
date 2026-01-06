@@ -289,6 +289,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   final AudioPlayer _player = AudioPlayer();
   bool _isAudioPlaying = false;
   bool _isProcessing = false;
+  bool _isClosing = false; // Prevent multiple pop() calls
 
   String get orderNumber => _orderData?['dailyOrderNumber']?.toString() ?? '---';
   String get customerName => _orderData?['customerName']?.toString() ?? 'Guest';
@@ -360,7 +361,8 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
       // Live Status Check
       final status = data['status'];
       if (status != 'pending') {
-        if (mounted) {
+        if (mounted && !_isClosing) {
+           _isClosing = true;
            // If accepted by someone else, close silently or with toast
            // But check who accepted it?
            final acceptedBy = data['acceptedBy'] ?? 'another user';
@@ -518,6 +520,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
 
   @override
   void dispose() {
+    _orderSubscription?.cancel();
     _stopAlarm();
     _timer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -532,23 +535,32 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
       context: context,
       builder: (BuildContext context) => const CancellationReasonDialog(),
     );
-    if (reason != null && mounted) {
+    if (reason != null && mounted && !_isClosing) {
+      _isClosing = true;
       setState(() => _isProcessing = true);
+      // Cancel subscription BEFORE updating to prevent race condition
+      await _orderSubscription?.cancel();
       await widget.onReject(reason);
       if (mounted) Navigator.of(context).pop();
     }
   }
 
   Future<void> _handleAcceptPress() async {
-    if (_isProcessing) return;
+    if (_isProcessing || _isClosing) return;
+    _isClosing = true;
     setState(() => _isProcessing = true);
 
     await _stopAlarm();
+    // Cancel subscription BEFORE updating to prevent race condition
+    await _orderSubscription?.cancel();
     try {
       await widget.onAccept();
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
+      _isClosing = false;
       setState(() => _isProcessing = false);
+      // Re-subscribe if accept failed so user can try again
+      _startListeningToOrder();
     }
   }
 

@@ -15,6 +15,11 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
   bool _isSaving = false;
   Map<String, dynamic> _workingHours = {};
 
+  // ✅ SuperAdmin branch selection
+  String? _selectedBranchId;
+  List<Map<String, dynamic>> _allBranches = [];
+  bool _isSuperAdmin = false;
+
   // Ordered list of days
   final List<String> _days = [
     'monday',
@@ -29,17 +34,113 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
   @override
   void initState() {
     super.initState();
-    _loadTimings();
+    _initializeScreen();
+  }
+
+  // --- Initialization ---
+
+  Future<void> _initializeScreen() async {
+    final userScope = context.read<UserScopeService>();
+    // Only use multi-branch mode if SuperAdmin has more than 1 branch assigned
+    _isSuperAdmin = userScope.isSuperAdmin && userScope.branchIds.length > 1;
+
+    if (_isSuperAdmin) {
+      // Load only assigned branches for SuperAdmin with multiple branches
+      await _loadAssignedBranches(userScope.branchIds);
+    } else {
+      // Regular user OR SuperAdmin with single branch - use their primary branch
+      _selectedBranchId = userScope.branchId;
+      await _loadTimings();
+    }
+  }
+
+  Future<void> _loadAssignedBranches(List<String> branchIds) async {
+    try {
+      final List<Map<String, dynamic>> loadedBranches = [];
+      
+      for (final branchId in branchIds) {
+        final doc = await FirebaseFirestore.instance.collection('Branch').doc(branchId).get();
+        if (doc.exists) {
+          final data = doc.data()!;
+          loadedBranches.add({
+            'id': doc.id,
+            'name': data['name'] ?? doc.id,
+          });
+        }
+      }
+      
+      setState(() {
+        _allBranches = loadedBranches;
+        if (_allBranches.isNotEmpty) {
+          _selectedBranchId = _allBranches.first['id'];
+        }
+      });
+
+      if (_selectedBranchId != null) {
+        await _loadTimings();
+      } else {
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      debugPrint("Error loading assigned branches: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading branches: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _loadAllBranches() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance.collection('Branch').get();
+      
+      setState(() {
+        _allBranches = snapshot.docs.map((doc) {
+          final data = doc.data();
+          return {
+            'id': doc.id,
+            'name': data['name'] ?? doc.id,
+          };
+        }).toList();
+
+        // Auto-select first branch if available
+        if (_allBranches.isNotEmpty) {
+          _selectedBranchId = _allBranches.first['id'];
+        }
+      });
+
+      if (_selectedBranchId != null) {
+        await _loadTimings();
+      } else {
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      debugPrint("Error loading branches: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading branches: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   // --- Data Loading ---
 
   Future<void> _loadTimings() async {
-    final userScope = context.read<UserScopeService>();
+    if (_selectedBranchId == null || _selectedBranchId!.isEmpty) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
     try {
       final doc = await FirebaseFirestore.instance
           .collection('Branch')
-          .doc(userScope.branchId)
+          .doc(_selectedBranchId)
           .get();
 
       if (doc.exists && doc.data()!.containsKey('workingHours')) {
@@ -79,10 +180,9 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
   // --- Actions & Logic ---
 
   Future<void> _saveTimings() async {
-    final userScope = context.read<UserScopeService>();
-    if (userScope.branchId.isEmpty) {
+    if (_selectedBranchId == null || _selectedBranchId!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ Error: No Branch ID found'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('❌ Error: No Branch selected'), backgroundColor: Colors.red),
       );
       return;
     }
@@ -92,14 +192,19 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
     try {
       await FirebaseFirestore.instance
           .collection('Branch')
-          .doc(userScope.branchId)
+          .doc(_selectedBranchId)
           .set({'workingHours': _workingHours}, SetOptions(merge: true))
-          .timeout(const Duration(seconds: 10)); // ✅ Prevent infinite loop
+          .timeout(const Duration(seconds: 10));
 
       if (mounted) {
+        final branchName = _allBranches.firstWhere(
+          (b) => b['id'] == _selectedBranchId,
+          orElse: () => {'name': _selectedBranchId},
+        )['name'];
+
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Timings updated successfully!'),
+          SnackBar(
+            content: Text('✅ Timings updated for $branchName!'),
             backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
@@ -131,9 +236,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
               setState(() {
                 final mondayData = _workingHours['monday'];
                 for (var day in _days) {
-                  // JsonDecode/Encode ensures a deep copy so changing one day doesn't affect others by reference
                   if (day != 'monday') {
-                    // Manual deep copy logic
                     _workingHours[day] = {
                       'isOpen': mondayData['isOpen'],
                       'slots': List.from((mondayData['slots'] as List).map((s) => Map.from(s))),
@@ -174,29 +277,31 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
     );
 
     if (picked != null) {
-      // Validate Logic: Ensure Open < Close
       final String formattedPicked = _formatTimeForStorage(picked);
 
-      // Get current slot to compare
       final currentSlot = _workingHours[day]['slots'][index];
       String openTime = key == 'open' ? formattedPicked : currentSlot['open'];
       String closeTime = key == 'close' ? formattedPicked : currentSlot['close'];
 
-      if (_isTimeAfter(openTime, closeTime)) {
-        setState(() {
-          _workingHours[day]['slots'][index][key] = formattedPicked;
-        });
-      } else {
-        if(mounted) {
+      setState(() {
+        _workingHours[day]['slots'][index][key] = formattedPicked;
+      });
+
+      // Show info message for overnight slots
+      if (!_isTimeAfter(openTime, closeTime) && openTime != closeTime) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('⚠️ Closing time must be after opening time'), backgroundColor: Colors.orange),
+            const SnackBar(
+              content: Text('ℹ️ Overnight shift detected (closes next day)'),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 2),
+            ),
           );
         }
       }
     }
   }
 
-  /// Returns true if closeTime is after openTime
   bool _isTimeAfter(String open, String close) {
     final o = _parseTime(open);
     final c = _parseTime(close);
@@ -210,14 +315,12 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
     return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
   }
 
-  /// Formats TimeOfDay to HH:mm for backend storage
   String _formatTimeForStorage(TimeOfDay time) {
     final hour = time.hour.toString().padLeft(2, '0');
     final minute = time.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
   }
 
-  /// Formats string HH:mm to localized AM/PM for UI
   String _formatTimeForDisplay(BuildContext context, String timeStr) {
     final time = _parseTime(timeStr);
     return time.format(context);
@@ -226,7 +329,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
   void _addSlot(String day) {
     setState(() {
       List slots = List.from(_workingHours[day]['slots'] ?? []);
-      slots.add({'open': '09:00', 'close': '17:00'}); // Default new slot
+      slots.add({'open': '09:00', 'close': '17:00'});
       _workingHours[day]['slots'] = slots;
     });
   }
@@ -253,7 +356,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.black87),
         actions: [
-          if (!_isLoading)
+          if (!_isLoading && _selectedBranchId != null)
             TextButton.icon(
               onPressed: _isSaving ? null : _saveTimings,
               icon: _isSaving
@@ -270,14 +373,84 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
         children: [
-          _buildBulkActions(),
+          // ✅ Branch selector only for SuperAdmin with multiple branches
+          if (_isSuperAdmin && _allBranches.length > 1) _buildBranchSelector(),
+          if (_selectedBranchId != null) ...[
+            _buildBulkActions(),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.only(bottom: 80),
+                itemCount: _days.length,
+                itemBuilder: (context, index) {
+                  return _buildDayCard(_days[index]);
+                },
+              ),
+            ),
+          ] else
+            const Expanded(
+              child: Center(
+                child: Text(
+                  'Please select a branch to manage timings',
+                  style: TextStyle(color: Colors.grey, fontSize: 16),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ NEW: Branch selector dropdown for SuperAdmin
+  Widget _buildBranchSelector() {
+    return Container(
+      width: double.infinity,
+      color: Colors.indigo.shade50,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          const Icon(Icons.store, color: Colors.indigo, size: 20),
+          const SizedBox(width: 12),
+          const Text(
+            'Branch:',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.indigo,
+            ),
+          ),
+          const SizedBox(width: 12),
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.only(bottom: 80),
-              itemCount: _days.length,
-              itemBuilder: (context, index) {
-                return _buildDayCard(_days[index]);
-              },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.indigo.shade200),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _selectedBranchId,
+                  isExpanded: true,
+                  icon: const Icon(Icons.keyboard_arrow_down, color: Colors.indigo),
+                  items: _allBranches.map((branch) {
+                    return DropdownMenuItem<String>(
+                      value: branch['id'],
+                      child: Text(
+                        branch['name'],
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue) {
+                    if (newValue != null && newValue != _selectedBranchId) {
+                      setState(() {
+                        _selectedBranchId = newValue;
+                        _workingHours = {};
+                      });
+                      _loadTimings();
+                    }
+                  },
+                ),
+              ),
             ),
           ),
         ],
@@ -410,7 +583,6 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
         children: [
           const Icon(Icons.access_time_filled, size: 18, color: Colors.deepPurple),
           const SizedBox(width: 12),
-          // Start Time
           Expanded(
             child: _TimeChip(
               label: "Open",
@@ -422,7 +594,6 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
             padding: EdgeInsets.symmetric(horizontal: 8),
             child: Icon(Icons.arrow_forward, size: 16, color: Colors.grey),
           ),
-          // End Time
           Expanded(
             child: _TimeChip(
               label: "Close",

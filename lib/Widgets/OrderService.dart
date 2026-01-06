@@ -14,6 +14,7 @@ class OrderService {
     required String orderType,
     required String status,
     required UserScopeService userScope,
+    List<String>? filterBranchIds, // ✅ Optional filter
   }) {
     Query<Map<String, dynamic>> baseQuery = _db
         .collection(AppConstants.collectionOrders)
@@ -21,18 +22,22 @@ class OrderService {
 
     if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
       // Show ALL orders if SuperAdmin has no specific branch selection
+    } else if (filterBranchIds != null && filterBranchIds.isNotEmpty) {
+      // Filter by provided specific branches (from BranchSelector)
+      if (filterBranchIds.length == 1) {
+        baseQuery = baseQuery.where('branchIds', arrayContains: filterBranchIds.first);
+      } else {
+        baseQuery = baseQuery.where('branchIds', arrayContainsAny: filterBranchIds);
+      }
     } else if (userScope.branchIds.isNotEmpty) {
-      // Filter by assigned branches (for BranchAdmin OR SuperAdmin with selection)
-      baseQuery = baseQuery.where('branchIds', arrayContainsAny: userScope.branchIds);
+      // Filter by assigned branches (fallback)
+      if (userScope.branchIds.length == 1) {
+        baseQuery = baseQuery.where('branchIds', arrayContains: userScope.branchIds.first);
+      } else {
+        baseQuery = baseQuery.where('branchIds', arrayContainsAny: userScope.branchIds);
+      }
     } else {
-      // Non-SuperAdmin with no branches? Should not happen, but safe to return matches-none or handle gracefully
-      // For now, let's assume they have branches if they are logged in as BranchAdmin.
-      // If empty, this query would fail with arrayContainsAny([]);
-      // So we prevent the query execution? Or just return valid stream.
-      // We'll standardly filter if not empty. If empty and not SuperAdmin, maybe return empty?
-      // Let's stick to the else-if logic above. If branchIds is empty and NOT SuperAdmin, we do nothing?
-      // No, we must filter. If list is empty, we must return nothing.
-      // Firestore throws on empty list.
+      // Non-SuperAdmin with no branches? Should not happen.
       return const Stream.empty();
     }
 
