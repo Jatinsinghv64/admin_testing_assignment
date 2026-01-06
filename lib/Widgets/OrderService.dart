@@ -88,6 +88,18 @@ class OrderService {
 
         if (newStatus == AppConstants.statusPrepared) {
           updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
+          
+          // ROBUSTNESS FIX: If rider is already assigned when marking as prepared,
+          // auto-advance to rider_assigned status to complete the workflow
+          final orderDoc = await orderRef.get();
+          final data = orderDoc.data() as Map<String, dynamic>? ?? {};
+          final String? riderId = data['riderId'] as String?;
+          
+          if (riderId != null && riderId.isNotEmpty) {
+            // Rider is already attached, advance to rider_assigned
+            updateData['status'] = AppConstants.statusRiderAssigned;
+            updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
+          }
         } else if (newStatus == AppConstants.statusDelivered) {
           updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
 

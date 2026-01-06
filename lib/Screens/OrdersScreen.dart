@@ -82,7 +82,6 @@ class _OrdersScreenState extends State<OrdersScreen>
     WidgetsBinding.instance.addObserver(this);
     _scrollController = ScrollController();
 
-    // Handle initial selection
     final selectedOrder = OrderSelectionService.getSelectedOrder();
     if (selectedOrder['orderId'] != null) {
       _orderToScrollTo = selectedOrder['orderId'];
@@ -792,7 +791,6 @@ class _OrderCardState extends State<_OrderCard> {
     if (riderId != null && riderId.isNotEmpty) {
       setState(() => _isAssigning = true);
 
-      // ✅ FIX: Use Robust Transaction-based Assignment
       await RiderAssignmentService.manualAssignRider(
         orderId: widget.order.id,
         riderId: riderId,
@@ -805,7 +803,6 @@ class _OrderCardState extends State<_OrderCard> {
     }
   }
 
-  // ✅ FULLY UPDATED: Excludes 'refunded' orders from showing 'Cancel' button
   Widget _buildActionButtons(BuildContext context, String status) {
     if (widget.isProcessing || _isAssigning) {
       return const SizedBox(
@@ -833,6 +830,7 @@ class _OrderCardState extends State<_OrderCard> {
     final List<Widget> buttons = [];
     final data = widget.order.data();
     final String orderTypeLower = widget.orderType.toLowerCase();
+    final String? riderId = data['riderId'];
 
     final bool isAutoAssigning =
         data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
@@ -843,7 +841,7 @@ class _OrderCardState extends State<_OrderCard> {
     EdgeInsets.symmetric(horizontal: 14, vertical: 10);
     const Size btnMinSize = Size(0, 40);
 
-    // 1. Accept Order
+    // 1. Accept Order (Moves to Preparing)
     if (status == AppConstants.statusPending) {
       buttons.add(
         ElevatedButton.icon(
@@ -863,12 +861,12 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
-    // 2. Mark Prepared
+    // 2. Mark Prepared (ROBUSTNESS FIX: Keep visible if preparing even if rider is attached)
     if (status == AppConstants.statusPreparing) {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.done_all, size: 16),
-          label: const Text('Mark as Prepared'),
+          label: Text(riderId != null ? 'Prepared & Notify Rider' : 'Mark as Prepared'),
           onPressed: () => widget.onStatusChange(
               widget.order.id, AppConstants.statusPrepared),
           style: ElevatedButton.styleFrom(
@@ -904,7 +902,7 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
-    // 4. Order Completion Logic
+    // 4. Order Completion and Assignment Logic
     if (orderTypeLower == 'pickup' ||
         orderTypeLower == 'takeaway' ||
         orderTypeLower == 'dine_in') {
@@ -940,7 +938,8 @@ class _OrderCardState extends State<_OrderCard> {
           status == AppConstants.statusPreparing ||
           needsManualAssignment);
 
-      if (canAssign && !isAutoAssigning) {
+      // Only show assignment buttons if no rider is currently assigned
+      if (canAssign && !isAutoAssigning && (riderId == null || riderId.isEmpty)) {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.delivery_dining, size: 16),
@@ -1033,7 +1032,7 @@ class _OrderCardState extends State<_OrderCard> {
       }
     }
 
-    // 5. Cancel Order Logic (Explicitly exclude 'refunded', 'cancelled', 'delivered')
+    // 5. Cancel Order Logic
     if (status != AppConstants.statusCancelled &&
         status != AppConstants.statusDelivered &&
         status != 'refunded') {
@@ -1473,6 +1472,8 @@ class _OrderCardState extends State<_OrderCard> {
     );
   }
 }
+
+
 
 class _OrderPopupDialog extends StatefulWidget {
   final DocumentSnapshot order;
