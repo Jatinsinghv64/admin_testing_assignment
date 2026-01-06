@@ -8,8 +8,8 @@ import '../constants.dart';
 /// Service to manage restaurant open/closed status based on manual override and schedule.
 /// Uses lifecycle-aware timer to reduce resource usage when app is in background.
 class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
-  // Timer interval - reduced to 30 seconds to save resources
-  static const Duration _timerInterval = Duration(seconds: 30);
+  // Timer interval - set to 1 second for accurate countdown
+  static const Duration _timerInterval = Duration(seconds: 1);
   static const Duration _closingWarningThreshold = Duration(minutes: 30);
   static const Duration _closingPopupThreshold = Duration(minutes: 2);
 
@@ -45,9 +45,7 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
   Duration? get timeUntilClose => _timeUntilClose;
 
   String get statusText {
-    if (!_isManualOpen) return "Closed (Manually)";
-    if (!_isScheduleOpen) return "Closed (Schedule)";
-    return "Open";
+    return isOpen ? "Open" : "Closed";
   }
 
   void initialize(String restaurantId, {String restaurantName = "Restaurant"}) {
@@ -249,27 +247,34 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
     return days[weekday] ?? 'monday';
   }
 
+  bool _isToggling = false;
+  bool get isToggling => _isToggling;
+
   /// Manually toggles the restaurant status.
   /// This should only be called by User Interaction (e.g. Tapping the Switch in Settings),
   /// NEVER by the automatic timer.
   Future<void> toggleRestaurantStatus(bool newStatus) async {
     if (_restaurantId == null) return;
 
-    // Optimistic Update
-    _isManualOpen = newStatus;
+    _isToggling = true;
     notifyListeners();
 
     try {
       // ✅ Updated to use AppConstants.collectionBranch
+      // Also setting 'manuallyClosed' flag to help server scripts respect manual overrides
       await _db.collection(AppConstants.collectionBranch).doc(_restaurantId!).set({
         'isOpen': newStatus,
+        'manuallyClosed': !newStatus, // If Closing (false), set manuallyClosed = true.
         'lastStatusUpdate': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      _isManualOpen = newStatus;
     } catch (e) {
-      // Revert if failed
-      _isManualOpen = !newStatus;
-      notifyListeners();
+      // Revert is handled by listener mostly, but we can notify error
       rethrow;
+    } finally {
+      _isToggling = false;
+      notifyListeners();
     }
   }
 }

@@ -163,19 +163,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () async {
+            onPressed: () {
+              // ✅ Just dismiss the popup.
+              // The schedule timer will automatically close the restaurant in a few minutes.
               Navigator.pop(context);
-              // ✅ CRITICAL FIX: Explicitly turn off the Manual Switch
-              // This updates Firestore 'isOpen' to false, ensuring customers can't order.
-              await context.read<RestaurantStatusService>().toggleRestaurantStatus(false);
-
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('🛑 Restaurant is now CLOSED.')),
-                );
-              }
             },
-            child: const Text('Yes, Close', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            child: const Text('Okay, Let it Close', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -197,7 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Stack(
       alignment: Alignment.center,
       children: [
-        if (statusService.isLoading)
+        if (statusService.isLoading || statusService.isToggling)
           Container(
             width: 50,
             height: 30,
@@ -209,7 +202,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: SizedBox(
                 width: 20,
                 height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.deepPurple),
               ),
             ),
           )
@@ -231,6 +224,88 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showStatusChangeConfirmation(bool newValue) {
     final statusService = context.read<RestaurantStatusService>();
 
+    // ✅ CHECK: If trying to OPEN but schedule says CLOSED
+    if (newValue == true && !statusService.isScheduleOpen) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Row(
+            children: const [
+              Icon(Icons.schedule, color: Colors.orange),
+              SizedBox(width: 10),
+              Text('Outside Schedule'),
+            ],
+          ),
+          content: const Text(
+            'The restaurant is closed according to the current schedule.\n\nTo open now, please update your Timings settings.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const RestaurantTimingScreen()),
+                );
+              },
+              icon: const Icon(Icons.edit_calendar, size: 16),
+              label: const Text('Update Timings'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // ✅ CHECK: If trying to CLOSE but schedule says OPEN
+    if (newValue == false && statusService.isScheduleOpen) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Row(
+            children: const [
+              Icon(Icons.warning_amber_rounded, color: Colors.orange),
+              SizedBox(width: 10),
+              Text('Schedule is Active'),
+            ],
+          ),
+          content: const Text(
+              'The restaurant is currently scheduled to be OPEN.\n\nClosing it now will manually override the schedule. Are you sure?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                try {
+                   // Proceed with closing
+                   await statusService.toggleRestaurantStatus(false);
+                   if (mounted) {
+                     ScaffoldMessenger.of(context).showSnackBar(
+                       const SnackBar(content: Text('🛑 Restaurant is now CLOSED (Manual Override)'), backgroundColor: Colors.red),
+                     );
+                   }
+                } catch (e) {
+                  // Error handling
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('Yes, Close'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Standard Confirmation for other cases
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -378,28 +453,38 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
             child: Row(
               children: [
-                Container(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: statusService.isOpen
-                        ? Colors.green.withOpacity(0.1)
-                        : Colors.red.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: statusService.isOpen ? Colors.green : Colors.red,
-                      width: 1,
+                if (statusService.isLoading)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 8),
+                    child: SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.deepPurple),
+                    ),
+                  )
+                else
+                  Container(
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusService.isOpen
+                          ? Colors.green.withOpacity(0.1)
+                          : Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: statusService.isOpen ? Colors.green : Colors.red,
+                        width: 1,
+                      ),
+                    ),
+                    child: Text(
+                      statusService.statusText.toUpperCase(),
+                      style: TextStyle(
+                        color: statusService.isOpen ? Colors.green : Colors.red,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
                     ),
                   ),
-                  child: Text(
-                    statusService.statusText.toUpperCase(),
-                    style: TextStyle(
-                      color: statusService.isOpen ? Colors.green : Colors.red,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
                 const SizedBox(width: 8),
                 _buildRestaurantToggle(statusService),
                 const SizedBox(width: 8),

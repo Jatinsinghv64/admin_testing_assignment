@@ -79,13 +79,22 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
   // --- Actions & Logic ---
 
   Future<void> _saveTimings() async {
-    setState(() => _isSaving = true);
     final userScope = context.read<UserScopeService>();
+    if (userScope.branchId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ Error: No Branch ID found'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    
     try {
       await FirebaseFirestore.instance
           .collection('Branch')
           .doc(userScope.branchId)
-          .set({'workingHours': _workingHours}, SetOptions(merge: true));
+          .set({'workingHours': _workingHours}, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 10)); // ✅ Prevent infinite loop
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

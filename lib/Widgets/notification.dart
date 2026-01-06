@@ -202,27 +202,42 @@ class OrderNotificationService with ChangeNotifier {
             // ✅ CRITICAL UPDATE: AUTO-ACCEPT LOGIC
             onAutoAccept: () async {
               try {
-                debugPrint("⏳ Timer expired. Auto-accepting order...");
+                debugPrint("⏳ Timer expired. Attempting to Auto-Accept...");
 
-                // 1. Mark as 'preparing' (Accepted)
-                await FirebaseFirestore.instance.collection('Orders').doc(orderId).update({
-                  'status': 'preparing',
-                  'autoAccepted': true, // Flag for analytics
-                  'acceptedBy': 'Auto-Accept System',
-                  'acceptedAt': FieldValue.serverTimestamp(),
+                // ✅ SAFE AUTO-ACCEPT: Use Transaction to check status first
+                final docRef = FirebaseFirestore.instance.collection('Orders').doc(orderId);
+                
+                await FirebaseFirestore.instance.runTransaction((transaction) async {
+                  final snapshot = await transaction.get(docRef);
+                  
+                  if (!snapshot.exists) throw Exception("Order no longer exists!");
+                  
+                  final currentStatus = snapshot.get('status');
+                  
+                  // 🛑 CRITICAL CHECK: Only auto-accept if STILL PENDING
+                  if (currentStatus != 'pending') {
+                    debugPrint("⚠️ Order $orderId was already handled (Status: $currentStatus). Aborting Auto-Accept.");
+                    return; // Do nothing, let the listener dismiss the dialog
+                  }
+
+                  transaction.update(docRef, {
+                    'status': 'preparing',
+                    'autoAccepted': true, 
+                    'acceptedBy': 'Auto-Accept System',
+                    'acceptedAt': FieldValue.serverTimestamp(),
+                  });
                 });
 
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text("Order Auto-Accepted due to timeout"),
-                        backgroundColor: Colors.green
-                    ),
-                  );
+                   // Only show snackbar if we actually did something? 
+                   // Ideally we can't easily know if transaction aborted cleanly or updated inside here
+                   // without returning a value. 
+                   // But safely assuming if no specific error thrown, it went through OR was skipped.
+                   // We will let the StreamListener dismiss the UI.
                 }
+
               } catch (e) {
-                debugPrint("❌ Failed to auto-accept order: $e");
-                // If auto-accept fails (e.g., already accepted by someone else), just close dialog
+                debugPrint("❌ Auto-accept transaction failed: $e");
               }
             },
           );
