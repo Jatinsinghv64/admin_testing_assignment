@@ -259,7 +259,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   Widget _buildBranchSelector(UserScopeService userScope, BranchFilterService branchFilter) {
     return Container(
       margin: const EdgeInsets.only(right: 12),
-      child: PopupMenuButton<String?>(
+      child: PopupMenuButton<String>(
         offset: const Offset(0, 45),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Container(
@@ -294,8 +294,8 @@ class _OrdersScreenState extends State<OrdersScreen>
           ),
         ),
         itemBuilder: (context) => [
-          PopupMenuItem<String?>(
-            value: null,
+          PopupMenuItem<String>(
+            value: BranchFilterService.allBranchesValue,
             child: Row(children: [
                Icon(branchFilter.selectedBranchId == null ? Icons.check_circle : Icons.circle_outlined, size:18, color: branchFilter.selectedBranchId == null ? Colors.deepPurple : Colors.grey),
                const SizedBox(width: 10),
@@ -303,7 +303,7 @@ class _OrdersScreenState extends State<OrdersScreen>
             ]),
           ),
           const PopupMenuDivider(),
-          ...userScope.branchIds.map((branchId) => PopupMenuItem<String?>(
+          ...userScope.branchIds.map((branchId) => PopupMenuItem<String>(
             value: branchId,
             child: Row(children: [
                Icon(branchFilter.selectedBranchId == branchId ? Icons.check_circle : Icons.circle_outlined, size:18, color: branchFilter.selectedBranchId == branchId ? Colors.deepPurple : Colors.grey),
@@ -488,12 +488,16 @@ class _OrdersScreenState extends State<OrdersScreen>
     final userScope = context.read<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>(); // Watch for filter changes
 
+    // Get branches to filter by (respects branch selector)
+    // When "All Branches" is selected (null), getFilterBranchIds returns userScope.branchIds
+    final effectiveFilterIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _orderService.getOrdersStream(
         orderType: orderType,
         status: _selectedStatus,
         userScope: userScope,
-        filterBranchIds: branchFilter.getFilterBranchIds(userScope.branchIds), // Pass filter
+        filterBranchIds: effectiveFilterIds,
       ),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {

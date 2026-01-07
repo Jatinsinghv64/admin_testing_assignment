@@ -20,9 +20,8 @@ class OrderService {
         .collection(AppConstants.collectionOrders)
         .where('Order_type', isEqualTo: orderType);
 
-    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
-      // Show ALL orders if SuperAdmin has no specific branch selection
-    } else if (filterBranchIds != null && filterBranchIds.isNotEmpty) {
+    // Always filter by branches - SuperAdmin sees only their assigned branches
+    if (filterBranchIds != null && filterBranchIds.isNotEmpty) {
       // Filter by provided specific branches (from BranchSelector)
       if (filterBranchIds.length == 1) {
         baseQuery = baseQuery.where('branchIds', arrayContains: filterBranchIds.first);
@@ -30,14 +29,14 @@ class OrderService {
         baseQuery = baseQuery.where('branchIds', arrayContainsAny: filterBranchIds);
       }
     } else if (userScope.branchIds.isNotEmpty) {
-      // Filter by assigned branches (fallback)
+      // Fall back to user's assigned branches (for "All Branches" selection or initial state)
       if (userScope.branchIds.length == 1) {
         baseQuery = baseQuery.where('branchIds', arrayContains: userScope.branchIds.first);
       } else {
         baseQuery = baseQuery.where('branchIds', arrayContainsAny: userScope.branchIds);
       }
     } else {
-      // Non-SuperAdmin with no branches? Should not happen.
+      // User with no branches assigned - return empty
       return const Stream.empty();
     }
 

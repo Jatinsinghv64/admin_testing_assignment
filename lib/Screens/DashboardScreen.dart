@@ -99,7 +99,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildBranchSelector(UserScopeService userScope, BranchFilterService branchFilter) {
     return Container(
       margin: const EdgeInsets.only(right: 12),
-      child: PopupMenuButton<String?>(
+      child: PopupMenuButton<String>(
         offset: const Offset(0, 45),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Container(
@@ -134,9 +134,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
         itemBuilder: (context) => [
-          // "All Branches" option
-          PopupMenuItem<String?>(
-            value: null,
+          // "All Branches" option - use sentinel value, not null
+          PopupMenuItem<String>(
+            value: BranchFilterService.allBranchesValue,
             child: Row(
               children: [
                 Icon(
@@ -155,7 +155,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const PopupMenuDivider(),
           // Individual branch options
-          ...userScope.branchIds.map((branchId) => PopupMenuItem<String?>(
+          ...userScope.branchIds.map((branchId) => PopupMenuItem<String>(
             value: branchId,
             child: Row(
               children: [
@@ -542,7 +542,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
   // --- Helper Methods for Branch Filtering ---
-
+  
   Query<Map<String, dynamic>> _getBaseOrderQuery(BuildContext context) {
     final userScope = Provider.of<UserScopeService>(context, listen: false);
     final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
@@ -551,13 +551,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Get branch IDs to filter by (respects branch selector)
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
-    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
-      // Show ALL orders if SuperAdmin has no specific branch selection
-    } else if (filterBranchIds.isNotEmpty) {
+    // Always filter by branches - SuperAdmin sees only their assigned branches
+    if (filterBranchIds.isNotEmpty) {
       // Filter by selected branch(es)
-      query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+      if (filterBranchIds.length == 1) {
+        query = query.where('branchIds', arrayContains: filterBranchIds.first);
+      } else {
+        query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+      }
+    } else if (userScope.branchIds.isNotEmpty) {
+      // Fall back to user's assigned branches
+      if (userScope.branchIds.length == 1) {
+        query = query.where('branchIds', arrayContains: userScope.branchIds.first);
+      } else {
+        query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+      }
     } else {
-      // Force empty result if no access
+      // User with no branches assigned - force empty result
       query = query.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
     }
     return query;
@@ -572,12 +582,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Get branch IDs to filter by (respects branch selector)
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
-    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
-      // Show ALL drivers
-    } else if (filterBranchIds.isNotEmpty) {
-      query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+    // Always filter by branches - SuperAdmin sees only their assigned branches
+    if (filterBranchIds.isNotEmpty) {
+      if (filterBranchIds.length == 1) {
+        query = query.where('branchIds', arrayContains: filterBranchIds.first);
+      } else {
+        query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+      }
+    } else if (userScope.branchIds.isNotEmpty) {
+      // Fall back to user's assigned branches
+      if (userScope.branchIds.length == 1) {
+        query = query.where('branchIds', arrayContains: userScope.branchIds.first);
+      } else {
+        query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+      }
     } else {
-       // Force empty result
+       // User with no branches - force empty result
        return const Stream<QuerySnapshot<Map<String, dynamic>>>.empty();
     }
     return query.snapshots();

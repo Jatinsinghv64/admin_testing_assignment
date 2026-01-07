@@ -6,6 +6,10 @@ import 'package:flutter/material.dart';
 class BranchFilterService with ChangeNotifier {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  /// Sentinel value for "All Branches" selection (used because PopupMenuButton
+  /// doesn't fire onSelected for null values)
+  static const String allBranchesValue = '__all_branches__';
+
   String? _selectedBranchId; // null = "All Branches"
   Map<String, String> _branchNames = {}; // Cache: branchId -> branchName
   bool _isLoaded = false;
@@ -24,12 +28,17 @@ class BranchFilterService with ChangeNotifier {
   /// Get all cached branch names
   Map<String, String> get branchNames => Map.unmodifiable(_branchNames);
 
-  /// Select a specific branch (or null for "All Branches")
+  /// Select a specific branch (or allBranchesValue for "All Branches")
+  /// Always notifies listeners to ensure UI refresh when user makes explicit selection
   void selectBranch(String? branchId) {
-    if (_selectedBranchId != branchId) {
+    // Convert sentinel value to null (internal representation)
+    if (branchId == allBranchesValue) {
+      _selectedBranchId = null;
+    } else {
       _selectedBranchId = branchId;
-      notifyListeners();
     }
+    debugPrint('BranchFilterService: Selected branch = $_selectedBranchId');
+    notifyListeners();
   }
 
   /// Get branchIds to filter by based on selection

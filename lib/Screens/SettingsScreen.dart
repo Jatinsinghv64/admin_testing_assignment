@@ -27,8 +27,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _darkModeEnabled = false;
   String _selectedLanguage = 'English';
 
-  // ✅ State to track logout process
+  // State to track logout process
   bool _isLoggingOut = false;
+  
+  // Cache permission state to prevent flash during scope reload
+  bool? _hadPermissionOnInit;
 
   late OrderNotificationService _notificationService;
   late RestaurantStatusService _restaurantStatus;
@@ -60,16 +63,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ✅ Check if logging out FIRST to prevent Access Denied flicker
+    // Check if logging out FIRST to prevent Access Denied flicker
     if (_isLoggingOut) {
       return const Scaffold(
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(),
+              CircularProgressIndicator(color: Colors.deepPurple),
               SizedBox(height: 16),
-              Text("Signing out..."),
+              Text("Signing out...", style: TextStyle(color: Colors.grey)),
             ],
           ),
         ),
@@ -79,12 +82,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final userScope = context.watch<UserScopeService>();
     final authService = context.read<AuthService>();
 
-    // Permission check for entire screen
+    // Cache permission state when first loaded
+    if (_hadPermissionOnInit == null && userScope.isLoaded) {
+      _hadPermissionOnInit = userScope.can(Permissions.canManageSettings);
+    }
+
+    // Show loading while scope is loading/reloading
+    if (!userScope.isLoaded) {
+      return Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: AppBar(
+          elevation: 0,
+          backgroundColor: Colors.white,
+          centerTitle: true,
+          title: const Text(
+            'Settings',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.deepPurple,
+              fontSize: 24,
+            ),
+          ),
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Colors.deepPurple),
+              SizedBox(height: 16),
+              Text('Loading...', style: TextStyle(color: Colors.grey)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Permission check - with flash prevention
     if (!userScope.can(Permissions.canManageSettings)) {
+      // If we had permission before, show loading instead of Access Denied
+      if (_hadPermissionOnInit == true) {
+        return Scaffold(
+          backgroundColor: Colors.grey[50],
+          appBar: AppBar(
+            elevation: 0,
+            backgroundColor: Colors.white,
+            centerTitle: true,
+            title: const Text(
+              'Settings',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.deepPurple,
+                fontSize: 24,
+              ),
+            ),
+          ),
+          body: const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(color: Colors.deepPurple),
+                SizedBox(height: 16),
+                Text('Refreshing...', style: TextStyle(color: Colors.grey)),
+              ],
+            ),
+          ),
+        );
+      }
       return const Scaffold(
         body: AccessDeniedWidget(permission: 'manage settings'),
       );
     }
+    
+    // Update cached permission state
+    _hadPermissionOnInit = true;
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -102,223 +172,473 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Restaurant Status Card
-            _buildRestaurantStatusCard(_restaurantStatus, userScope),
-            const SizedBox(height: 16),
+            // Profile Card
+            _buildProfileCard(userScope, authService),
+            const SizedBox(height: 24),
 
-            // User Profile Card
-            _buildUserProfileCard(userScope, authService),
-            const SizedBox(height: 16),
+            // Restaurant Status
+            _buildRestaurantStatusCard(_restaurantStatus, userScope),
+            const SizedBox(height: 24),
 
             // Administration Section
-            buildSectionHeader('Administration', Icons.admin_panel_settings),
-            const SizedBox(height: 16),
-            // Inside SettingsScreen build method, under Administration section:
-
-            if (userScope.isSuperAdmin)
-              buildSettingsCard(
-                icon: Icons.access_time_rounded,
-                title: 'Restaurant Timings',
-                subtitle: 'Manage opening hours and shifts',
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (context) => const RestaurantTimingScreen()),
-                ),
-              ),
-            const SizedBox(height: 12),
-
-            // --- Order History ---
-            if (userScope.isSuperAdmin || userScope.role == 'branchadmin') ...[
-              buildSettingsCard(
-                icon: Icons.history_edu_rounded,
-                title: 'Order History',
-                subtitle: 'View all past orders with pagination',
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => const OrderHistoryScreen(),
-                    ),
-                  );
-                },
-                iconColor: Colors.blue,
-                cardColor: Colors.blue.withOpacity(0.05),
-              ),
+            if (userScope.isSuperAdmin || userScope.can(Permissions.canManageStaff) || userScope.can(Permissions.canManageCoupons)) ...[
+              _buildSectionTitle('Administration', Icons.admin_panel_settings),
               const SizedBox(height: 12),
+              _buildGroupedSettingsCard([
+                if (userScope.isSuperAdmin)
+                  _SettingsItem(
+                    icon: Icons.access_time_rounded,
+                    title: 'Restaurant Timings',
+                    subtitle: 'Manage opening hours',
+                    iconColor: Colors.orange,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const RestaurantTimingScreen()),
+                    ),
+                  ),
+                if (userScope.isSuperAdmin || userScope.role == 'branchadmin')
+                  _SettingsItem(
+                    icon: Icons.history_edu_rounded,
+                    title: 'Order History',
+                    subtitle: 'View past orders',
+                    iconColor: Colors.blue,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const OrderHistoryScreen()),
+                    ),
+                  ),
+                if (userScope.isSuperAdmin && userScope.can(Permissions.canManageStaff))
+                  _SettingsItem(
+                    icon: Icons.people_alt,
+                    title: 'Staff Management',
+                    subtitle: 'Manage team members',
+                    iconColor: Colors.deepPurple,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const StaffManagementScreen()),
+                    ),
+                  ),
+                if (userScope.can(Permissions.canManageCoupons))
+                  _SettingsItem(
+                    icon: Icons.card_giftcard_rounded,
+                    title: 'Coupon Management',
+                    subtitle: 'Create discount codes',
+                    iconColor: Colors.teal,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const CouponManagementScreen()),
+                    ),
+                  ),
+                if (userScope.isSuperAdmin)
+                  _SettingsItem(
+                    icon: Icons.business_outlined,
+                    title: 'Branch Settings',
+                    subtitle: 'Manage branches',
+                    iconColor: Colors.indigo,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const BranchManagementScreen()),
+                    ),
+                  ),
+                if (userScope.isSuperAdmin)
+                  _SettingsItem(
+                    icon: Icons.analytics_outlined,
+                    title: 'Business Analytics',
+                    subtitle: 'View reports & insights',
+                    iconColor: Colors.green,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const AnalyticsScreen()),
+                    ),
+                  ),
+              ]),
+              const SizedBox(height: 24),
             ],
 
-            if (userScope.isSuperAdmin && userScope.can(Permissions.canManageStaff))
-              buildSettingsCard(
-                icon: Icons.people_alt,
-                title: 'Staff Management',
-                subtitle: 'Manage staff members and permissions',
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => const StaffManagementScreen(),
-                    ),
-                  );
-                },
+            // App Preferences Section
+            _buildSectionTitle('App Preferences', Icons.tune_rounded),
+            const SizedBox(height: 12),
+            _buildGroupedSettingsCard([
+              _SettingsItem(
+                icon: Icons.notifications_outlined,
+                title: 'Notifications',
+                subtitle: 'Push alerts & sounds',
+                iconColor: Colors.red,
+                onTap: () => _showNotificationSettings(context),
               ),
-            if (userScope.isSuperAdmin && userScope.can(Permissions.canManageStaff))
-              const SizedBox(height: 12),
-            if (userScope.can(Permissions.canManageCoupons))
-              buildSettingsCard(
-                icon: Icons.card_giftcard_rounded,
-                title: 'Coupon Management',
-                subtitle: 'Create and manage discount coupons',
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => const CouponManagementScreen(),
-                    ),
-                  );
-                },
-                iconColor: Colors.teal,
-                cardColor: Colors.teal.withOpacity(0.05),
-              ),
-            if (userScope.can(Permissions.canManageCoupons))
-              const SizedBox(height: 12),
-
-            if (userScope.isSuperAdmin)
-              buildSettingsCard(
-                  icon: Icons.business_outlined,
-                  title: 'Branch Settings',
-                  subtitle: 'Manage branch information and settings',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => const BranchManagementScreen(),
-                    ),
-                  )
-              ),
-            if (userScope.isSuperAdmin)
-              const SizedBox(height: 12),
-
-            if (userScope.isSuperAdmin)
-              buildSettingsCard(
-                icon: Icons.analytics_outlined,
-                title: 'Business Analytics',
-                subtitle: 'View detailed business reports',
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => const AnalyticsScreen(),
-                  ),
+              _SettingsItem(
+                icon: Icons.dark_mode_outlined,
+                title: 'Dark Mode',
+                subtitle: _darkModeEnabled ? 'Enabled' : 'Disabled',
+                iconColor: Colors.blueGrey,
+                trailing: Switch.adaptive(
+                  value: _darkModeEnabled,
+                  activeColor: Colors.deepPurple,
+                  onChanged: (val) {
+                    setState(() => _darkModeEnabled = val);
+                    _savePreference('dark_mode_enabled', val);
+                    _showSnackBar(context, 'Dark mode ${val ? 'enabled' : 'disabled'}');
+                  },
                 ),
               ),
-            if (userScope.isSuperAdmin)
-              const SizedBox(height: 32),
-
-            // App Preferences Section
-            if (!userScope.isSuperAdmin)
-              const SizedBox(height: 32),
-            buildSectionHeader('App Preferences', Icons.settings_applications),
-            const SizedBox(height: 16),
-            buildSettingsCard(
-              icon: Icons.notifications_outlined,
-              title: 'Notifications',
-              subtitle: 'Manage push notifications and alerts',
-              onTap: () => _showNotificationSettings(context),
-            ),
-            const SizedBox(height: 12),
-            buildSettingsCard(
-              icon: Icons.dark_mode_outlined,
-              title: 'Dark Mode',
-              subtitle: 'Switch between light and dark theme',
-              onTap: () {
-                setState(() => _darkModeEnabled = !_darkModeEnabled);
-                _savePreference('dark_mode_enabled', _darkModeEnabled);
-                _showSnackBar(context, 'Dark mode ${_darkModeEnabled ? 'enabled' : 'disabled'}');
-              },
-            ),
-            const SizedBox(height: 12),
-            buildSettingsCard(
-              icon: Icons.language_outlined,
-              title: 'Language',
-              subtitle: 'Change app language',
-              onTap: () => _showLanguageDialog(context),
-            ),
-            const SizedBox(height: 12),
-            buildSettingsCard(
-              icon: Icons.palette_outlined,
-              title: 'Theme Color',
-              subtitle: 'Change primary theme color',
-              onTap: () => _showThemeColorDialog(context),
-            ),
-
-            const SizedBox(height: 32),
+              _SettingsItem(
+                icon: Icons.language_outlined,
+                title: 'Language',
+                subtitle: _selectedLanguage,
+                iconColor: Colors.purple,
+                onTap: () => _showLanguageDialog(context),
+              ),
+              _SettingsItem(
+                icon: Icons.palette_outlined,
+                title: 'Theme Color',
+                subtitle: 'Customize appearance',
+                iconColor: Colors.pink,
+                onTap: () => _showThemeColorDialog(context),
+              ),
+            ]),
+            const SizedBox(height: 24),
 
             // Support Section
-            buildSectionHeader('Support & Information', Icons.help_outline),
-            const SizedBox(height: 16),
-            buildSettingsCard(
-              icon: Icons.help_center_outlined,
-              title: 'Help & Support',
-              subtitle: 'Get help and contact support',
-              onTap: () => _contactSupport(context),
-            ),
+            _buildSectionTitle('Support & Help', Icons.support_agent_rounded),
             const SizedBox(height: 12),
-            buildSettingsCard(
-              icon: Icons.bug_report_outlined,
-              title: 'Report a Bug',
-              subtitle: 'Found an issue? Let us know',
-              onTap: () => _reportBug(context),
-            ),
-            const SizedBox(height: 12),
-            buildSettingsCard(
-              icon: Icons.feedback_outlined,
-              title: 'Send Feedback',
-              subtitle: 'Share your suggestions',
-              onTap: () => _sendFeedback(context),
-            ),
-            const SizedBox(height: 12),
-            buildSettingsCard(
-              icon: Icons.privacy_tip_outlined,
-              title: 'Privacy Policy',
-              subtitle: 'View our privacy policy',
-              onTap: () => _viewPrivacyPolicy(context),
-            ),
-            const SizedBox(height: 12),
-            buildSettingsCard(
-              icon: Icons.description_outlined,
-              title: 'Terms of Service',
-              subtitle: 'View terms and conditions',
-              onTap: () => _viewTermsOfService(context),
-            ),
-            const SizedBox(height: 12),
-            buildSettingsCard(
-              icon: Icons.phone_android_outlined,
-              title: 'App Version',
-              subtitle: 'v1.2.0 (Build 45)',
-              onTap: () => _showAppInfo(context),
-            ),
-            const SizedBox(height: 12),
-            buildSettingsCard(
-              icon: Icons.update_outlined,
-              title: 'Check for Updates',
-              subtitle: 'Check for new app versions',
-              onTap: () => _checkForUpdates(context),
-            ),
+            _buildGroupedSettingsCard([
+              _SettingsItem(
+                icon: Icons.help_center_outlined,
+                title: 'Help Center',
+                subtitle: 'FAQs & guides',
+                iconColor: Colors.blue,
+                onTap: () => _contactSupport(context),
+              ),
+              _SettingsItem(
+                icon: Icons.bug_report_outlined,
+                title: 'Report Bug',
+                subtitle: 'Found an issue?',
+                iconColor: Colors.red,
+                onTap: () => _reportBug(context),
+              ),
+              _SettingsItem(
+                icon: Icons.feedback_outlined,
+                title: 'Send Feedback',
+                subtitle: 'Share suggestions',
+                iconColor: Colors.amber,
+                onTap: () => _sendFeedback(context),
+              ),
+            ]),
+            const SizedBox(height: 24),
 
-            const SizedBox(height: 40),
+            // Legal & Info Section
+            _buildSectionTitle('Legal & Info', Icons.info_outline_rounded),
+            const SizedBox(height: 12),
+            _buildGroupedSettingsCard([
+              _SettingsItem(
+                icon: Icons.privacy_tip_outlined,
+                title: 'Privacy Policy',
+                subtitle: 'How we use your data',
+                iconColor: Colors.teal,
+                onTap: () => _viewPrivacyPolicy(context),
+              ),
+              _SettingsItem(
+                icon: Icons.description_outlined,
+                title: 'Terms of Service',
+                subtitle: 'User agreement',
+                iconColor: Colors.brown,
+                onTap: () => _viewTermsOfService(context),
+              ),
+              _SettingsItem(
+                icon: Icons.system_update_outlined,
+                title: 'Check for Updates',
+                subtitle: 'v1.2.0 (Build 45)',
+                iconColor: Colors.green,
+                onTap: () => _checkForUpdates(context),
+              ),
+              _SettingsItem(
+                icon: Icons.info_outline,
+                title: 'About App',
+                subtitle: 'App information',
+                iconColor: Colors.grey,
+                onTap: () => _showAppInfo(context),
+              ),
+            ]),
+            const SizedBox(height: 32),
 
             // Logout Button
+            _buildLogoutButton(authService),
+            const SizedBox(height: 40),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileCard(UserScopeService userScope, AuthService authService) {
+    final initials = userScope.userEmail.isNotEmpty 
+        ? userScope.userEmail.substring(0, 2).toUpperCase() 
+        : 'U';
+    
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.deepPurple.shade50,
+            Colors.white,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.deepPurple.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.deepPurple.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Avatar
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF7C4DFF), Colors.deepPurple],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.deepPurple.withOpacity(0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Text(
+                initials,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 22,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          // Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  userScope.userEmail,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Colors.black87,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _getRoleColor(userScope.role).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    _formatRole(userScope.role),
+                    style: TextStyle(
+                      color: _getRoleColor(userScope.role),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                if (userScope.branchId.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.store, size: 14, color: Colors.grey[600]),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          userScope.branchId,
+                          style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          // Edit button
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(Icons.edit_outlined, size: 20, color: Colors.grey[600]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getRoleColor(String role) {
+    switch (role.toLowerCase()) {
+      case 'super_admin': return Colors.deepPurple;
+      case 'branch_admin': return Colors.blue;
+      case 'manager': return Colors.teal;
+      default: return Colors.grey;
+    }
+  }
+
+  String _formatRole(String role) {
+    return role.replaceAll('_', ' ').split(' ').map((word) => 
+      word.isNotEmpty ? '${word[0].toUpperCase()}${word.substring(1)}' : ''
+    ).join(' ');
+  }
+
+  Widget _buildSectionTitle(String title, IconData icon) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.deepPurple.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: Colors.deepPurple, size: 18),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGroupedSettingsCard(List<_SettingsItem> items) {
+    // Filter out null items
+    final validItems = items.where((item) => true).toList();
+    if (validItems.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: validItems.asMap().entries.map((entry) {
+          final index = entry.key;
+          final item = entry.value;
+          final isLast = index == validItems.length - 1;
+          
+          return Column(
+            children: [
+              _buildSettingsRow(item),
+              if (!isLast)
+                Divider(height: 1, indent: 72, endIndent: 16, color: Colors.grey[200]),
+            ],
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildSettingsRow(_SettingsItem item) {
+    return InkWell(
+      onTap: item.trailing != null ? null : item.onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
             Container(
-              width: double.infinity,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.red.withOpacity(0.2),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                color: item.iconColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(item.icon, color: item.iconColor, size: 20),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    item.subtitle,
+                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                   ),
                 ],
               ),
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 24),
-                label: const Text(
+            ),
+            if (item.trailing != null)
+              item.trailing!
+            else
+              Icon(Icons.chevron_right_rounded, color: Colors.grey[400], size: 22),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLogoutButton(AuthService authService) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFF5252), Color(0xFFD32F2F)],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.red.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _showLogoutDialog(context, authService),
+          borderRadius: BorderRadius.circular(16),
+          child: const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.logout_rounded, color: Colors.white, size: 22),
+                SizedBox(width: 12),
+                Text(
                   'Sign Out',
                   style: TextStyle(
                     color: Colors.white,
@@ -326,19 +646,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     fontSize: 16,
                   ),
                 ),
-                onPressed: () => _showLogoutDialog(context, authService),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  elevation: 0,
-                ),
-              ),
+              ],
             ),
-            const SizedBox(height: 20),
-          ],
+          ),
         ),
       ),
     );
@@ -346,69 +656,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildRestaurantStatusCard(
       RestaurantStatusService status, UserScopeService scope) {
-    // ✅ Show for both SuperAdmin and Branch Admin
     return _SuperAdminStatusCard(userScope: scope);
-  }
-
-  Widget _buildUserProfileCard(
-      UserScopeService userScope, AuthService authService) {
-    return _SettingsCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.person, color: Colors.deepPurple),
-              const SizedBox(width: 12),
-              const Text(
-                'User Profile',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.deepPurple,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _buildInfoRow(Icons.email, 'Email:', userScope.userEmail),
-          const SizedBox(height: 8),
-          _buildInfoRow(Icons.security, 'Role:', userScope.role.toUpperCase()),
-          const SizedBox(height: 8),
-          _buildInfoRow(
-              Icons.store, 'Branch:', userScope.branchId ?? 'N/A'),
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInfoRow(IconData icon, String label, String value) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: Colors.grey[600]),
-        const SizedBox(width: 8),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: Colors.grey[700],
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            value,
-            textAlign: TextAlign.end,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
-    );
   }
 
   Widget _SettingsCard({required Widget child}) {
@@ -674,21 +922,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _viewPrivacyPolicy(BuildContext context) async {
     const url = 'https://yourapp.com/privacy';
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
-      _showSnackBar(context, 'Could not open privacy policy');
+    try {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) _showSnackBar(context, 'Could not open privacy policy');
+      }
+    } catch (e) {
+      debugPrint('Error launching URL: $e');
+      if (mounted) _showSnackBar(context, 'Error opening privacy policy');
     }
   }
 
   Future<void> _viewTermsOfService(BuildContext context) async {
     const url = 'https://yourapp.com/terms';
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
-      _showSnackBar(context, 'Could not open terms of service');
+    try {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) _showSnackBar(context, 'Could not open terms of service');
+      }
+    } catch (e) {
+      debugPrint('Error launching URL: $e');
+      if (mounted) _showSnackBar(context, 'Error opening terms of service');
     }
   }
 
@@ -696,7 +954,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('App Information'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.deepPurple),
+            const SizedBox(width: 12),
+            const Text('App Information'),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -704,8 +969,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _AppInfoItem(title: 'Version', value: '1.2.0'),
             _AppInfoItem(title: 'Build Number', value: '45'),
             _AppInfoItem(title: 'Last Updated', value: '2024-01-15'),
-            _AppInfoItem(title: 'Developer', value: 'Your Company'),
-            _AppInfoItem(title: 'Package Name', value: 'com.yourapp.admin'),
+            _AppInfoItem(title: 'Developer', value: 'Zayka Admin'),
+            _AppInfoItem(title: 'Package Name', value: 'com.zayka.admin'),
+            const SizedBox(height: 8),
+            const Divider(),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.flutter_dash, size: 16, color: Colors.blue[400]),
+                const SizedBox(width: 8),
+                Text('Built with Flutter', style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+              ],
+            ),
           ],
         ),
         actions: [
@@ -719,33 +994,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _checkForUpdates(BuildContext context) {
+    // Show initial loading state
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Checking for Updates'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 16),
-            const Text('Checking for the latest version...'),
-            const SizedBox(height: 16),
-            Text(
-              'You are using the latest version',
-              style: TextStyle(
-                color: Colors.green[600],
-                fontWeight: FontWeight.bold,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        // Simulate checking after 1.5 seconds
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          if (Navigator.of(dialogContext).canPop()) {
+            Navigator.of(dialogContext).pop();
+            // Show result
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                title: Row(
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.green[600]),
+                    const SizedBox(width: 12),
+                    const Text('Up to Date'),
+                  ],
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'You are using the latest version (v1.2.0)',
+                      style: TextStyle(color: Colors.grey[700]),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Last checked: Just now',
+                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                    ),
+                  ],
+                ),
+                actions: [
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+                    child: const Text('OK'),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+            );
+          }
+        });
+        
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Checking for Updates'),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: 16),
+              CircularProgressIndicator(color: Colors.deepPurple),
+              SizedBox(height: 24),
+              Text('Checking for the latest version...'),
+              SizedBox(height: 8),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -936,13 +1247,83 @@ class StaffManagementScreen extends StatefulWidget {
 
 class _StaffManagementScreenState extends State<StaffManagementScreen> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  
+  // Track if we had permission initially (to avoid flash during scope reload)
+  bool? _hadPermissionOnInit;
 
   @override
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
-    final branchFilter = context.watch<BranchFilterService>(); // ✅ Added branch filter
+    final branchFilter = context.watch<BranchFilterService>();
 
+    // Cache the initial permission state
+    if (_hadPermissionOnInit == null && userScope.isLoaded) {
+      _hadPermissionOnInit = userScope.isSuperAdmin && userScope.can(Permissions.canManageStaff);
+    }
+
+    // Show loading indicator while scope is loading/reloading
+    // This prevents flashing "Access Denied" during state transitions
+    if (!userScope.isLoaded) {
+      return Scaffold(
+        appBar: AppBar(
+          elevation: 0,
+          backgroundColor: Colors.white,
+          iconTheme: const IconThemeData(color: Colors.deepPurple),
+          title: const Text(
+            'Manage Staff',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.deepPurple,
+              fontSize: 24,
+            ),
+          ),
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Colors.deepPurple),
+              SizedBox(height: 16),
+              Text('Loading...', style: TextStyle(color: Colors.grey)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Only show Access Denied if we genuinely don't have permission
+    // and it's not just a transitional state
     if (!userScope.isSuperAdmin || !userScope.can(Permissions.canManageStaff)) {
+      // If we had permission before and now don't, it might be a reload flash
+      // Give it a moment - show loading briefly
+      if (_hadPermissionOnInit == true) {
+        return Scaffold(
+          appBar: AppBar(
+            elevation: 0,
+            backgroundColor: Colors.white,
+            iconTheme: const IconThemeData(color: Colors.deepPurple),
+            title: const Text(
+              'Manage Staff',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.deepPurple,
+                fontSize: 24,
+              ),
+            ),
+          ),
+          body: const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(color: Colors.deepPurple),
+                SizedBox(height: 16),
+                Text('Refreshing...', style: TextStyle(color: Colors.grey)),
+              ],
+            ),
+          ),
+        );
+      }
+      
       return Scaffold(
         appBar: AppBar(title: const Text('Access Denied')),
         body: const Center(
@@ -950,6 +1331,9 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
         ),
       );
     }
+    
+    // Update cached permission state
+    _hadPermissionOnInit = true;
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -1131,8 +1515,6 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
 
   Future<void> _updateStaffMember(String staffId, Map<String, dynamic> staffData) async {
     try {
-      final userScope = context.read<UserScopeService>();
-      final isUpdatingSelf = staffId == userScope.userEmail;
 
       await _db.collection('staff').doc(staffId).update({
         ...staffData,
@@ -1142,10 +1524,8 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       if (mounted) {
         _showSnackBar('✅ Staff member updated successfully');
       }
-
-      if (isUpdatingSelf) {
-        await _reloadCurrentUserScope();
-      }
+      // Note: No need to manually reload scope - the real-time Firestore listener
+      // in UserScopeService automatically updates when the staff document changes
     } catch (e) {
       if (mounted) {
         _showSnackBar('Error updating staff: $e', isError: true);
@@ -1153,36 +1533,37 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
     }
   }
 
-  Future<void> _reloadCurrentUserScope() async {
-    final userScope = context.read<UserScopeService>();
-    final authService = context.read<AuthService>();
-    final currentUser = authService.currentUser;
-
-    if (currentUser != null) {
-      await userScope.clearScope();
-      await userScope.loadUserScope(currentUser, authService);
-    }
-  }
+  // Removed _reloadCurrentUserScope() - the UserScopeService has a real-time
+  // Firestore listener that automatically updates when the staff document changes.
+  // Manually calling clearScope() + loadUserScope() caused a flash of "Access Denied".
+  
 
   // ✅ Query definition
   Stream<QuerySnapshot> _getStaffQuery(UserScopeService userScope, BranchFilterService branchFilter) {
     Query query = _db.collection('staff');
 
-    // Filter by branch logic
+    // Always filter by branches - SuperAdmin sees only their assigned branches
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    debugPrint("DEBUG: _getStaffQuery called. FilterBranchIds: $filterBranchIds");
     
-    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
-        // Show all
-    } else if (filterBranchIds.isNotEmpty) {
+    if (filterBranchIds.isNotEmpty) {
       if (filterBranchIds.length == 1) {
-        // Use simpler arrayContains for single branch filter -> fixes "nothing updates" issue
+        debugPrint("DEBUG: Using arrayContains for single branch: ${filterBranchIds.first}");
         query = query.where('branchIds', arrayContains: filterBranchIds.first);
       } else {
+        debugPrint("DEBUG: Using arrayContainsAny for: $filterBranchIds");
         query = query.where('branchIds', arrayContainsAny: filterBranchIds);
       }
-    } else if (!userScope.isSuperAdmin) {
-      // Fallback for simple branch admin
-      query = query.where('branchIds', arrayContains: userScope.branchId);
+    } else if (userScope.branchIds.isNotEmpty) {
+      // Fall back to user's assigned branches
+      if (userScope.branchIds.length == 1) {
+        query = query.where('branchIds', arrayContains: userScope.branchIds.first);
+      } else {
+        query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+      }
+    } else {
+      // User with no branches - return impossible query (empty result)
+      query = query.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
     }
     
     return query.snapshots();
@@ -1192,7 +1573,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
   Widget _buildBranchSelector(UserScopeService userScope, BranchFilterService branchFilter) {
     return Container(
       margin: const EdgeInsets.only(right: 4),
-      child: PopupMenuButton<String?>(
+      child: PopupMenuButton<String>(
         offset: const Offset(0, 45),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Container(
@@ -1227,8 +1608,8 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
           ),
         ),
         itemBuilder: (context) => [
-          PopupMenuItem<String?>(
-            value: null,
+          PopupMenuItem<String>(
+            value: BranchFilterService.allBranchesValue,
             child: Row(children: [
                Icon(branchFilter.selectedBranchId == null ? Icons.check_circle : Icons.circle_outlined, size:18, color: branchFilter.selectedBranchId == null ? Colors.deepPurple : Colors.grey),
                const SizedBox(width: 10),
@@ -1236,7 +1617,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
             ]),
           ),
           const PopupMenuDivider(),
-          ...userScope.branchIds.map((branchId) => PopupMenuItem<String?>(
+          ...userScope.branchIds.map((branchId) => PopupMenuItem<String>(
             value: branchId,
             child: Row(children: [
                Icon(branchFilter.selectedBranchId == branchId ? Icons.check_circle : Icons.circle_outlined, size:18, color: branchFilter.selectedBranchId == branchId ? Colors.deepPurple : Colors.grey),
@@ -2063,4 +2444,21 @@ class _SuperAdminStatusCardState extends State<_SuperAdminStatusCard> {
   }
 }
 
+// Helper class for grouped settings items
+class _SettingsItem {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color iconColor;
+  final VoidCallback? onTap;
+  final Widget? trailing;
 
+  const _SettingsItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.iconColor,
+    this.onTap,
+    this.trailing,
+  });
+}

@@ -8,6 +8,7 @@ import '../Widgets/ProfessionalErrorWidget.dart';
 import '../main.dart';
 import 'BranchManagement.dart';
 import 'OrdersScreen.dart';
+import '../Widgets/BranchFilterService.dart';
 
 
 class RidersScreen extends StatefulWidget {
@@ -33,18 +34,42 @@ class _RidersScreenState extends State<RidersScreen> {
     }
 
     // --- 2. Build Branch-Scoped Query ---
-    Query<Map<String, dynamic>> query =
+    Query<Map<String, dynamic>> baseQuery =
     FirebaseFirestore.instance.collection('Drivers').orderBy('name');
 
-    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
-      // Show ALL drivers if SuperAdmin has no specific branch selection
+    // Get branch IDs properly from filter service
+    // Note: We need to access branchFilter here. Since it wasn't watched in original code, we should technically check if it's available or use userScope fallback.
+    // However, for consistency, we should use BranchFilterService if possible.
+    final branchFilter = context.watch<BranchFilterService>();
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
+    // Always filter by branches - SuperAdmin sees only their assigned branches
+    if (filterBranchIds.isNotEmpty) {
+       if (filterBranchIds.length == 1) {
+         baseQuery = baseQuery.where('branchIds', arrayContains: filterBranchIds.first);
+       } else {
+         baseQuery = baseQuery.where('branchIds', arrayContainsAny: filterBranchIds);
+       }
     } else if (userScope.branchIds.isNotEmpty) {
-      // Filter by assigned branches
-      query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+       // Fall back to user's assigned branches
+       if (userScope.branchIds.length == 1) {
+          baseQuery = baseQuery.where('branchIds', arrayContains: userScope.branchIds.first);
+       } else {
+          baseQuery = baseQuery.where('branchIds', arrayContainsAny: userScope.branchIds);
+       }
     } else {
-      // Force empty result if no access
-       query = query.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
+      // User with no branches - force empty result
+       baseQuery = baseQuery.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
     }
+
+    // Assign query to scope-level variable if needed, or just use in _buildEnhancedDriversList
+    // But wait, _buildEnhancedDriversList creates its OWN query. We should update THAT method.
+    // And also the build method does perform a query check?
+    // Looking at lines 36-47 in original file, it creates a 'query' local variable but it's not actually passed to _buildEnhancedDriversList?
+    // Re-reading: The 'query' variable in build() seems UNUSED because _buildEnhancedDriversList creates a NEW query at line 199.
+    // I should fix _buildEnhancedDriversList AND remove the redundant query in build() if it confusing.
+    // Actually, let's just make sure the 'query' in build is valid for whatever (maybe debugging?).
+    // But crucially, I must update _buildEnhancedDriversList.
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -196,11 +221,28 @@ class _RidersScreenState extends State<RidersScreen> {
   }
 
   Widget _buildEnhancedDriversList(UserScopeService userScope) {
+    final branchFilter = Provider.of<BranchFilterService>(context); // Listen to branch changes
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('Drivers');
 
-    // Apply branch filter for non-super admin
-    if (!userScope.isSuperAdmin) {
-      query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
+    // Always filter by branches - SuperAdmin sees only their assigned branches
+    if (filterBranchIds.isNotEmpty) {
+        if (filterBranchIds.length == 1) {
+          query = query.where('branchIds', arrayContains: filterBranchIds.first);
+        } else {
+          query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+        }
+    } else if (userScope.branchIds.isNotEmpty) {
+        // Fall back to user's assigned branches
+         if (userScope.branchIds.length == 1) {
+          query = query.where('branchIds', arrayContains: userScope.branchIds.first);
+        } else {
+          query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+        }
+    } else {
+       // User with no branches - force empty result
+        query = query.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
     }
 
     // Apply status filters
