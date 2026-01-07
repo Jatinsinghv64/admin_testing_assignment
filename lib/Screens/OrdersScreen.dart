@@ -13,6 +13,7 @@ import '../Widgets/TimeUtils.dart';
 import '../main.dart';
 import '../constants.dart';
 import '../Widgets/BranchFilterService.dart'; // ✅ Added
+import '../Widgets/OrderUIComponents.dart'; // ✅ Shared UI components
 
 // Service for handling cross-screen order selection/highlighting
 class OrderSelectionService {
@@ -168,6 +169,14 @@ class _OrdersScreenState extends State<OrdersScreen>
       {String? reason}) async {
     if (!mounted) return;
 
+    // ✅ Network connectivity check
+    if (!await NetworkUtils.hasConnectivity()) {
+      if (mounted) {
+        NetworkUtils.showNetworkError(context);
+      }
+      return;
+    }
+
     setState(() {
       _processingOrderIds.add(orderId);
     });
@@ -186,7 +195,7 @@ class _OrdersScreenState extends State<OrdersScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Order status updated to "$newStatus"!'),
+            content: Text('Order status updated to "${StatusUtils.getDisplayText(newStatus)}"'),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 1),
           ),
@@ -194,9 +203,10 @@ class _OrdersScreenState extends State<OrdersScreen>
       }
     } catch (e) {
       if (mounted) {
+        // ✅ User-friendly error message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to update: $e'),
+            content: Text(NetworkUtils.getUserFriendlyError(e)),
             backgroundColor: Colors.red,
           ),
         );
@@ -209,6 +219,7 @@ class _OrdersScreenState extends State<OrdersScreen>
       }
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -492,76 +503,118 @@ class _OrdersScreenState extends State<OrdersScreen>
     // When "All Branches" is selected (null), getFilterBranchIds returns userScope.branchIds
     final effectiveFilterIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _orderService.getOrdersStream(
-        orderType: orderType,
-        status: _selectedStatus,
-        userScope: userScope,
-        filterBranchIds: effectiveFilterIds,
-      ),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
-                ),
-                const SizedBox(height: 16),
-                Text('Loading orders...',
-                    style: TextStyle(color: Colors.grey[600])),
-              ],
-            ),
-          );
-        }
-
-        if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
-        }
-
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.receipt_long_outlined,
-                    size: 64, color: Colors.grey[400]),
-                const SizedBox(height: 16),
-                Text('No orders found.',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 18)),
-              ],
-            ),
-          );
-        }
-
-        final docs = snapshot.data!.docs;
-
-        return ListView.separated(
-          controller: _scrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 16),
-          itemBuilder: (context, index) {
-            final orderDoc = docs[index];
-            final isHighlighted = _shouldHighlightOrder &&
-                (orderDoc.id == widget.initialOrderId ||
-                    orderDoc.id == _orderToScrollTo);
-
-            return _OrderCard(
-              key: ValueKey(orderDoc.id),
-              order: orderDoc,
-              orderType: orderType,
-              onStatusChange: updateOrderStatus,
-              isHighlighted: isHighlighted,
-              isProcessing: _processingOrderIds.contains(orderDoc.id),
-            );
-          },
-        );
+    // ✅ IMPROVED: Add RefreshIndicator for pull-to-refresh
+    return RefreshIndicator(
+      onRefresh: () async {
+        // Force rebuild by triggering setState
+        if (mounted) setState(() {});
+        // Small delay to show refresh indicator
+        await Future.delayed(const Duration(milliseconds: 300));
       },
+      color: Colors.deepPurple,
+      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: _orderService.getOrdersStream(
+          orderType: orderType,
+          status: _selectedStatus,
+          userScope: userScope,
+          filterBranchIds: effectiveFilterIds,
+        ),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation(Colors.deepPurple),
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Loading orders...',
+                      style: TextStyle(color: Colors.grey[600])),
+                ],
+              ),
+            );
+          }
+
+          if (snapshot.hasError) {
+            // ✅ IMPROVED: User-friendly error display
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Unable to load orders',
+                    style: TextStyle(color: Colors.grey[800], fontSize: 18),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Pull down to refresh',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            // ✅ IMPROVED: Wrap in ListView for pull-to-refresh to work on empty state
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.5,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.receipt_long_outlined,
+                            size: 64, color: Colors.grey[400]),
+                        const SizedBox(height: 16),
+                        Text('No orders found.',
+                            style: TextStyle(color: Colors.grey[600], fontSize: 18)),
+                        const SizedBox(height: 8),
+                        Text('Pull down to refresh.',
+                            style: TextStyle(color: Colors.grey[400], fontSize: 14)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          final docs = snapshot.data!.docs;
+
+          return ListView.separated(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(), // ✅ Enable pull-down even with items
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            itemCount: docs.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 16),
+            itemBuilder: (context, index) {
+              final orderDoc = docs[index];
+              final isHighlighted = _shouldHighlightOrder &&
+                  (orderDoc.id == widget.initialOrderId ||
+                      orderDoc.id == _orderToScrollTo);
+
+              return _OrderCard(
+                key: ValueKey(orderDoc.id),
+                order: orderDoc,
+                orderType: orderType,
+                onStatusChange: updateOrderStatus,
+                isHighlighted: isHighlighted,
+                isProcessing: _processingOrderIds.contains(orderDoc.id),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
+
 
 class _OrderCard extends StatefulWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> order;
@@ -587,28 +640,12 @@ class _OrderCardState extends State<_OrderCard> {
   bool _isAssigning = false;
   bool _isProcessingRefund = false;
 
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-        return Colors.orange;
-      case 'preparing':
-        return Colors.teal;
-      case 'rider_assigned':
-        return Colors.purple;
-      case 'pickedup':
-        return Colors.deepPurple;
-      case 'delivered':
-        return Colors.green;
-      case 'cancelled':
-        return Colors.red;
-      case 'refunded':
-        return Colors.pink;
-      case 'needs_rider_assignment':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
+  // ✅ IMPROVED: Use shared StatusUtils (removed duplicate code)
+  Color _getStatusColor(String status) => StatusUtils.getColor(status);
+
+  Color _getStatusColorForOrderType(String status, String orderType) =>
+      StatusUtils.getColorForOrderType(status, orderType);
+
 
   Future<void> _showRefundConfirmationDialog(BuildContext context, bool isApprove, String? imageUrl) async {
     return showDialog<void>(
@@ -786,12 +823,44 @@ class _OrderCardState extends State<_OrderCard> {
                 height: 200,
                 width: double.infinity,
                 fit: BoxFit.cover,
+                // ✅ IMPROVED: Add loading indicator
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Container(
+                    height: 200,
+                    color: Colors.grey.shade200,
+                    child: Center(
+                      child: CircularProgressIndicator(
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded /
+                                loadingProgress.expectedTotalBytes!
+                            : null,
+                        strokeWidth: 2,
+                        color: Colors.red.shade400,
+                      ),
+                    ),
+                  );
+                },
+                // ✅ IMPROVED: Better error display
                 errorBuilder: (context, error, stackTrace) => Container(
-                    height: 100,
-                    color: Colors.grey.shade300,
-                    child: const Icon(Icons.broken_image)),
+                  height: 100,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.broken_image, color: Colors.grey, size: 32),
+                      SizedBox(height: 4),
+                      Text('Image unavailable', 
+                          style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    ],
+                  ),
+                ),
               ),
             ),
+
             const SizedBox(height: 16),
           ],
           if (_isProcessingRefund)
@@ -856,31 +925,61 @@ class _OrderCardState extends State<_OrderCard> {
     }
   }
 
-  Future<void> _assignRiderManually(BuildContext context) async {
+  Future<void> _assignRiderManually(BuildContext parentContext) async {
+    // Capture the ScaffoldMessengerState BEFORE async operations
+    // This ensures we have a valid reference even if the dialog dismisses
+    final scaffoldMessenger = ScaffoldMessenger.of(parentContext);
+    
     // data is not available here, accessing widget.order.data()
     final data = widget.order.data();
-    final orderBranchId = data['branchId']?.toString() ?? 
-        (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty 
-            ? data['branchIds'][0].toString() 
-            : null);
+    // ROBUST BRANCH ID EXTRACTION
+    // Try top-level branchId -> branchIds[0] -> items[0].branchId
+    String? orderBranchId = data['branchId']?.toString();
+    
+    if (orderBranchId == null && data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty) {
+      orderBranchId = data['branchIds'][0].toString();
+    }
+    
+    // Fallback: Check items for Pickup/Dine-in orders
+    if (orderBranchId == null && data['items'] is List && (data['items'] as List).isNotEmpty) {
+       final firstItem = data['items'][0];
+       if (firstItem is Map && firstItem['branchId'] != null) {
+         orderBranchId = firstItem['branchId'].toString();
+       }
+    }
+    
+    // Final Fallback for SuperAdmin or malformed data: Use current user's first branch
+    if (orderBranchId == null) {
+      final userScope = Provider.of<UserScopeService>(parentContext, listen: false);
+      if (userScope.branchIds.isNotEmpty) {
+        orderBranchId = userScope.branchIds.first;
+      }
+    }
 
     final riderId = await showDialog<String>(
-      context: context,
-      builder: (context) =>
+      context: parentContext,
+      builder: (dialogContext) =>
           _RiderSelectionDialog(currentBranchId: orderBranchId),
     );
 
     if (riderId != null && riderId.isNotEmpty) {
       setState(() => _isAssigning = true);
 
-      await RiderAssignmentService.manualAssignRider(
+      final result = await RiderAssignmentService.manualAssignRider(
         orderId: widget.order.id,
         riderId: riderId,
-        context: context,
       );
 
       if (mounted) {
         setState(() => _isAssigning = false);
+        
+        // Use the pre-captured ScaffoldMessengerState (always valid)
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(result.message),
+            backgroundColor: result.backgroundColor,
+          ),
+        );
       }
     }
   }
@@ -911,11 +1010,17 @@ class _OrderCardState extends State<_OrderCard> {
 
     final List<Widget> buttons = [];
     final data = widget.order.data();
-    final String orderTypeLower = widget.orderType.toLowerCase();
+    final String orderType = widget.orderType;
     final String? riderId = data['riderId'];
 
+    // Use normalized order type for consistent comparison
+    final bool isDelivery = AppConstants.isDeliveryOrder(orderType);
+    final bool isDineIn = AppConstants.isDineInOrder(orderType);
+    // Note: Pickup/Takeaway handled via !isDelivery && !isDineIn check
+
+
     final bool isAutoAssigning =
-        data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
+        data.containsKey('autoAssignStarted') && isDelivery;
     final bool needsManualAssignment =
         status == AppConstants.statusNeedsAssignment;
 
@@ -943,14 +1048,34 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
-    // 2. Ready for Pickup/Delivery - show completion for non-delivery, handled below for delivery
-    if (status == AppConstants.statusPreparing) {
-      if (orderTypeLower != 'delivery') {
-        // For non-delivery orders, show completion button
+    // 2. Ready & Completion Logic for non-delivery orders (pickup, takeaway, dine-in)
+    if (!isDelivery) {
+      // Step A: Mark as Ready (Preparing -> Ready)
+      if (status == AppConstants.statusPreparing) {
         buttons.add(
           ElevatedButton.icon(
-            icon: Icon(orderTypeLower == 'dine_in' ? Icons.restaurant_menu : Icons.local_mall, size: 16),
-            label: Text(orderTypeLower == 'dine_in' ? 'Served to Table' : 'Handed to Customer'),
+            icon: const Icon(Icons.check_circle_outlined, size: 16),
+            label: const Text('Mark as Ready'),
+            // "needs_rider_assignment" is used as the "Ready" state for non-delivery orders
+            onPressed: () => widget.onStatusChange(
+                widget.order.id, AppConstants.statusNeedsAssignment),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+              padding: btnPadding,
+              minimumSize: btnMinSize,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        );
+      }
+      
+      // Step B: Complete Order (Ready -> Delivered)
+      if (status == AppConstants.statusNeedsAssignment) {
+        buttons.add(
+          ElevatedButton.icon(
+            icon: Icon(isDineIn ? Icons.restaurant_menu : Icons.local_mall, size: 16),
+            label: Text(AppConstants.getCompletionButtonText(orderType)),
             onPressed: () => widget.onStatusChange(
                 widget.order.id, AppConstants.statusDelivered),
             style: ElevatedButton.styleFrom(
@@ -958,8 +1083,7 @@ class _OrderCardState extends State<_OrderCard> {
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
-              shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
         );
@@ -987,8 +1111,8 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
-    // 4. Order Completion and Assignment Logic
-    if (orderTypeLower == 'delivery') {
+    // 4. Order Completion and Assignment Logic (ONLY for delivery orders)
+    if (isDelivery) {
       final bool canAssign = (status == AppConstants.statusPreparing ||
           needsManualAssignment);
 
@@ -1086,6 +1210,63 @@ class _OrderCardState extends State<_OrderCard> {
       }
     }
 
+    // 5. Return Logic (For Pickup/Dine-in ONLY) - Post-Completion
+    if (!isDelivery && status == AppConstants.statusDelivered) {
+       buttons.add(
+        ElevatedButton.icon(
+          icon: const Icon(Icons.assignment_return, size: 16),
+          label: const Text('Return / Exchange'),
+          onPressed: () async {
+            final result = await showDialog<Map<String, dynamic>>(
+              context: context,
+              builder: (context) => const _ReturnOptionsDialog(),
+            );
+
+            if (result != null) {
+              final type = result['type'];
+              final reason = result['reason'];
+              
+              if (type == 'exchange') {
+                // For exchange, we need to mark it as exchange first so revenue isn't lost
+                // We do this direct update to avoid changing the method signature of onStatusChange everywhere
+                await FirebaseFirestore.instance
+                    .collection(AppConstants.collectionOrders)
+                    .doc(widget.order.id)
+                    .update({
+                      'isExchange': true,
+                      'exchangeDetails': {
+                        'reason': reason,
+                        'timestamp': FieldValue.serverTimestamp(),
+                        // 'adminId': ... (could add user email if available in this context)
+                      }
+                    });
+                    
+                widget.onStatusChange(
+                  widget.order.id, 
+                  AppConstants.statusPreparing, // Reset to Preparing
+                  reason: "Exchange: $reason"
+                );
+              } else {
+                // Refund
+                widget.onStatusChange(
+                  widget.order.id, 
+                  AppConstants.statusRefunded,
+                  reason: reason
+                );
+              }
+            }
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.pink,
+            foregroundColor: Colors.white,
+            padding: btnPadding,
+            minimumSize: btnMinSize,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+      );
+    }
+
     // 5. Cancel Order Logic
     if (status != AppConstants.statusCancelled &&
         status != AppConstants.statusDelivered &&
@@ -1118,25 +1299,13 @@ class _OrderCardState extends State<_OrderCard> {
     );
   }
 
-  String _getStatusDisplayText(String status) {
-    switch (status.toLowerCase()) {
-      case 'needs_rider_assignment':
-        return 'NEEDS ASSIGN';
-      case 'rider_assigned':
-        return 'RIDER ASSIGNED';
-      case 'pickedup':
-        return 'PICKED UP';
-      default:
-        return status.toUpperCase();
-    }
-  }
+  // ✅ IMPROVED: Use shared StatusUtils (removed duplicate code)
+  String _getStatusDisplayText(String status, {String? orderType}) =>
+      StatusUtils.getDisplayText(status, orderType: orderType);
 
-  double _getStatusFontSize(String status) {
-    final displayText = _getStatusDisplayText(status);
-    if (displayText.length > 12) return 9;
-    if (displayText.length > 8) return 10;
-    return 11;
-  }
+  double _getStatusFontSize(String status, {String? orderType}) =>
+      StatusUtils.getFontSize(status, orderType: orderType);
+
 
   Widget _buildSectionHeader(String title, IconData icon) {
     return Row(
@@ -1243,8 +1412,7 @@ class _OrderCardState extends State<_OrderCard> {
         ? TimeUtils.getRestaurantTime(rawTimestamp)
         : null;
 
-    final orderNumber = data['dailyOrderNumber']?.toString() ??
-        widget.order.id.substring(0, 6).toUpperCase();
+    final orderNumber = OrderNumberHelper.getDisplayNumber(data, orderId: widget.order.id);
     final double subtotal = (data['subtotal'] as num? ?? 0.0).toDouble();
     final double deliveryFee = (data['deliveryFee'] as num? ?? 0.0).toDouble();
     final double totalAmount = (data['totalAmount'] as num? ?? 0.0).toDouble();
@@ -1267,7 +1435,31 @@ class _OrderCardState extends State<_OrderCard> {
     // Only show branch badge if user has access to multiple branches
     final showBranchBadge = branchId != null && userScope.branchIds.length > 1;
 
+    // --- BANNER LOGIC ---
+    Color? bannerColor;
+    String? bannerText;
+    IconData? bannerIcon;
+    bool showBanner = false;
+
+    if (hasPendingRefund) {
+      bannerColor = Colors.red;
+      bannerText = 'RETURN REQUEST';
+      bannerIcon = Icons.report_problem_outlined;
+      showBanner = true;
+    } else if (status == AppConstants.statusRefunded || status == 'refunded') {
+      bannerColor = Colors.pink;
+      bannerText = 'RETURNED ORDER';
+      bannerIcon = Icons.assignment_return_outlined;
+      showBanner = true;
+    } else if (data['isExchange'] == true) {
+      bannerColor = Colors.teal;
+      bannerText = 'EXCHANGE ORDER';
+      bannerIcon = Icons.swap_horiz_outlined;
+      showBanner = true;
+    }
+
     return Container(
+      clipBehavior: Clip.antiAlias, // Ensure banner doesn't overflow rounded corners
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -1284,15 +1476,49 @@ class _OrderCardState extends State<_OrderCard> {
               spreadRadius: 2,
               offset: const Offset(0, 0),
             ),
+          if (showBanner) // ✅ Dynamic highlight
+            BoxShadow(
+              color: bannerColor!.withOpacity(0.2),
+              blurRadius: 15,
+              spreadRadius: 1,
+              offset: const Offset(0, 0),
+            ),
         ],
-        border: widget.isHighlighted
-            ? Border.all(color: Colors.blue, width: 2)
-            : null,
+        border: showBanner 
+            ? Border.all(color: bannerColor!, width: 2) // ✅ Dynamic border
+            : widget.isHighlighted
+                ? Border.all(color: Colors.blue, width: 2)
+                : null,
       ),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (showBanner) // ✅ DYNAMIC BANNER
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              color: bannerColor,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(bannerIcon, color: Colors.white, size: 16),
+                  const SizedBox(width: 8),
+                  Text(
+                    bannerText!,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
           title: Row(
             children: [
@@ -1393,7 +1619,8 @@ class _OrderCardState extends State<_OrderCard> {
                               fontSize: 11,
                               fontWeight: FontWeight.w500)),
                     ],
-                    if (needsManualAssignment) ...[
+                    // Only show "needs manual assignment" badge for delivery orders
+                    if (needsManualAssignment && orderTypeLower == 'delivery') ...[
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -1457,14 +1684,14 @@ class _OrderCardState extends State<_OrderCard> {
                       height: 6,
                       decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: _getStatusColor(status))),
+                          color: _getStatusColorForOrderType(status, orderTypeLower))),
                   const SizedBox(width: 4),
                   Flexible(
-                    child: Text(_getStatusDisplayText(status),
+                    child: Text(_getStatusDisplayText(status, orderType: orderTypeLower),
                         style: TextStyle(
-                            color: _getStatusColor(status),
+                            color: _getStatusColorForOrderType(status, orderTypeLower),
                             fontWeight: FontWeight.bold,
-                            fontSize: _getStatusFontSize(status),
+                            fontSize: _getStatusFontSize(status, orderType: orderTypeLower),
                             overflow: TextOverflow.ellipsis),
                         maxLines: 1),
                   ),
@@ -1562,6 +1789,8 @@ class _OrderCardState extends State<_OrderCard> {
             _buildActionButtons(context, status),
           ],
         ),
+      ),
+        ],
       ),
     );
   }
@@ -1777,12 +2006,16 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
 
   // ✅ UPDATED: Now uses robust RiderAssignmentService
   Future<void> _assignRider(String orderId) async {
+    // Capture references BEFORE async operations
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    
     final userScope = context.read<UserScopeService>();
     final currentBranchId = userScope.branchId;
 
     final riderId = await showDialog<String>(
       context: context,
-      builder: (context) =>
+      builder: (dialogContext) =>
           _RiderSelectionDialog(currentBranchId: currentBranchId),
     );
 
@@ -1792,16 +2025,24 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       });
 
       // ✅ FIX: Uses Transaction-based assignment to prevent Double-Assign bug
-      final success = await RiderAssignmentService.manualAssignRider(
+      final result = await RiderAssignmentService.manualAssignRider(
         orderId: orderId,
         riderId: riderId,
-        context: context,
       );
 
       if (mounted) {
         setState(() => _isLoading = false);
-        if (success) {
-          Navigator.of(context).pop(); // Close popup only on success
+        
+        // Use pre-captured ScaffoldMessengerState (safe across async gaps)
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(result.message),
+            backgroundColor: result.backgroundColor,
+          ),
+        );
+        
+        if (result.isSuccess) {
+          navigator.pop(); // Close popup only on success
         }
       }
     }
@@ -1821,10 +2062,13 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
 
     final List<Widget> buttons = [];
     final data = widget.order.data() as Map<String, dynamic>? ?? {};
-    final String orderTypeLower = orderType.toLowerCase();
+
+    // Use normalized order type for consistent comparison
+    final bool isDelivery = AppConstants.isDeliveryOrder(orderType);
+    final bool isDineIn = AppConstants.isDineInOrder(orderType);
 
     final bool isAutoAssigning =
-        data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
+        data.containsKey('autoAssignStarted') && isDelivery;
     final bool needsManualAssignment =
         status == AppConstants.statusNeedsAssignment;
 
@@ -1876,29 +2120,28 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       );
     }
 
-    if (status == AppConstants.statusPreparing) {
-      // Show completion buttons for non-delivery orders
-      if (orderTypeLower != 'delivery') {
-        buttons.add(
-          ElevatedButton.icon(
-            icon: Icon(orderTypeLower == 'dine_in' ? Icons.restaurant_menu : Icons.local_mall, size: 16),
-            label: Text(orderTypeLower == 'dine_in' ? 'Served to Table' : 'Handed to Customer'),
-            onPressed: () => updateOrderStatus(
-                orderId, AppConstants.statusDelivered),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green.shade700,
-              foregroundColor: Colors.white,
-              padding: btnPadding,
-              minimumSize: btnMinSize,
-              shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
+    // Show completion buttons for non-delivery orders when preparing OR needs_rider_assignment
+    if (!isDelivery && (status == AppConstants.statusPreparing || needsManualAssignment)) {
+      buttons.add(
+        ElevatedButton.icon(
+          icon: Icon(isDineIn ? Icons.restaurant_menu : Icons.local_mall, size: 16),
+          label: Text(AppConstants.getCompletionButtonText(orderType)),
+          onPressed: () => updateOrderStatus(
+              orderId, AppConstants.statusDelivered),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green.shade700,
+            foregroundColor: Colors.white,
+            padding: btnPadding,
+            minimumSize: btnMinSize,
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
-        );
-      }
+        ),
+      );
     }
 
-    if (orderTypeLower == 'delivery') {
+    // Rider assignment logic (ONLY for delivery orders)
+    if (isDelivery) {
       if ((status == AppConstants.statusPreparing || needsManualAssignment) &&
           !isAutoAssigning) {
         buttons.add(
@@ -1910,6 +2153,26 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
             style: ElevatedButton.styleFrom(
               backgroundColor:
               needsManualAssignment ? Colors.orange : Colors.blue,
+              foregroundColor: Colors.white,
+              padding: btnPadding,
+              minimumSize: btnMinSize,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        );
+      }
+
+      // ✅ NEW: Admin Override - Allow marking as Picked Up if Rider fails to do so
+      if (status == AppConstants.statusRiderAssigned) {
+        buttons.add(
+          ElevatedButton.icon(
+            icon: const Icon(Icons.local_shipping, size: 16),
+            label: const Text('Mark as Picked Up'),
+            onPressed: () => updateOrderStatus(
+                orderId, AppConstants.statusPickedUp),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.indigo,
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
@@ -2147,8 +2410,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
     final status = data['status']?.toString() ?? 'pending';
     final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
-    final orderNumber = data['dailyOrderNumber']?.toString() ??
-        widget.order.id.substring(0, 6).toUpperCase();
+    final orderNumber = OrderNumberHelper.getDisplayNumber(data, orderId: widget.order.id);
     final double subtotal = (data['subtotal'] as num? ?? 0.0).toDouble();
     final double deliveryFee = (data['deliveryFee'] as num? ?? 0.0).toDouble();
     final double totalAmount = (data['totalAmount'] as num? ?? 0.0).toDouble();
@@ -2309,29 +2571,10 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     );
   }
 
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-        return Colors.orange;
-      case 'preparing':
-        return Colors.teal;
-      case 'rider_assigned':
-        return Colors.purple;
-      case 'pickedup':
-        return Colors.deepPurple;
-      case 'delivered':
-        return Colors.green;
-      case 'cancelled':
-        return Colors.red;
-      case 'refunded':
-        return Colors.pink;
-      case 'needs_rider_assignment':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
+  // ✅ IMPROVED: Use shared StatusUtils
+  Color _getStatusColor(String status) => StatusUtils.getColor(status);
 }
+
 
 class CancellationReasonDialog extends StatefulWidget {
   const CancellationReasonDialog({super.key});
@@ -2728,6 +2971,175 @@ class _RiderSelectionDialog extends StatelessWidget {
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ReturnOptionsDialog extends StatefulWidget {
+  const _ReturnOptionsDialog({super.key});
+
+  @override
+  State<_ReturnOptionsDialog> createState() => _ReturnOptionsDialogState();
+}
+
+class _ReturnOptionsDialogState extends State<_ReturnOptionsDialog> {
+  final TextEditingController _reasonController = TextEditingController();
+  final List<String> _commonReasons = [
+    'Quality Issue',
+    'Wrong Item(s)',
+    'Missing Item(s)',
+    'Customer Complaint',
+    'Packaging Issue',
+    'Other'
+  ];
+  String? _selectedReason;
+  String _returnType = 'refund'; // 'refund' or 'exchange'
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.assignment_return, color: Colors.pink),
+          SizedBox(width: 8),
+          Text('Return Order'),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Return Type Selector
+            Row(
+              children: [
+                Expanded(
+                  child: RadioListTile<String>(
+                    title: const Text('Refund', style: TextStyle(fontSize: 14)),
+                    value: 'refund',
+                    groupValue: _returnType,
+                    contentPadding: EdgeInsets.zero,
+                    activeColor: Colors.pink,
+                    onChanged: (value) => setState(() => _returnType = value!),
+                  ),
+                ),
+                Expanded(
+                  child: RadioListTile<String>(
+                    title: const Text('Exchange', style: TextStyle(fontSize: 14)),
+                    value: 'exchange',
+                    groupValue: _returnType,
+                    contentPadding: EdgeInsets.zero,
+                    activeColor: Colors.teal,
+                    onChanged: (value) => setState(() => _returnType = value!),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(),
+            const SizedBox(height: 8),
+            
+            const Text(
+              'Select a reason:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _commonReasons.map((reason) {
+                final isSelected = _selectedReason == reason;
+                return ChoiceChip(
+                  label: Text(reason),
+                  selected: isSelected,
+                  selectedColor: _returnType == 'exchange' 
+                      ? Colors.teal.shade100 
+                      : Colors.pink.shade100,
+                  labelStyle: TextStyle(
+                    color: isSelected 
+                        ? (_returnType == 'exchange' ? Colors.teal.shade900 : Colors.pink.shade900) 
+                        : Colors.black87,
+                  ),
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        _selectedReason = reason;
+                        if (reason != 'Other') {
+                           _reasonController.text = reason;
+                        } else {
+                          _reasonController.clear();
+                        }
+                      } else {
+                        _selectedReason = null;
+                        _reasonController.clear();
+                      }
+                    });
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _reasonController,
+              decoration: const InputDecoration(
+                labelText: 'Details (Optional)',
+                border: OutlineInputBorder(),
+                hintText: 'Add more specific details...',
+              ),
+              maxLines: 2,
+            ),
+            if (_returnType == 'exchange') ...[
+               const SizedBox(height: 12),
+               Container(
+                 padding: const EdgeInsets.all(8),
+                 decoration: BoxDecoration(
+                   color: Colors.teal.shade50,
+                   borderRadius: BorderRadius.circular(8),
+                   border: Border.all(color: Colors.teal.shade200),
+                 ),
+                 child: const Row(
+                   children: [
+                     Icon(Icons.info_outline, color: Colors.teal, size: 16),
+                     SizedBox(width: 8),
+                     Expanded(
+                       child: Text(
+                         'Exchange will reset order status to "Preparing". Revenue will NOT be deducted.',
+                         style: TextStyle(fontSize: 12, color: Colors.teal),
+                       ),
+                     ),
+                   ],
+                 ),
+               ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _returnType == 'exchange' ? Colors.teal : Colors.pink,
+            foregroundColor: Colors.white,
+          ),
+          onPressed: _selectedReason == null
+              ? null
+              : () {
+                  Navigator.pop(context, {
+                    'type': _returnType,
+                    'reason': _reasonController.text
+                  });
+                },
+          child: Text(_returnType == 'exchange' ? 'Confirm Exchange' : 'Confirm Refund'),
         ),
       ],
     );

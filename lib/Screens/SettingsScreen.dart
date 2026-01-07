@@ -1495,16 +1495,33 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
         return;
       }
 
+      // ✅ IMPROVED: Clean staff document structure
+      // FCM tokens are stored in subcollection 'tokens', not at root level
       await docRef.set({
-        ...staffData,
+        // Core user info
+        'name': staffData['name'],
+        'email': email,
+        'phone': staffData['phone'] ?? '', // ✅ Include phone
+        'role': staffData['role'],
         'isActive': true,
+        
+        // Branch assignments
+        'branchIds': staffData['branchIds'] ?? [],
+        
+        // Permissions
+        'permissions': staffData['permissions'] ?? {},
+        
+        // Metadata
         'createdAt': FieldValue.serverTimestamp(),
-        'fcmToken': null,
-        'fcmTokenUpdated': null,
+        'createdBy': context.read<UserScopeService>().userEmail,
+        'lastUpdated': FieldValue.serverTimestamp(),
+        
+        // NOTE: FCM tokens are now stored in subcollection 'staff/{email}/tokens'
+        // No need to store fcmToken or fcmTokenUpdated at root level
       });
 
       if (mounted) {
-        _showSnackBar('✅ Staff member added successfully');
+        _showSnackBar('✅ Staff member "$email" added successfully');
       }
     } catch (e) {
       if (mounted) {
@@ -1515,14 +1532,22 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
 
   Future<void> _updateStaffMember(String staffId, Map<String, dynamic> staffData) async {
     try {
-
+      final userScope = context.read<UserScopeService>();
+      
+      // ✅ IMPROVED: Explicitly update only allowed fields, add audit metadata
       await _db.collection('staff').doc(staffId).update({
-        ...staffData,
+        'name': staffData['name'],
+        'phone': staffData['phone'] ?? '', // ✅ Include phone
+        'role': staffData['role'],
+        'isActive': staffData['isActive'],
+        'branchIds': staffData['branchIds'] ?? [],
+        'permissions': staffData['permissions'] ?? {},
         'lastUpdated': FieldValue.serverTimestamp(),
+        'lastUpdatedBy': userScope.userEmail,
       });
 
       if (mounted) {
-        _showSnackBar('✅ Staff member updated successfully');
+        _showSnackBar('✅ Staff member "$staffId" updated successfully');
       }
       // Note: No need to manually reload scope - the real-time Firestore listener
       // in UserScopeService automatically updates when the staff document changes
@@ -1853,10 +1878,14 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
+  final _phoneController = TextEditingController(); // ✅ NEW
 
   String _selectedRole = 'branch_admin';
   bool _isActive = true;
   List<String> _selectedBranches = [];
+  
+  // Email validation regex
+  static final _emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
 
   final Map<String, bool> _permissions = {
     'canViewDashboard': true,
@@ -1874,6 +1903,7 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
     if (widget.isEditing && widget.currentData != null) {
       _nameController.text = widget.currentData!['name'] ?? '';
       _emailController.text = widget.currentData!['email'] ?? '';
+      _phoneController.text = widget.currentData!['phone'] ?? ''; // ✅ NEW
 
       String rawRole = widget.currentData!['role'] ?? 'branch_admin';
       if (rawRole == 'superadmin') rawRole = 'super_admin';
@@ -1947,12 +1977,19 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                       TextFormField(
                         controller: _emailController,
                         enabled: !widget.isEditing,
+                        keyboardType: TextInputType.emailAddress,
+                        textCapitalization: TextCapitalization.none,
+                        autocorrect: false,
                         decoration: _inputDecoration('Email Address', Icons.email_outlined).copyWith(
                           filled: widget.isEditing,
+                          hintText: 'user@example.com',
                         ),
                         validator: (v) {
-                          if (v?.trim().isEmpty ?? true) return 'Required';
-                          if (!v!.contains('@')) return 'Invalid email';
+                          if (v?.trim().isEmpty ?? true) return 'Email is required';
+                          final email = v!.trim().toLowerCase();
+                          if (!_emailRegex.hasMatch(email)) {
+                            return 'Please enter a valid email address';
+                          }
                           return null;
                         },
                       ),
@@ -1964,6 +2001,18 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                           ),
                         ),
+                      const SizedBox(height: 16),
+                      
+                      // ✅ NEW: Phone number field
+                      TextFormField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: _inputDecoration('Phone Number (Optional)', Icons.phone_outlined).copyWith(
+                          hintText: '+974 XXXX XXXX',
+                        ),
+                        // Phone is optional, no validator needed
+                      ),
+                      
                       const SizedBox(height: 24),
                       const Text('Role & Access', style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
@@ -2056,6 +2105,7 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
 
   void _validateAndSave() {
     if (_formKey.currentState!.validate()) {
+      // Validation: Branch Admins must have at least one branch
       if (_selectedRole == 'branch_admin' && _selectedBranches.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -2065,10 +2115,22 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
         );
         return;
       }
+      
+      // Validation: Super Admins should also have branches for scope
+      if (_selectedRole == 'super_admin' && _selectedBranches.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Super Admins should be assigned to at least one branch.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
 
       final staffData = {
         'name': _nameController.text.trim(),
         'email': _emailController.text.trim().toLowerCase(),
+        'phone': _phoneController.text.trim(), // ✅ NEW: Include phone
         'role': _selectedRole,
         'isActive': _isActive,
         'branchIds': _selectedBranches,

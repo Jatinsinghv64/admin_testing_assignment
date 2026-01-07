@@ -57,6 +57,115 @@ class OrderService {
     return baseQuery.orderBy('timestamp', descending: true).snapshots();
   }
 
+  // STANDARD QUERY HELPERS (Refactored from DashboardScreen)
+
+  // 1. Get Today's Orders
+  Stream<QuerySnapshot<Map<String, dynamic>>> getTodayOrdersStream({
+    required UserScopeService userScope,
+    List<String>? filterBranchIds,
+  }) {
+    final startOfShift = TimeUtils.getBusinessStartTimestamp();
+    
+    Query<Map<String, dynamic>> query = _db.collection(AppConstants.collectionOrders);
+    
+    // Apply Branch Filter
+    query = _applyBranchFilter(query, userScope, filterBranchIds);
+
+    // Apply Time Filter
+    return query
+        .where('timestamp', isGreaterThanOrEqualTo: startOfShift)
+        .orderBy('timestamp', descending: true)
+        .snapshots();
+  }
+
+  // 2. Get Active Drivers
+  Stream<QuerySnapshot<Map<String, dynamic>>> getActiveDriversStream({
+    required UserScopeService userScope,
+    List<String>? filterBranchIds,
+  }) {
+    Query<Map<String, dynamic>> query = _db
+        .collection(AppConstants.collectionDrivers)
+        .where('isAvailable', isEqualTo: true);
+
+    // Apply Branch Filter
+    query = _applyBranchFilter(query, userScope, filterBranchIds);
+    
+    return query.snapshots();
+  }
+
+  // 3. Get Available Menu Items
+  Stream<QuerySnapshot<Map<String, dynamic>>> getAvailableMenuItemsStream({
+    required UserScopeService userScope,
+    List<String>? filterBranchIds,
+  }) {
+    Query<Map<String, dynamic>> query = _db.collection('menu_items'); // Hardcoded collection name from Dashboard
+
+    // Apply Branch Filter
+    query = _applyBranchFilter(query, userScope, filterBranchIds);
+
+    return query.where('isAvailable', isEqualTo: true).snapshots();
+  }
+
+  // Helper: Centralized Revenue Calculation Logic
+  static double calculateRevenue(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    double totalRevenue = 0;
+    final billableStatuses = {
+      AppConstants.statusDelivered,
+      'completed',
+      'paid',
+      // AppConstants.statusRefunded // Refunds should NOT count (deducts from revenue)
+    };
+
+    for (var doc in docs) {
+      final data = doc.data();
+      final status = (data['status'] ?? '').toString().toLowerCase();
+      final isExchange = data['isExchange'] == true;
+
+      // 1. Check if status is billable (Delivered, Completed, Paid)
+      // 2. OR if it's an Exchange order that is currently being prepared (Preparing)
+      //    (Normal preparing orders are not paid yet/revenue realized, but Exchanges were already paid)
+      bool shouldCount = billableStatuses.contains(status);
+      
+      if (!shouldCount && isExchange && status == AppConstants.statusPreparing) {
+        shouldCount = true;
+      }
+
+      if (shouldCount) {
+        totalRevenue += (data['totalAmount'] as num? ?? 0).toDouble();
+      }
+    }
+    return totalRevenue;
+  }
+
+  // Private Helper: Apply Branch Filter
+  Query<Map<String, dynamic>> _applyBranchFilter(
+    Query<Map<String, dynamic>> query,
+    UserScopeService userScope,
+    List<String>? filterBranchIds,
+  ) {
+    // Priority 1: Specific Filter (e.g. from Dropdown)
+    if (filterBranchIds != null && filterBranchIds.isNotEmpty) {
+      if (filterBranchIds.length == 1) {
+        return query.where('branchIds', arrayContains: filterBranchIds.first);
+      } else {
+        return query.where('branchIds', arrayContainsAny: filterBranchIds);
+      }
+    }
+    
+    // Priority 2: User's Assigned Branches (Default view)
+    if (userScope.branchIds.isNotEmpty) {
+      if (userScope.branchIds.length == 1) {
+        return query.where('branchIds', arrayContains: userScope.branchIds.first);
+      } else {
+        return query.where('branchIds', arrayContainsAny: userScope.branchIds);
+      }
+    }
+
+    // Priority 3: No Access (Safety Fallback)
+    // Return a query that is guaranteed to be empty
+    return query.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
+  }
+
   Future<void> updateOrderStatus(
       BuildContext context,
       String orderId,

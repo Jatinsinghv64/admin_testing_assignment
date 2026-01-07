@@ -656,9 +656,11 @@ class BadgeCountProvider with ChangeNotifier {
     _currentBranchId = branchId;
     _subscription?.cancel();
 
+    // ✅ FIX: Added Order_type filter - only delivery orders need rider assignment
     Query query = FirebaseFirestore.instance
         .collection('Orders')
-        .where('status', isEqualTo: 'needs_rider_assignment');
+        .where('status', isEqualTo: 'needs_rider_assignment')
+        .where('Order_type', isEqualTo: 'delivery');
 
     if (branchId != null && branchId.isNotEmpty) {
       query = query.where('branchIds', arrayContains: branchId);

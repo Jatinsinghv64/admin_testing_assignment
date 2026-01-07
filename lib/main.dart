@@ -257,6 +257,15 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
       notificationService.init(scopeService, navigatorKey);
       await FcmService().init(scopeService.userEmail);
 
+      // ✅ CRITICAL FIX: Process any pending notification from cold start
+      // This handles the case where user tapped notification while app was terminated
+      if (FcmService.hasPendingNotification) {
+        debugPrint("📬 Processing pending cold-start notification...");
+        // Small delay to ensure UI is fully ready
+        await Future.delayed(const Duration(milliseconds: 500));
+        FcmService.processPendingNotification(notificationService, scopeService);
+      }
+
       await _requestInitialPermissions();
 
       debugPrint('🎯 SYSTEM READY: FCM-Only Mode Active');

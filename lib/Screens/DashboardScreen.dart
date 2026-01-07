@@ -13,6 +13,7 @@ import '../Widgets/RiderAssignment.dart'; // ✅ Added for transaction-based ass
 import '../Widgets/PrintingService.dart';
 import '../Widgets/TimeUtils.dart';
 import '../Widgets/BranchFilterService.dart'; // ✅ Branch filter
+import '../Widgets/OrderUIComponents.dart'; // ✅ Shared UI components
 
 class DashboardScreen extends StatefulWidget {
   final Function(int) onTabChange;
@@ -243,10 +244,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               // 1. Today's Orders
               Expanded(
                 child: _buildStatCardWrapper(
-                  stream: FirebaseFirestore.instance
-                      .collection('Orders')
-                      .where('timestamp', isGreaterThanOrEqualTo: startOfShift)
-                      .snapshots(),
+                  // ✅ Use filtered query from OrderService
+                  stream: _getTodayOrdersStream(context),
                   builder: (context, snapshot) {
                     final count =
                     snapshot.hasData ? snapshot.data!.docs.length : 0;
@@ -264,7 +263,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               // 2. Active Riders
               Expanded(
                 child: _buildStatCardWrapper(
-                  stream: _getFilteredDriversStream(context),
+                  stream: _getActiveDriversStream(context),
                   builder: (context, snapshot) {
                     final count =
                     snapshot.hasData ? snapshot.data!.docs.length : 0;
@@ -286,28 +285,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               // 3. Revenue (EXCLUDING REFUNDED)
               Expanded(
                 child: _buildStatCardWrapper(
-                  stream: _getBaseOrderQuery(context)
-                      .where('timestamp', isGreaterThanOrEqualTo: startOfShift)
-                      .snapshots(),
+                  stream: _getTodayOrdersStream(context),
                   builder: (context, snapshot) {
                     double totalRevenue = 0;
                     if (snapshot.hasData) {
-                      // ✅ ROBUST REVENUE LOGIC
-                      final billableStatuses = {
-                        AppConstants.statusDelivered,
-                        'completed',
-                        'paid'
-                      };
-
-                      for (var doc in snapshot.data!.docs) {
-                        final data = doc.data() as Map<String, dynamic>;
-                        final status = (data['status'] ?? '').toString().toLowerCase();
-
-                        // Strict check: Must be in billable list AND NOT refunded
-                        if (billableStatuses.contains(status) && status != 'refunded') {
-                          totalRevenue += (data['totalAmount'] as num? ?? 0).toDouble();
-                        }
-                      }
+                      // ✅ ROBUST REVENUE LOGIC via OrderService
+                      totalRevenue = OrderService.calculateRevenue(snapshot.data!.docs);
                     }
                     return _EnhancedStatCard(
                       title: 'Revenue',
@@ -323,10 +306,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               // 4. Menu Items
               Expanded(
                 child: _buildStatCardWrapper(
-                  stream: FirebaseFirestore.instance
-                      .collection('menu_items')
-                      .where('isAvailable', isEqualTo: true)
-                      .snapshots(),
+                  // ✅ Use filtered menu query
+                  stream: _getAvailableMenuItemsStream(context),
                   builder: (context, snapshot) {
                     final count =
                     snapshot.hasData ? snapshot.data!.docs.length : 0;
@@ -442,11 +423,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           SizedBox(
             height: 320,
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _getBaseOrderQuery(context)
-                  .where('timestamp', isGreaterThanOrEqualTo: startOfShift)
-                  .orderBy('timestamp', descending: true)
-                  .limit(5)
-                  .snapshots(),
+              stream: _getTodayOrdersStream(context),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
@@ -465,15 +442,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return _buildEmptyState();
                 }
-                return ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: snapshot.data!.docs.length,
-                  separatorBuilder: (context, index) =>
-                  const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    var order = snapshot.data!.docs[index];
-                    return _EnhancedOrderListItem(order: order);
-                  },
+                  // Only take up to 5 orders for the recent list
+                  final recentOrders = snapshot.data!.docs.take(5).toList();
+                  
+                  return ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: recentOrders.length,
+                    separatorBuilder: (context, index) =>
+                    const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      var order = recentOrders[index];
+                      return _EnhancedOrderListItem(order: order);
+                    },
                 );
               },
             ),
@@ -541,66 +521,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
-  // --- Helper Methods for Branch Filtering ---
-  
-  Query<Map<String, dynamic>> _getBaseOrderQuery(BuildContext context) {
+  // --- Helper Methods using OrderService ---
+
+  final OrderService _orderService = OrderService();
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> _getTodayOrdersStream(BuildContext context) {
     final userScope = Provider.of<UserScopeService>(context, listen: false);
     final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
-    Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('Orders');
-
+    
     // Get branch IDs to filter by (respects branch selector)
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
-    // Always filter by branches - SuperAdmin sees only their assigned branches
-    if (filterBranchIds.isNotEmpty) {
-      // Filter by selected branch(es)
-      if (filterBranchIds.length == 1) {
-        query = query.where('branchIds', arrayContains: filterBranchIds.first);
-      } else {
-        query = query.where('branchIds', arrayContainsAny: filterBranchIds);
-      }
-    } else if (userScope.branchIds.isNotEmpty) {
-      // Fall back to user's assigned branches
-      if (userScope.branchIds.length == 1) {
-        query = query.where('branchIds', arrayContains: userScope.branchIds.first);
-      } else {
-        query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
-      }
-    } else {
-      // User with no branches assigned - force empty result
-      query = query.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
-    }
-    return query;
+    return _orderService.getTodayOrdersStream(
+      userScope: userScope,
+      filterBranchIds: filterBranchIds,
+    );
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _getFilteredDriversStream(BuildContext context) {
+  Stream<QuerySnapshot<Map<String, dynamic>>> _getActiveDriversStream(BuildContext context) {
     final userScope = Provider.of<UserScopeService>(context, listen: false);
     final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
-    Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('Drivers')
-        .where('isAvailable', isEqualTo: true);
-
-    // Get branch IDs to filter by (respects branch selector)
+    
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
-    // Always filter by branches - SuperAdmin sees only their assigned branches
-    if (filterBranchIds.isNotEmpty) {
-      if (filterBranchIds.length == 1) {
-        query = query.where('branchIds', arrayContains: filterBranchIds.first);
-      } else {
-        query = query.where('branchIds', arrayContainsAny: filterBranchIds);
-      }
-    } else if (userScope.branchIds.isNotEmpty) {
-      // Fall back to user's assigned branches
-      if (userScope.branchIds.length == 1) {
-        query = query.where('branchIds', arrayContains: userScope.branchIds.first);
-      } else {
-        query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
-      }
-    } else {
-       // User with no branches - force empty result
-       return const Stream<QuerySnapshot<Map<String, dynamic>>>.empty();
-    }
-    return query.snapshots();
+    return _orderService.getActiveDriversStream(
+      userScope: userScope,
+      filterBranchIds: filterBranchIds,
+    );
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> _getAvailableMenuItemsStream(BuildContext context) {
+    final userScope = Provider.of<UserScopeService>(context, listen: false);
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
+    
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
+    return _orderService.getAvailableMenuItemsStream(
+      userScope: userScope,
+      filterBranchIds: filterBranchIds,
+    );
   }
 }
 
@@ -773,7 +732,7 @@ class _EnhancedOrderListItem extends StatelessWidget {
   const _EnhancedOrderListItem({required this.order});
 
   String _formatOrderType(String type) {
-    switch (type) {
+    switch (type.toLowerCase()) {
       case 'delivery':
         return 'Delivery';
       case 'takeaway':
@@ -783,7 +742,7 @@ class _EnhancedOrderListItem extends StatelessWidget {
       case 'dine_in':
         return 'Dine-in';
       default:
-        return 'Unknown Type';
+        return 'Order';
     }
   }
 
@@ -797,19 +756,20 @@ class _EnhancedOrderListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final data = order.data() as Map<String, dynamic>? ?? {};
-    final String displayOrderNumber = data['dailyOrderNumber']?.toString() ??
-        order.id.substring(0, 6).toUpperCase();
-    final String rawOrderType = data['Order_type'] ?? 'delivery';
+    // ✅ IMPROVED: Use OrderDataHelper for safe data extraction
+    final orderData = OrderDataHelper.fromSnapshot(order);
+    final String displayOrderNumber = OrderNumberHelper.getDisplayNumber(orderData.data, orderId: order.id);
+    final String rawOrderType = orderData.getString('Order_type', 'delivery');
     final String formattedOrderType = _formatOrderType(rawOrderType);
-    final String status = data['status'] ?? 'Unknown';
-    final double totalAmount = (data['totalAmount'] as num? ?? 0).toDouble();
-    final Timestamp? placedTimestamp = data['timestamp'];
-    final String placedDate = placedTimestamp != null
-        ? DateFormat('MMM d, hh:mm a').format(placedTimestamp.toDate())
+    final String status = orderData.getString('status', 'pending');
+    final double totalAmount = orderData.getDouble('totalAmount');
+    final DateTime? placedTime = orderData.getTimestamp('timestamp');
+    final String placedDate = placedTime != null
+        ? DateFormat('MMM d, hh:mm a').format(placedTime)
         : 'N/A';
 
-    final Color statusColor = _getStatusColor(status);
+    // ✅ IMPROVED: Use shared StatusUtils
+    final Color statusColor = StatusUtils.getColorForOrderType(status, rawOrderType);
 
     return Container(
       decoration: BoxDecoration(
@@ -891,8 +851,7 @@ class _EnhancedOrderListItem extends StatelessWidget {
                           Flexible(
                             child: Text(
                               ' • $placedDate',
-                              style:
-                              TextStyle(fontSize: 12, color: Colors.grey),
+                              style: const TextStyle(fontSize: 12, color: Colors.grey),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -902,27 +861,11 @@ class _EnhancedOrderListItem extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Container(
-                  constraints: const BoxConstraints(
-                    maxWidth: 90,
-                  ),
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _getStatusDisplayText(status),
-                    style: TextStyle(
-                      color: statusColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: _getStatusFontSize(status),
-                    ),
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                  ),
+                // ✅ IMPROVED: Use shared StatusBadge component
+                StatusBadge(
+                  status: status,
+                  orderType: rawOrderType,
+                  maxWidth: 90,
                 ),
               ],
             ),
@@ -931,51 +874,8 @@ class _EnhancedOrderListItem extends StatelessWidget {
       ),
     );
   }
-
-  String _getStatusDisplayText(String status) {
-    switch (status.toLowerCase()) {
-      case 'needs_rider_assignment':
-        return 'NEEDS ASSIGN';
-      case 'rider_assigned':
-        return 'RIDER ASSIGNED';
-      case 'pickedup':
-        return 'PICKED UP';
-      default:
-        return status.toUpperCase();
-    }
-  }
-
-  double _getStatusFontSize(String status) {
-    final displayText = _getStatusDisplayText(status);
-    if (displayText.length > 12) return 9;
-    if (displayText.length > 8) return 10;
-    return 11;
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-        return Colors.orange;
-      case 'preparing':
-        return Colors.teal;
-      case 'rider_assigned':
-        return Colors.purple;
-      case 'pickedup':
-        return Colors.deepPurple;
-      case 'delivered':
-        return Colors.green;
-      case 'cancelled':
-        return Colors.red;
-      case 'refunded':
-        return Colors.pink;
-      case 'needs_rider_assignment':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
-
 }
+
 
 class _OrderPopupDialog extends StatefulWidget {
   final DocumentSnapshot order;
@@ -988,10 +888,22 @@ class _OrderPopupDialog extends StatefulWidget {
 
 class _OrderPopupDialogState extends State<_OrderPopupDialog> {
   bool _isLoading = false;
+  bool _isButtonPressed = false; // ✅ Double-tap prevention
 
-  // ✅ ROBUST: Uses OrderService for atomic updates
+  // ✅ ROBUST: Uses OrderService for atomic updates with network check
   Future<void> updateOrderStatus(String orderId, String newStatus,
       {String? cancellationReason}) async {
+    // ✅ Double-tap prevention
+    if (_isButtonPressed) return;
+    _isButtonPressed = true;
+
+    // ✅ Network connectivity check
+    if (!await NetworkUtils.hasConnectivity()) {
+      NetworkUtils.showNetworkError(context);
+      _isButtonPressed = false;
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
@@ -1010,7 +922,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Order status updated to "$newStatus"!'),
+            content: Text('Order status updated to "${StatusUtils.getDisplayText(newStatus)}"'),
             backgroundColor: Colors.green,
           ),
         );
@@ -1018,14 +930,16 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       }
     } catch (e) {
       if (mounted) {
+        // ✅ User-friendly error message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to update: $e'),
+            content: Text(NetworkUtils.getUserFriendlyError(e)),
             backgroundColor: Colors.red,
           ),
         );
       }
     } finally {
+      _isButtonPressed = false;
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -1034,14 +948,19 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
   }
 
+
   // ✅ ROBUST: Uses RiderAssignmentService for transaction-based assignment
   Future<void> _assignRider(String orderId) async {
+    // Capture references BEFORE async operations
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    
     final userScope = context.read<UserScopeService>();
     final currentBranchId = userScope.branchId;
 
     final rider = await showDialog<String>(
       context: context,
-      builder: (context) =>
+      builder: (dialogContext) =>
           _RiderSelectionDialog(currentBranchId: currentBranchId),
     );
 
@@ -1050,15 +969,23 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
         _isLoading = true;
       });
 
-      final success = await RiderAssignmentService.manualAssignRider(
+      final result = await RiderAssignmentService.manualAssignRider(
           orderId: orderId,
           riderId: rider,
-          context: context
       );
 
       if (mounted) {
         setState(() => _isLoading = false);
-        if (success) Navigator.of(context).pop();
+        
+        // Use pre-captured ScaffoldMessengerState (safe across async gaps)
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(result.message),
+            backgroundColor: result.backgroundColor,
+          ),
+        );
+        
+        if (result.isSuccess) navigator.pop();
       }
     }
   }
@@ -1129,26 +1056,24 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       );
     }
 
-    if (status == AppConstants.statusPreparing) {
-      // For non-delivery orders, show completion button
-      // For delivery orders, show assign rider button (handled below)
-      if (orderTypeLower != 'delivery') {
-        buttons.add(
-          ElevatedButton.icon(
-            icon: const Icon(Icons.task_alt, size: 16),
-            label: Text(orderTypeLower == 'dine_in' ? 'Served to Table' : 'Handed to Customer'),
-            onPressed: () => updateOrderStatus(orderId, AppConstants.statusDelivered),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green.shade700,
-              foregroundColor: Colors.white,
-              padding: btnPadding,
-              minimumSize: btnMinSize,
-              shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
+    // For non-delivery orders, show completion button when preparing OR needs_rider_assignment
+    // (needs_rider_assignment shouldn't apply to non-delivery orders but may exist)
+    if (orderTypeLower != 'delivery' && (status == AppConstants.statusPreparing || needsManualAssignment)) {
+      buttons.add(
+        ElevatedButton.icon(
+          icon: const Icon(Icons.task_alt, size: 16),
+          label: Text(orderTypeLower == 'dine_in' ? 'Served to Table' : 'Handed to Customer'),
+          onPressed: () => updateOrderStatus(orderId, AppConstants.statusDelivered),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green.shade700,
+            foregroundColor: Colors.white,
+            padding: btnPadding,
+            minimumSize: btnMinSize,
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
-        );
-      }
+        ),
+      );
     }
 
     // DELIVERY
@@ -1389,8 +1314,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
     final status = data['status']?.toString() ?? 'pending';
     final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
-    final orderNumber = data['dailyOrderNumber']?.toString() ??
-        widget.order.id.substring(0, 6).toUpperCase();
+    final orderNumber = OrderNumberHelper.getDisplayNumber(data, orderId: widget.order.id);
     final double subtotal = (data['subtotal'] as num? ?? 0.0).toDouble();
     final double deliveryFee = (data['deliveryFee'] as num? ?? 0.0).toDouble();
     final double totalAmount = (data['totalAmount'] as num? ?? 0.0).toDouble();
@@ -1450,9 +1374,9 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
                                 shape: BoxShape.circle,
                                 color: _getStatusColor(status))),
                         const SizedBox(width: 6),
-                        Text(status.toUpperCase(),
+                        Text(_getStatusDisplayText(status, orderType),
                             style: TextStyle(
-                                color: _getStatusColor(status),
+                                color: _getStatusColorForOrderType(status, orderType),
                                 fontWeight: FontWeight.bold,
                                 fontSize: 12)),
                       ],
@@ -1548,29 +1472,16 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     );
   }
 
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-        return Colors.orange;
-      case 'preparing':
-        return Colors.teal;
-      case 'rider_assigned':
-        return Colors.purple;
-      case 'pickedup':
-        return Colors.deepPurple;
-      case 'delivered':
-        return Colors.green;
-      case 'cancelled':
-        return Colors.red;
-      case 'refunded':
-        return Colors.pink;
-      case 'needs_rider_assignment':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
+  // ✅ IMPROVED: Use shared StatusUtils (removed ~50 lines of duplicate code)
+  String _getStatusDisplayText(String status, String orderType) =>
+      StatusUtils.getDisplayText(status, orderType: orderType);
+
+  Color _getStatusColor(String status) => StatusUtils.getColor(status);
+
+  Color _getStatusColorForOrderType(String status, String orderType) =>
+      StatusUtils.getColorForOrderType(status, orderType);
 }
+
 
 class _RiderSelectionDialog extends StatelessWidget {
   final String? currentBranchId;

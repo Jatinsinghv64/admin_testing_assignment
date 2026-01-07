@@ -55,16 +55,27 @@ exports.startAssignmentWorkflowV2 = onDocumentUpdated(
         const afterData = event.data.after.data();
         const orderId = event.params.orderId;
 
+        // --- STRICT GUARD: Only Delivery Orders ---
+        // Ensure "Order_type" matches exactly what is stored in Firestore
+        // Fallback to checking both Case Styles just to be safe
+        const rawOrderType = afterData.Order_type || afterData.orderType || '';
+        const orderType = rawOrderType.toLowerCase();
+
+        if (orderType !== 'delivery') {
+            // Log this ONLY if it would have theoretically triggered (preparing + no rider)
+            // to avoid log spam for every single update
+            if (afterData.status === STATUS.PREPARING && (!afterData.riderId)) {
+                logger.log(`[${orderId}] Skipping auto-assignment for type: '${rawOrderType}' (not delivery)`);
+            }
+            return null;
+        }
+
         // Simplified: trigger only when status becomes 'preparing'
         const statusJustEntered = beforeData.status !== STATUS.PREPARING && afterData.status === STATUS.PREPARING;
         const noRider = !afterData.riderId || afterData.riderId === '';
         const notAlreadyStarted = !afterData.autoAssignStarted;
 
-        // Only auto-assign for delivery orders
-        const orderType = (afterData.Order_type || '').toLowerCase();
-        const isDeliveryOrder = orderType === 'delivery';
-
-        if (statusJustEntered && noRider && notAlreadyStarted && isDeliveryOrder) {
+        if (statusJustEntered && noRider && notAlreadyStarted) {
             logger.log(`🚀 [${orderId}] Starting auto-assignment workflow for delivery order...`);
 
             const targetBranchId = afterData.branchId || (afterData.branchIds && afterData.branchIds[0]);
@@ -631,13 +642,15 @@ function _calculateDistance(lat1, lon1, lat2, lon2) {
  */
 const VALID_TRANSITIONS = {
     'pending': ['preparing', 'cancelled'],
+    'pending_payment': ['pending', 'preparing', 'cancelled'], // Added to allow handling
     'preparing': ['rider_assigned', 'needs_rider_assignment', 'cancelled'],
-    'needs_rider_assignment': ['rider_assigned', 'cancelled'],
+    'needs_rider_assignment': ['rider_assigned', 'cancelled', 'pickedUp', 'pickedup', 'delivered'], // Added terminal states for manual override
     'rider_assigned': ['pickedUp', 'pickedup', 'cancelled'],
-    'pickedup': ['delivered', 'cancelled'],
-    'pickedUp': ['delivered', 'cancelled'],
-    'delivered': [],  // Terminal state
-    'cancelled': [],  // Terminal state
+    'pickedup': ['delivered', 'cancelled', 'preparing'], // Added 'preparing' for Exchange
+    'pickedUp': ['delivered', 'cancelled', 'refunded', 'preparing'], // Added 'preparing' for Exchange
+    'delivered': ['refunded', 'preparing'],  // Added 'preparing' for Exchange
+    'cancelled': ['refunded', 'preparing'],  // Added 'preparing' for Re-opening/Exchange
+    'refunded': [], // Terminal state
 };
 
 /**
@@ -751,6 +764,7 @@ exports.sendRiderNotification = require("firebase-functions/v2/https").onCall(
 const ORDER_RESET_HOUR = 0; // Reset at 12:00 AM (midnight) local time
 const DEFAULT_TIMEZONE = 'Asia/Qatar'; // Default timezone for Qatar-based operations
 const MAX_RETRIES = 3;
+const DEFAULT_BRANCH_PREFIX = 'ORD'; // Default prefix if branch has none configured
 
 /**
  * Calculate business date based on reset hour.
@@ -767,80 +781,181 @@ function getBusinessDate(now, resetHour = ORDER_RESET_HOUR) {
 }
 
 /**
+ * Format business date for display in order number (YYMMDD)
+ * @param {string} businessDate - Date in YYYY-MM-DD format
+ * @returns {string} Date in YYMMDD format
+ */
+function formatDateForOrderNumber(businessDate) {
+    const parts = businessDate.split('-');
+    const year = parts[0].slice(-2); // Last 2 digits of year
+    const month = parts[1];
+    const day = parts[2];
+    return `${year}${month}${day}`;
+}
+
+/**
  * Generate fallback order number when counter fails.
  * Uses timestamp to ensure uniqueness while still being readable.
- * @param {string} orderId - Order document ID
- * @returns {string} Fallback order number like "T123456"
+ * @param {string} prefix - Branch prefix
+ * @param {string} businessDate - Business date
+ * @returns {string} Fallback order number like "ZKD-260107-T456"
  */
-function generateFallbackOrderNumber(orderId) {
-    const timestamp = Date.now().toString().slice(-6);
-    return `T${timestamp}`;
+function generateFallbackOrderNumber(prefix, businessDate) {
+    const dateStr = formatDateForOrderNumber(businessDate);
+    const timestamp = Date.now().toString().slice(-3);
+    return `${prefix}-${dateStr}-T${timestamp}`;
+}
+
+/**
+ * Format the order number with proper padding
+ * @param {string} prefix - Branch prefix (e.g., "ZKD")
+ * @param {string} businessDate - Business date (YYYY-MM-DD)
+ * @param {number} sequenceNumber - Sequential number for the day
+ * @returns {string} Formatted order number (e.g., "ZKD-260107-001")
+ */
+function formatOrderNumber(prefix, businessDate, sequenceNumber) {
+    const dateStr = formatDateForOrderNumber(businessDate);
+    // Pad to 3 digits, supports up to 999 orders per branch per day
+    // If more than 999, it will show 1000, 1001, etc. (4 digits)
+    const paddedSequence = String(sequenceNumber).padStart(3, '0');
+    return `${prefix}-${dateStr}-${paddedSequence}`;
 }
 
 /**
  * FUNCTION 6: Generate Daily Order Number (Per Branch)
- * Triggered when a new order is created.
  * 
- * Features:
- * - Branch-specific counters (each branch has independent sequence)
- * - Business day logic (resets at 6 AM, not midnight)
- * - Timezone-aware (uses branch's configured timezone)
- * - Retry logic for transient failures
- * - Fallback order number if all retries fail
- * - Rich metadata for debugging
+ * Industry-Grade Features:
+ * - Formatted order numbers: {PREFIX}-{YYMMDD}-{NNN}
+ * - Branch-specific prefixes for easy identification
+ * - Business day logic (configurable reset hour)
+ * - Timezone-aware using branch configuration
+ * - Atomic counter increment using Firestore transactions
+ * - Retry logic with exponential backoff
+ * - Fallback mechanism if all retries fail
+ * - Rich metadata for debugging and analytics
+ * 
+ * Example output: "ZKD-260107-001" (Branch ZKD, Jan 7 2026, Order #1)
  */
-exports.generateOrderNumber = onDocumentCreated(
+const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+
+/**
+ * FUNCTION 6: Generate Daily Order Number (Per Branch)
+ * 
+ * Industry-Grade Features:
+ * - Formatted order numbers: {PREFIX}-{YYMMDD}-{NNN}
+ * - Branch-specific prefixes for easy identification
+ * - Business day logic (configurable reset hour)
+ * - Timezone-aware using branch configuration
+ * - Atomic counter increment using Firestore transactions
+ * - Retry logic with exponential backoff
+ * - Fallback mechanism if all retries fail
+ * - Rich metadata for debugging and analytics
+ * - Supports both Creation and Updates (e.g. if branchId is patched in late)
+ * 
+ * Example output: "ZKD-260107-001" (Branch ZKD, Jan 7 2026, Order #1)
+ */
+exports.generateOrderNumber = onDocumentWritten(
     { document: "Orders/{orderId}", region: GCP_LOCATION },
     async (event) => {
-        const snapshot = event.data;
-        if (!snapshot) return;
+        // 1. Skip if document was deleted
+        if (!event.data.after.exists) return;
 
-        const orderData = snapshot.data();
+        const orderData = event.data.after.data();
         const orderId = event.params.orderId;
 
-        // Extract branchId (handle both formats)
-        const branchId = orderData.branchId || (orderData.branchIds && orderData.branchIds[0]);
-        if (!branchId) {
-            logger.warn(`[${orderId}] ⚠️ Missing branchId, using fallback order number.`);
-            const fallback = generateFallbackOrderNumber(orderId);
-            await snapshot.ref.update({ dailyOrderNumber: fallback });
+        // 2. IDEMPOTENCY CHECK: If already has a number, STOP IMMEDIATELY
+        if (orderData.dailyOrderNumber) {
             return;
         }
 
-        // Fetch branch timezone (with fallback to Qatar timezone)
+        // 3. Extract branchId with robust fallback logic
+        // Priority: top-level branchId -> top-level branchIds[0] -> items[0].branchId
+        let branchId = orderData.branchId;
+
+        if (!branchId && orderData.branchIds && Array.isArray(orderData.branchIds) && orderData.branchIds.length > 0) {
+            branchId = orderData.branchIds[0];
+        }
+
+        if (!branchId && orderData.items && Array.isArray(orderData.items) && orderData.items.length > 0) {
+            // Check first item for branchId
+            if (orderData.items[0].branchId) {
+                branchId = orderData.items[0].branchId;
+                logger.log(`[${orderId}] Found branchId ${branchId} in items list`);
+            }
+        }
+
+        // 4. If still no branchId, warn but don't fail hard - we might need to wait for a future update
+        // However, to avoid being stuck forever, if the order is old (> 1 min) and still no branchId, we might default to global?
+        // For now, let's log a warning. If we don't return here, we fall back to global sequence.
+        // Better to wait if it's very fresh, but for now we proceed to Global if missing.
+
+        // Fetch branch configuration
+        let branchPrefix = DEFAULT_BRANCH_PREFIX;
         let branchTimezone = DEFAULT_TIMEZONE;
         let resetHour = ORDER_RESET_HOUR;
-        try {
-            const branchDoc = await db.collection('Branch').doc(branchId).get();
-            if (branchDoc.exists) {
-                const branchData = branchDoc.data();
-                if (branchData.timezone) {
-                    branchTimezone = validateTimezone(branchData.timezone, branchId);
+
+        if (branchId) {
+            try {
+                const branchDoc = await db.collection('Branch').doc(branchId).get();
+                if (branchDoc.exists) {
+                    const branchData = branchDoc.data();
+
+                    // Get branch prefix (e.g., "ZKD" for Zayka Downtown)
+                    if (branchData.orderPrefix && typeof branchData.orderPrefix === 'string') {
+                        branchPrefix = branchData.orderPrefix.toUpperCase().slice(0, 4);
+                    } else if (branchData.name) {
+                        // Auto-generate prefix from branch name (first 3 letters)
+                        branchPrefix = branchData.name.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3) || DEFAULT_BRANCH_PREFIX;
+                    }
+
+                    // Get timezone
+                    if (branchData.timezone) {
+                        branchTimezone = validateTimezone(branchData.timezone, branchId);
+                    }
+
+                    // Get reset hour
+                    if (typeof branchData.orderResetHour === 'number') {
+                        resetHour = branchData.orderResetHour;
+                    }
+                } else {
+                    logger.warn(`[${orderId}] Branch ${branchId} not found, using defaults.`);
                 }
-                // Allow per-branch reset hour override
-                if (typeof branchData.orderResetHour === 'number') {
-                    resetHour = branchData.orderResetHour;
-                }
-            } else {
-                logger.warn(`[${orderId}] Branch ${branchId} not found, using UTC timezone.`);
+            } catch (e) {
+                logger.warn(`[${orderId}] Failed to fetch branch: ${e.message}. Using defaults.`);
             }
-        } catch (e) {
-            logger.warn(`[${orderId}] Failed to fetch branch: ${e.message}. Using UTC.`);
+        } else {
+            // If it's a freshly created order (within last 5 seconds), maybe we should WAIT for an update?
+            // checking timestamp
+            const createdAt = orderData.createdAt || orderData.timestamp;
+            if (createdAt) {
+                const createdTime = createdAt.toDate ? createdAt.toDate().getTime() : new Date(createdAt).getTime();
+                const now = Date.now();
+                if (now - createdTime < 5000) {
+                    logger.log(`[${orderId}] No branchId yet, but order is fresh (<5s). Skipping global assignment to allow for update.`);
+                    return;
+                }
+            }
+            logger.warn(`[${orderId}] ⚠️ Missing branchId after wait period, using default prefix (Global Sequence).`);
         }
 
         // Calculate business date using branch timezone and reset hour
         const now = DateTime.now().setZone(branchTimezone);
         const businessDate = getBusinessDate(now, resetHour);
 
-        logger.log(`[${orderId}] Branch: ${branchId}, TZ: ${branchTimezone}, ResetHour: ${resetHour}, BusinessDate: ${businessDate}`);
+        logger.log(`[${orderId}] Branch: ${branchId || 'Global'}, Prefix: ${branchPrefix}, TZ: ${branchTimezone}, Date: ${businessDate}`);
 
-        const counterRef = db.collection('Counters').doc(`branch_${branchId}_${businessDate}`);
+        // Counter document ID includes branch ID and date for uniqueness
+        // If branchId is missing, we use 'global' to separate it from actual branches
+        const safeBranchId = branchId || 'global';
+        const counterDocId = `branch_${safeBranchId}_${businessDate}`;
+
+        const counterRef = db.collection('Counters').doc(counterDocId);
 
         // Retry logic for transient failures
         let lastError = null;
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
-                const result = await db.runTransaction(async (t) => {
+                const orderNumber = await db.runTransaction(async (t) => {
                     const counterDoc = await t.get(counterRef);
                     let currentCount = 0;
                     let isFirstOrder = false;
@@ -853,15 +968,20 @@ exports.generateOrderNumber = onDocumentCreated(
 
                     const nextCount = currentCount + 1;
 
+                    // Format the order number
+                    const formattedOrderNumber = formatOrderNumber(branchPrefix, businessDate, nextCount);
+
                     // Enhanced counter metadata
                     const counterData = {
                         count: nextCount,
-                        branchId: branchId,
+                        branchId: safeBranchId,
+                        branchPrefix: branchPrefix,
                         date: businessDate,
                         timezone: branchTimezone,
                         resetHour: resetHour,
                         lastUpdated: FieldValue.serverTimestamp(),
                         lastOrderAt: FieldValue.serverTimestamp(),
+                        lastOrderNumber: formattedOrderNumber,
                     };
 
                     // Track first order time
@@ -870,12 +990,18 @@ exports.generateOrderNumber = onDocumentCreated(
                     }
 
                     t.set(counterRef, counterData, { merge: true });
-                    t.update(snapshot.ref, { dailyOrderNumber: nextCount });
 
-                    return nextCount;
+                    // Update order with both the formatted number and raw sequence
+                    t.update(event.data.after.ref, {
+                        dailyOrderNumber: formattedOrderNumber,
+                        orderSequence: nextCount, // Raw sequence number for sorting
+                        orderNumberAssignedAt: FieldValue.serverTimestamp(),
+                    });
+
+                    return formattedOrderNumber;
                 });
 
-                logger.log(`[${orderId}] ✅ Assigned #${result} for branch ${branchId} (${businessDate})`);
+                logger.log(`[${orderId}] ✅ Assigned ${orderNumber} for branch ${safeBranchId}`);
                 return; // Success, exit function
             } catch (e) {
                 lastError = e;
@@ -889,11 +1015,15 @@ exports.generateOrderNumber = onDocumentCreated(
         }
 
         // All retries failed - use fallback
-        logger.error(`[${orderId}] ❌ All retries failed. Using fallback order number.`);
-        const fallbackNumber = generateFallbackOrderNumber(orderId);
+        logger.error(`[${orderId}] ❌ All retries failed. Using fallback order number. Error: ${lastError?.message}`);
+        const fallbackNumber = generateFallbackOrderNumber(branchPrefix, businessDate);
 
         try {
-            await snapshot.ref.update({ dailyOrderNumber: fallbackNumber });
+            await event.data.after.ref.update({
+                dailyOrderNumber: fallbackNumber,
+                orderNumberAssignedAt: FieldValue.serverTimestamp(),
+                orderNumberFallback: true, // Flag to identify fallback numbers
+            });
             logger.log(`[${orderId}] Assigned fallback order number: ${fallbackNumber}`);
         } catch (updateError) {
             logger.error(`[${orderId}] Failed to set fallback order number: ${updateError.message}`);

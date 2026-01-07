@@ -3,13 +3,10 @@ import 'dart:convert';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:provider/provider.dart';
 
 import '../main.dart';
-import '../Screens/MainScreen.dart';
-import 'Authorization.dart';
 import 'notification.dart';
 
 class FcmService {
@@ -23,6 +20,19 @@ class FcmService {
 
   bool _isInitialized = false;
   String? _currentEmail;
+
+  // ✅ NEW: Store pending notification for cold start scenarios
+  static Map<String, dynamic>? _pendingNotificationData;
+  
+  /// Check if there's a pending notification to be processed
+  static bool get hasPendingNotification => _pendingNotificationData != null;
+  
+  /// Get and clear pending notification data
+  static Map<String, dynamic>? consumePendingNotification() {
+    final data = _pendingNotificationData;
+    _pendingNotificationData = null;
+    return data;
+  }
 
   Future<void> init(String adminEmail) async {
     if (_isInitialized) return;
@@ -75,7 +85,15 @@ class FcmService {
         });
       }
 
-      // 4. Setup Message Handlers
+      // 4. ✅ CRITICAL FIX: Check for initial message SYNCHRONOUSLY before setting up handlers
+      // This ensures we capture cold-start notifications before init() returns
+      final RemoteMessage? initialMessage = await _fcm.getInitialMessage();
+      if (initialMessage != null) {
+        debugPrint('🔴 FCM: Cold start notification found during init');
+        _pendingNotificationData = initialMessage.data;
+      }
+
+      // 5. Setup Message Handlers for foreground/background (but NOT initial - already handled)
       _setupMessageHandlers();
 
       _isInitialized = true;
@@ -86,6 +104,7 @@ class FcmService {
   }
 
   void _setupMessageHandlers() {
+    // Handle foreground messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       debugPrint('🔵 FCM Foreground Message: ${message.messageId}');
       final context = navigatorKey.currentContext;
@@ -96,50 +115,71 @@ class FcmService {
       }
     });
 
+    // Handle background notification tap (app was in background, not terminated)
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       debugPrint('🟡 FCM Notification Tapped (Background)');
       _handleNotificationTap(message.data);
     });
-
-    _fcm.getInitialMessage().then((RemoteMessage? message) {
-      if (message != null) {
-        debugPrint('🔴 FCM Notification Tapped (Terminated)');
-        Future.delayed(const Duration(seconds: 1), () {
-          _handleNotificationTap(message.data);
-        });
-      }
-    });
+    
+    // NOTE: getInitialMessage() for terminated state is now handled in init()
+    // to ensure synchronous capture before init() returns
   }
 
   void _handleNotificationTap(Map<String, dynamic> data) {
     final orderId = data['orderId'];
-    if (orderId != null) {
-      debugPrint("🚀 Notification Tapped. Navigating to Order: $orderId");
-      final context = navigatorKey.currentContext;
-      if (context != null) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const AuthWrapper()),
-              (route) => false,
-        );
-
-        final notifService = Provider.of<OrderNotificationService>(context, listen: false);
-        final scopeService = Provider.of<UserScopeService>(context, listen: false);
-
-        if (scopeService.isLoaded) {
-          notifService.handleFCMOrder(data, scopeService);
-        } else {
-          void listener() {
-            if (scopeService.isLoaded) {
-              scopeService.removeListener(listener);
-              notifService.handleFCMOrder(data, scopeService);
-            }
-          }
-          scopeService.addListener(listener);
-          Future.delayed(const Duration(seconds: 15), () {
-            scopeService.removeListener(listener);
-          });
-        }
+    if (orderId == null) return;
+    
+    debugPrint("🚀 Notification Tapped. Order: $orderId");
+    
+    final context = navigatorKey.currentContext;
+    
+    // If no context available (should not happen for background tap, but just in case)
+    if (context == null) {
+      debugPrint("📦 No context - storing notification for later processing");
+      _pendingNotificationData = data;
+      return;
+    }
+    
+    // ✅ For background tap (onMessageOpenedApp), services should already be available
+    // Try to show the dialog directly
+    try {
+      final notifService = Provider.of<OrderNotificationService>(context, listen: false);
+      final scopeService = Provider.of<UserScopeService>(context, listen: false);
+      
+      if (scopeService.isLoaded && notifService.isInitialized) {
+        debugPrint("✅ Services ready - showing order dialog directly");
+        notifService.handleFCMOrder(data, scopeService);
+      } else {
+        // Services not ready, store for when they are
+        debugPrint("⏳ Services not ready - storing for later");
+        _pendingNotificationData = data;
       }
+    } catch (e) {
+      debugPrint("⚠️ Error accessing services: $e - storing notification");
+      _pendingNotificationData = data;
+    }
+  }
+  
+  /// Process any pending notification. Call this after full app initialization.
+  /// Returns true if a notification was processed.
+  static bool processPendingNotification(
+    OrderNotificationService notifService,
+    UserScopeService scopeService,
+  ) {
+    final data = consumePendingNotification();
+    if (data == null) return false;
+    
+    final orderId = data['orderId'];
+    if (orderId == null) return false;
+    
+    debugPrint("🔔 Processing pending notification for order: $orderId");
+    
+    if (scopeService.isLoaded) {
+      notifService.handleFCMOrder(data, scopeService);
+      return true;
+    } else {
+      debugPrint("⚠️ Scope not loaded yet - notification may be handled by backup listener");
+      return false;
     }
   }
 

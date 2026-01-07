@@ -28,8 +28,16 @@ class OrderNotificationService with ChangeNotifier {
   bool _playSound = true;
   bool _vibrate = true;
 
+  // ✅ NEW: Track scope service and branch changes
+  UserScopeService? _scopeService;
+  List<String> _lastKnownBranchIds = [];
+  VoidCallback? _scopeListener;
+
   bool get playSound => _playSound;
   bool get vibrate => _vibrate;
+  
+  /// Check if service is properly initialized with navigator key
+  bool get isInitialized => _navigatorKey != null;
 
   OrderNotificationService() {
     _loadPreferences();
@@ -58,9 +66,63 @@ class OrderNotificationService with ChangeNotifier {
 
   void init(UserScopeService scopeService, GlobalKey<NavigatorState> key) {
     _navigatorKey = key;
+    _scopeService = scopeService;
+    
+    // Clean up any existing listener
+    if (_scopeListener != null) {
+      scopeService.removeListener(_scopeListener!);
+    }
+    
+    // ✅ NEW: Listen for branch changes
+    _scopeListener = () => _onScopeChanged(scopeService);
+    scopeService.addListener(_scopeListener!);
+    
     if (scopeService.isLoaded) {
+      _lastKnownBranchIds = List.from(scopeService.branchIds);
       _startBackupListener(scopeService);
     }
+    
+    debugPrint("✅ OrderNotificationService initialized with navigator key");
+  }
+  
+  /// ✅ NEW: Handle scope changes (e.g., branch reassignment)
+  void _onScopeChanged(UserScopeService scopeService) {
+    if (!scopeService.isLoaded) return;
+    
+    // Check if branchIds actually changed
+    final currentBranchIds = scopeService.branchIds;
+    final branchesChanged = !_listEquals(currentBranchIds, _lastKnownBranchIds);
+    
+    if (branchesChanged) {
+      debugPrint("🔄 Branch IDs changed: $_lastKnownBranchIds → $currentBranchIds");
+      _lastKnownBranchIds = List.from(currentBranchIds);
+      
+      // Restart the backup listener with new branches
+      _startBackupListener(scopeService);
+    }
+  }
+  
+  /// Compare two lists for equality
+  bool _listEquals(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    final sortedA = List<String>.from(a)..sort();
+    final sortedB = List<String>.from(b)..sort();
+    for (int i = 0; i < sortedA.length; i++) {
+      if (sortedA[i] != sortedB[i]) return false;
+    }
+    return true;
+  }
+  
+  /// Clean up listeners when service is disposed
+  @override
+  void dispose() {
+    _backupSubscription?.cancel();
+    if (_scopeService != null && _scopeListener != null) {
+      _scopeService!.removeListener(_scopeListener!);
+    }
+    _scopeListener = null;
+    _scopeService = null;
+    super.dispose();
   }
 
   void _startBackupListener(UserScopeService scopeService) {
@@ -160,7 +222,10 @@ class OrderNotificationService with ChangeNotifier {
 
                   if (!snapshot.exists) throw Exception("Order no longer exists!");
                   final status = snapshot.get('status');
-                  if (status != 'pending') throw Exception("Order was already accepted by someone else.");
+                  // Allow accepting 'pending' AND 'pending_payment'
+                  if (status != 'pending' && status != 'pending_payment') {
+                    throw Exception("Order was already accepted by someone else.");
+                  }
 
                   transaction.update(docRef, {
                     'status': 'preparing',
@@ -214,8 +279,8 @@ class OrderNotificationService with ChangeNotifier {
                   
                   final currentStatus = snapshot.get('status');
                   
-                  // 🛑 CRITICAL CHECK: Only auto-accept if STILL PENDING
-                  if (currentStatus != 'pending') {
+                  // 🛑 CRITICAL CHECK: Only auto-accept if STILL PENDING or PENDING PAYMENT
+                  if (currentStatus != 'pending' && currentStatus != 'pending_payment') {
                     debugPrint("⚠️ Order $orderId was already handled (Status: $currentStatus). Aborting Auto-Accept.");
                     return; // Do nothing, let the listener dismiss the dialog
                   }
@@ -360,7 +425,7 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
 
       // Live Status Check
       final status = data['status'];
-      if (status != 'pending') {
+      if (status != 'pending' && status != 'pending_payment') {
         if (mounted && !_isClosing) {
            _isClosing = true;
            // If accepted by someone else, close silently or with toast
@@ -395,8 +460,9 @@ class NewOrderDialogState extends State<NewOrderDialog> with WidgetsBindingObser
   }
 
   bool _isUserAuthorized(Map<String, dynamic> data) {
-    if (widget.scopeService.isSuperAdmin) return true;
-
+    // ✅ FIX: SuperAdmins should only see orders for their assigned branchIds,
+    // not ALL orders. Removed the isSuperAdmin bypass.
+    
     List<dynamic> orderBranchIds = [];
     if (data['branchIds'] is List) {
       orderBranchIds = data['branchIds'];

@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../main.dart'; // Imports UserScopeService
+import '../constants.dart'; // For OrderNumberHelper
 
 class OrderHistoryScreen extends StatefulWidget {
   const OrderHistoryScreen({super.key});
@@ -284,7 +285,7 @@ class _OrderHistoryItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = orderDoc.data() as Map<String, dynamic>;
     final status = data['status']?.toString() ?? 'Unknown';
-    final orderNumber = data['dailyOrderNumber']?.toString() ?? orderDoc.id.substring(0, 6).toUpperCase();
+    final orderNumber = OrderNumberHelper.getDisplayNumber(data, orderId: orderDoc.id);
     final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
     final totalAmount = (data['totalAmount'] as num?)?.toDouble() ?? 0.0;
     final customerName = data['customerName']?.toString() ?? 'Guest';
@@ -428,7 +429,7 @@ class OrderDetailsDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = orderDoc.data() as Map<String, dynamic>;
     final status = data['status']?.toString() ?? 'unknown';
-    final orderNumber = data['dailyOrderNumber']?.toString() ?? '---';
+    final orderNumber = OrderNumberHelper.getDisplayNumber(data, orderId: orderDoc.id);
     final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
     final double subtotal = (data['subtotal'] as num?)?.toDouble() ?? 0.0;
     final double deliveryFee = (data['deliveryFee'] as num?)?.toDouble() ?? 0.0;

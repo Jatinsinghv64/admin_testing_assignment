@@ -4,6 +4,49 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import '../constants.dart';
 
+/// Result type for manual rider assignment
+enum RiderAssignmentResult {
+  success,
+  timeout,
+  orderNotFound,
+  riderNotFound,
+  orderAlreadyCompleted,
+  unknownError,
+}
+
+/// Extension to get error message from RiderAssignmentResult
+extension RiderAssignmentResultExtension on RiderAssignmentResult {
+  String get message {
+    switch (this) {
+      case RiderAssignmentResult.success:
+        return 'Rider assigned successfully';
+      case RiderAssignmentResult.timeout:
+        return 'Request timed out. Please check and retry.';
+      case RiderAssignmentResult.orderNotFound:
+        return 'Order not found';
+      case RiderAssignmentResult.riderNotFound:
+        return 'Rider not found';
+      case RiderAssignmentResult.orderAlreadyCompleted:
+        return 'Order is already completed. Assignment blocked.';
+      case RiderAssignmentResult.unknownError:
+        return 'Failed to assign rider. Please try again.';
+    }
+  }
+  
+  bool get isSuccess => this == RiderAssignmentResult.success;
+  
+  Color get backgroundColor {
+    switch (this) {
+      case RiderAssignmentResult.success:
+        return Colors.green;
+      case RiderAssignmentResult.timeout:
+        return Colors.orange;
+      default:
+        return Colors.red;
+    }
+  }
+}
+
 class RiderAssignmentService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
@@ -55,11 +98,11 @@ class RiderAssignmentService {
   }
 
   /// Transaction-based Manual Assignment.
-  /// Decouples kitchen preparation from rider assignment logic.
-  static Future<bool> manualAssignRider({
+  /// Returns a RiderAssignmentResult to let the caller handle UI feedback.
+  /// This avoids context issues when the calling widget is disposed.
+  static Future<RiderAssignmentResult> manualAssignRider({
     required String orderId,
     required String riderId,
-    required BuildContext context,
   }) async {
     try {
       await _firestore.runTransaction((transaction) async {
@@ -67,18 +110,20 @@ class RiderAssignmentService {
         final riderRef = _firestore.collection(AppConstants.collectionDrivers).doc(riderId);
         final assignmentRef = _firestore.collection(AppConstants.collectionRiderAssignments).doc(orderId);
 
+        // ✅ ALL READS MUST COME FIRST (Firestore transaction rule)
         final orderDoc = await transaction.get(orderRef);
         final riderDoc = await transaction.get(riderRef);
+        final assignmentDoc = await transaction.get(assignmentRef);
 
-        if (!orderDoc.exists) throw Exception("Order not found");
-        if (!riderDoc.exists) throw Exception("Rider not found");
+        if (!orderDoc.exists) throw Exception("ORDER_NOT_FOUND");
+        if (!riderDoc.exists) throw Exception("RIDER_NOT_FOUND");
 
         final orderData = orderDoc.data() as Map<String, dynamic>;
         final String currentStatus = AppConstants.normalizeStatus(orderData['status'] ?? '');
 
         // Block assignment if the order is already finished or cancelled
         if (AppConstants.isTerminalStatus(currentStatus)) {
-          throw Exception("Order is already $currentStatus. Assignment blocked.");
+          throw Exception("ORDER_COMPLETED");
         }
 
         // Simplified status flow: pending -> preparing -> rider_assigned
@@ -99,6 +144,7 @@ class RiderAssignmentService {
           statusToSet = currentStatus;
         }
 
+        // ✅ ALL WRITES COME AFTER ALL READS
         // 1. Update Order: Attach rider
         transaction.update(orderRef, {
           'riderId': riderId,
@@ -115,8 +161,7 @@ class RiderAssignmentService {
           'isAvailable': false,
         });
 
-        // 3. Cleanup: Check if assignment record exists before deleting
-        final assignmentDoc = await transaction.get(assignmentRef);
+        // 3. Cleanup: Delete assignment record if it exists
         if (assignmentDoc.exists) {
           transaction.delete(assignmentRef);
         }
@@ -125,27 +170,20 @@ class RiderAssignmentService {
       // Send notification to the rider after the DB update succeeds
       _notifyRiderViaCloudFunction(orderId, riderId);
 
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Rider assigned successfully'), backgroundColor: Colors.green),
-        );
-      }
-      return true;
+      return RiderAssignmentResult.success;
     } on TimeoutException {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Request timed out. Please check and retry.'), backgroundColor: Colors.orange),
-        );
-      }
-      return false;
+      return RiderAssignmentResult.timeout;
     } catch (e) {
-      if (context.mounted) {
-        final String errorMsg = e.toString().replaceAll("Exception: ", "");
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to assign rider: $errorMsg'), backgroundColor: Colors.red),
-        );
+      final errorStr = e.toString();
+      if (errorStr.contains("ORDER_NOT_FOUND")) {
+        return RiderAssignmentResult.orderNotFound;
+      } else if (errorStr.contains("RIDER_NOT_FOUND")) {
+        return RiderAssignmentResult.riderNotFound;
+      } else if (errorStr.contains("ORDER_COMPLETED")) {
+        return RiderAssignmentResult.orderAlreadyCompleted;
       }
-      return false;
+      debugPrint("Manual assignment error: $e");
+      return RiderAssignmentResult.unknownError;
     }
   }
 

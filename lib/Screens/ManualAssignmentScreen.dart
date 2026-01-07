@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../Widgets/RiderAssignment.dart';
 import '../Widgets/BranchFilterService.dart'; // ✅ Added for filtering
 import '../main.dart'; // Assuming UserScopeService is here
+import '../constants.dart'; // For OrderNumberHelper
 
 class ManualAssignmentScreen extends StatefulWidget {
   const ManualAssignmentScreen({super.key});
@@ -17,20 +18,33 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
   Future<void> _promptAssignRider(
       BuildContext context, String orderId, String currentBranchId) async {
     if (!mounted) return;
+    
+    // Capture ScaffoldMessengerState BEFORE async operations
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     final riderId = await showDialog<String>(
       context: context,
-      builder: (context) =>
+      builder: (dialogContext) =>
           RiderSelectionDialog(currentBranchId: currentBranchId),
     );
 
     if (riderId != null && riderId.isNotEmpty) {
       if (!mounted) return;
-      await RiderAssignmentService.manualAssignRider(
+      
+      final result = await RiderAssignmentService.manualAssignRider(
         orderId: orderId,
         riderId: riderId,
-        context: context,
       );
+      
+      // Use pre-captured ScaffoldMessengerState (safe across async gaps)
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(result.message),
+            backgroundColor: result.backgroundColor,
+          ),
+        );
+      }
     }
   }
 
@@ -49,9 +63,11 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
     // ✅ FIX: REMOVED DATE FILTER
     // This ensures the screen displays ALL orders that need assignment,
     // matching the Badge Count and preventing hidden tasks.
+    // ✅ FIX: Added Order_type filter - only delivery orders need rider assignment
     Query query = FirebaseFirestore.instance
         .collection('Orders')
-        .where('status', isEqualTo: 'needs_rider_assignment');
+        .where('status', isEqualTo: 'needs_rider_assignment')
+        .where('Order_type', isEqualTo: 'delivery');
 
     // Filter by branch logic (BranchAdmin OR SuperAdmin with selection)
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
@@ -177,8 +193,7 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
             itemBuilder: (context, index) {
               final orderDoc = docs[index];
               final data = orderDoc.data();
-              final orderNumber = data['dailyOrderNumber']?.toString() ??
-                  orderDoc.id.substring(0, 6).toUpperCase();
+              final orderNumber = OrderNumberHelper.getDisplayNumber(data, orderId: orderDoc.id);
               final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
               final reason = data['assignmentNotes'] ?? 'No reason provided';
               final customerName = data['customerName'] ?? 'N/A';
