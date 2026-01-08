@@ -14,18 +14,24 @@ class AppConstants {
   // Order Statuses (Standardized)
   static const String statusPending = 'pending';
   static const String statusPreparing = 'preparing';
+  static const String statusPrepared = 'prepared';         // NEW: Food ready (non-delivery)
+  static const String statusServed = 'served';             // NEW: Dine-in served to table
+  static const String statusPaid = 'paid';                 // NEW: Terminal for takeaway/dine-in
+  static const String statusCollected = 'collected';       // NEW: Terminal for pickup (prepaid)
   static const String statusRiderAssigned = 'rider_assigned';
-  static const String statusPickedUp = 'pickedUp'; // Standardized camelCase
-  static const String statusPickedUpLegacy = 'pickedup'; // Legacy lowercase
+  static const String statusPickedUp = 'pickedUp';         // Standardized camelCase
+  static const String statusPickedUpLegacy = 'pickedup';   // Legacy lowercase
   static const String statusDelivered = 'delivered';
   static const String statusCancelled = 'cancelled';
   static const String statusNeedsAssignment = 'needs_rider_assignment';
-  static const String statusRefunded = 'refunded'; // ✅ Added for returns
+  static const String statusRefunded = 'refunded';
 
   // Terminal statuses (no further transitions allowed)
   static const List<String> terminalStatuses = [
     statusDelivered,
     statusCancelled,
+    statusPaid,       // Terminal for takeaway/dine-in
+    statusCollected,  // Terminal for pickup
   ];
 
   // Firestore Operation Timeouts
@@ -58,7 +64,9 @@ class AppConstants {
     final normalized = normalizeStatus(status);
     return terminalStatuses.contains(normalized) ||
         normalized.toLowerCase() == 'pickedup' ||
-        normalized == statusPickedUp;
+        normalized == statusPickedUp ||
+        normalized == statusPaid ||
+        normalized == statusCollected;
   }
 
   // Order Types (Standardized)
@@ -112,11 +120,114 @@ class AppConstants {
     return isDeliveryOrder(orderType);
   }
 
-  /// Get the completion button text based on order type
-  static String getCompletionButtonText(String? orderType) {
+  /// Check if order type is takeaway (pay at counter)
+  static bool isTakeawayOrder(String? orderType) {
+    return normalizeOrderType(orderType) == orderTypeTakeaway;
+  }
+
+  /// Get the next status after 'preparing' based on order type
+  static String getNextStatusAfterPreparing(String? orderType) {
+    if (isDeliveryOrder(orderType)) {
+      return statusNeedsAssignment; // Delivery goes to rider assignment
+    }
+    return statusPrepared; // All other types go to prepared
+  }
+
+  /// Get the next status after 'prepared' based on order type
+  static String getNextStatusAfterPrepared(String? orderType) {
+    final normalized = normalizeOrderType(orderType);
+    if (normalized == orderTypeDineIn) return statusServed;
+    if (normalized == orderTypePickup) return statusCollected;
+    if (normalized == orderTypeTakeaway) return statusPaid;
+    return statusDelivered; // Fallback
+  }
+
+  /// Get the completion button text based on order type and current status
+  static String getCompletionButtonText(String? orderType, {String? currentStatus}) {
+    final normalized = normalizeOrderType(orderType);
+    
+    // For preparing -> prepared
+    if (currentStatus == statusPreparing && !isDeliveryOrder(orderType)) {
+      return 'Mark Prepared';
+    }
+    
+    // For prepared -> next status
+    if (currentStatus == statusPrepared) {
+      if (normalized == orderTypeDineIn) return 'Mark Served';
+      if (normalized == orderTypePickup) return 'Collected';
+      if (normalized == orderTypeTakeaway) return 'Mark Paid';
+    }
+    
+    // For served -> paid (dine-in only)
+    if (currentStatus == statusServed) {
+      return 'Mark Paid';
+    }
+    
+    // Legacy fallbacks
     if (isDineInOrder(orderType)) return 'Served to Table';
     if (isPickupOrder(orderType)) return 'Handed to Customer';
     return 'Mark as Delivered';
+  }
+
+  /// Get status display text (human readable)
+  static String getStatusDisplayText(String? status, {String? orderType}) {
+    if (status == null) return '';
+    switch (status.toLowerCase()) {
+      case 'pending': return 'PENDING';
+      case 'preparing': return 'PREPARING';
+      case 'prepared': return 'PREPARED';
+      case 'served': return 'SERVED';
+      case 'paid': return 'PAID';
+      case 'collected': return 'COLLECTED';
+      case 'needs_rider_assignment': return 'NEEDS RIDER';
+      case 'rider_assigned': return 'RIDER ASSIGNED';
+      case 'pickedup': return 'PICKED UP';
+      case 'pickedUp': return 'PICKED UP';
+      case 'delivered': return 'DELIVERED';
+      case 'cancelled': return 'CANCELLED';
+      case 'refunded': return 'REFUNDED';
+      default: return status.toUpperCase();
+    }
+  }
+
+  // --- PAYMENT METHOD HELPERS ---
+  
+  /// Check if payment method is cash-based (requires collection)
+  static bool isCashPayment(String? paymentMethod) {
+    if (paymentMethod == null || paymentMethod.isEmpty) return true; // Default to cash
+    final p = paymentMethod.toLowerCase();
+    return p == 'cash' || p == 'cod' || p == 'cash_on_delivery';
+  }
+  
+  /// Check if payment method is prepaid (already collected)
+  static bool isPrepaidPayment(String? paymentMethod) {
+    if (paymentMethod == null || paymentMethod.isEmpty) return false;
+    final p = paymentMethod.toLowerCase();
+    return p == 'online' || p == 'card' || p == 'prepaid' || 
+           p == 'apple_pay' || p == 'google_pay' || p == 'wallet';
+  }
+  
+  /// Get display text for payment method
+  static String getPaymentDisplayText(String? paymentMethod) {
+    if (paymentMethod == null || paymentMethod.isEmpty) return 'CASH';
+    switch (paymentMethod.toLowerCase()) {
+      case 'cash':
+      case 'cod':
+      case 'cash_on_delivery':
+        return 'CASH';
+      case 'online':
+      case 'card':
+      case 'prepaid':
+        return 'PREPAID';
+      case 'apple_pay':
+        return 'APPLE PAY';
+      case 'google_pay':
+        return 'GOOGLE PAY';
+      case 'wallet':
+        return 'WALLET';
+      default:
+        return paymentMethod.toUpperCase();
+    }
   }
 }
 

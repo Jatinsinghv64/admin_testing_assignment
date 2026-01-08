@@ -160,6 +160,12 @@ class PrintingService {
             final String dailyOrderNumber = order['dailyOrderNumber']?.toString() ?? orderDoc.id.substring(0, 6).toUpperCase();
             final String orderType = (order['Order_type'] ?? 'Unknown').toString().toUpperCase().replaceAll('_', ' ');
             final String customerName = (order['customerName'] ?? 'Walk-in').toString();
+            
+            // Takeaway-specific fields
+            final String orderTypeLower = (order['Order_type'] ?? '').toString().toLowerCase();
+            final bool isTakeaway = orderTypeLower == 'takeaway';
+            final String carPlateNumber = (order['carPlateNumber'] ?? '').toString();
+            final String specialInstructions = (order['specialInstructions'] ?? '').toString();
 
             // QR Code (Simple Order Ref)
             final String qrData = "Order: $dailyOrderNumber\nAmt: $totalAmount\nDate: $formattedDate";
@@ -238,7 +244,16 @@ class PrintingService {
                                       pw.SizedBox(height: 2),
                                       bilingualRow("Type", "النوع", orderType),
                                       pw.SizedBox(height: 2),
-                                      bilingualRow("Customer", "العميل", customerName.length > 15 ? "${customerName.substring(0,12)}..." : customerName),
+                                      // For takeaway: show car plate instead of customer name
+                                      if (isTakeaway && carPlateNumber.isNotEmpty)
+                                        bilingualRow("Car Plate", "رقم لوحة السيارة", carPlateNumber.length > 15 ? "${carPlateNumber.substring(0,12)}..." : carPlateNumber)
+                                      else
+                                        bilingualRow("Customer", "العميل", customerName.length > 15 ? "${customerName.substring(0,12)}..." : customerName),
+                                      // For takeaway: show special instructions if present
+                                      if (isTakeaway && specialInstructions.isNotEmpty) ...[
+                                        pw.SizedBox(height: 2),
+                                        bilingualRow("Instructions", "تعليمات خاصة", specialInstructions.length > 20 ? "${specialInstructions.substring(0,17)}..." : specialInstructions),
+                                      ],
                                     ]
                                 )
                             ),

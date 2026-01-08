@@ -15,6 +15,7 @@ import 'BranchManagement.dart';
 import 'CouponsScreen.dart';
 import 'OrderHistory.dart';
 import 'RestaurantTimingScreen.dart';
+import 'TableManagement.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -237,6 +238,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     iconColor: Colors.indigo,
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (context) => const BranchManagementScreen()),
+                    ),
+                  ),
+                if (userScope.isSuperAdmin || userScope.role == 'branch_admin')
+                  _SettingsItem(
+                    icon: Icons.table_restaurant_rounded,
+                    title: 'Table Management',
+                    subtitle: 'Manage restaurant tables',
+                    iconColor: Colors.teal,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const TableManagementScreen()),
                     ),
                   ),
                 if (userScope.isSuperAdmin)

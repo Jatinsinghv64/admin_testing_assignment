@@ -482,3 +482,4 @@ class UserScopeService with ChangeNotifier {
     notifyListeners();
   }
 }
+

@@ -19,8 +19,18 @@ class StatusUtils {
         return Colors.orange;
       case 'preparing':
         return Colors.teal;
+      case 'prepared':
+        return Colors.teal.shade600;     // NEW: Slightly darker teal
+      case 'served':
+        return Colors.green.shade600;    // NEW: Served to table
+      case 'paid':
+        return Colors.blue.shade700;     // NEW: Payment complete
+      case 'collected':
+        return Colors.green.shade700;    // NEW: Pickup collected
       case 'rider_assigned':
         return Colors.purple;
+      case 'needs_rider_assignment':
+        return Colors.orange.shade700;
       case 'pickedup':
         return Colors.deepPurple;
       case 'delivered':
@@ -29,21 +39,14 @@ class StatusUtils {
         return Colors.red;
       case 'refunded':
         return Colors.pink;
-      case 'needs_rider_assignment':
-        return Colors.orange;
       default:
         return Colors.grey;
     }
   }
 
   /// Get status color considering order type
-  /// For non-delivery orders with needs_rider_assignment, show green (ready) instead of orange
   static Color getColorForOrderType(String status, String orderType) {
-    if (status.toLowerCase() == 'needs_rider_assignment') {
-      if (!AppConstants.isDeliveryOrder(orderType)) {
-        return Colors.green; // Ready color for non-delivery orders
-      }
-    }
+    // All statuses now have proper colors, no special handling needed
     return getColor(status);
   }
 
@@ -51,19 +54,31 @@ class StatusUtils {
   static String getDisplayText(String status, {String? orderType}) {
     final statusLower = status.toLowerCase();
 
-    // For non-delivery orders, show 'READY' instead of 'NEEDS ASSIGN'
-    if (statusLower == 'needs_rider_assignment') {
-      if (orderType != null && !AppConstants.isDeliveryOrder(orderType)) {
-        return 'READY';
-      }
-      return 'NEEDS ASSIGN';
-    }
-
     switch (statusLower) {
+      case 'pending':
+        return 'PENDING';
+      case 'preparing':
+        return 'PREPARING';
+      case 'prepared':
+        return 'PREPARED';
+      case 'served':
+        return 'SERVED';
+      case 'paid':
+        return 'PAID';
+      case 'collected':
+        return 'COLLECTED';
+      case 'needs_rider_assignment':
+        return 'NEEDS RIDER';
       case 'rider_assigned':
         return 'RIDER ASSIGNED';
       case 'pickedup':
         return 'PICKED UP';
+      case 'delivered':
+        return 'DELIVERED';
+      case 'cancelled':
+        return 'CANCELLED';
+      case 'refunded':
+        return 'REFUNDED';
       default:
         return status.toUpperCase();
     }

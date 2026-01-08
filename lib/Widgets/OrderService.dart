@@ -9,52 +9,178 @@ import '../constants.dart';
 
 class OrderService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-
+  /// Gets orders stream, handling both legacy `branchId` (string) and new `branchIds` (array) fields
   Stream<QuerySnapshot<Map<String, dynamic>>> getOrdersStream({
     required String orderType,
     required String status,
     required UserScopeService userScope,
     List<String>? filterBranchIds, // ✅ Optional filter
   }) {
-    Query<Map<String, dynamic>> baseQuery = _db
-        .collection(AppConstants.collectionOrders)
-        .where('Order_type', isEqualTo: orderType);
-
-    // Always filter by branches - SuperAdmin sees only their assigned branches
-    if (filterBranchIds != null && filterBranchIds.isNotEmpty) {
-      // Filter by provided specific branches (from BranchSelector)
-      if (filterBranchIds.length == 1) {
-        baseQuery = baseQuery.where('branchIds', arrayContains: filterBranchIds.first);
-      } else {
-        baseQuery = baseQuery.where('branchIds', arrayContainsAny: filterBranchIds);
-      }
-    } else if (userScope.branchIds.isNotEmpty) {
-      // Fall back to user's assigned branches (for "All Branches" selection or initial state)
-      if (userScope.branchIds.length == 1) {
-        baseQuery = baseQuery.where('branchIds', arrayContains: userScope.branchIds.first);
-      } else {
-        baseQuery = baseQuery.where('branchIds', arrayContainsAny: userScope.branchIds);
-      }
-    } else {
-      // User with no branches assigned - return empty
+    debugPrint('🔍 OrderService.getOrdersStream called:');
+    debugPrint('   - orderType: $orderType');
+    debugPrint('   - status: $status');
+    debugPrint('   - filterBranchIds: $filterBranchIds');
+    debugPrint('   - userScope.branchIds: ${userScope.branchIds}');
+    
+    final effectiveBranchIds = filterBranchIds ?? userScope.branchIds;
+    
+    if (effectiveBranchIds.isEmpty) {
       return const Stream.empty();
     }
 
+    // ✅ FIX: Query for BOTH branchId (singular string) AND branchIds (array)
+    // Some orders (like takeaway) use branchId, others use branchIds
+    
+    // Build two separate streams and merge them
+    final Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> mergedStream = 
+        _getMergedOrdersStream(
+          orderType: orderType,
+          status: status,
+          branchIds: effectiveBranchIds,
+        );
+    
+    // Convert merged list back to a QuerySnapshot-like stream
+    // We'll return a custom stream that OrdersScreen can consume
+    return mergedStream.map((docs) {
+      // Create a fake QuerySnapshot wrapper - but actually we need to return
+      // QuerySnapshot type. Let's use a different approach.
+      throw UnimplementedError('Use getOrdersStreamMerged instead');
+    });
+  }
+
+  /// ✅ NEW: Returns merged stream of order documents (handles both branchId and branchIds)
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> getOrdersStreamMerged({
+    required String orderType,
+    required String status,
+    required UserScopeService userScope,
+    List<String>? filterBranchIds,
+  }) {
+    debugPrint('🔍 OrderService.getOrdersStreamMerged called:');
+    debugPrint('   - orderType: $orderType');
+    debugPrint('   - status: $status');
+    debugPrint('   - filterBranchIds: $filterBranchIds');
+    debugPrint('   - userScope.branchIds: ${userScope.branchIds}');
+    
+    final effectiveBranchIds = filterBranchIds ?? userScope.branchIds;
+    
+    if (effectiveBranchIds.isEmpty) {
+      return Stream.value([]);
+    }
+
+    return _getMergedOrdersStream(
+      orderType: orderType,
+      status: status,
+      branchIds: effectiveBranchIds,
+    );
+  }
+
+  /// Internal: Creates merged stream from both branchId and branchIds queries
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _getMergedOrdersStream({
+    required String orderType,
+    required String status,
+    required List<String> branchIds,
+  }) {
+    // Query 1: Orders with branchIds array field
+    Query<Map<String, dynamic>> arrayQuery = _db
+        .collection(AppConstants.collectionOrders)
+        .where('Order_type', isEqualTo: orderType);
+    
+    if (branchIds.length == 1) {
+      arrayQuery = arrayQuery.where('branchIds', arrayContains: branchIds.first);
+    } else {
+      arrayQuery = arrayQuery.where('branchIds', arrayContainsAny: branchIds);
+    }
+    
+    // Query 2: Orders with singular branchId string field (for each branch)
+    // We need to use whereIn for branchId since it's a simple string field
+    Query<Map<String, dynamic>> stringQuery = _db
+        .collection(AppConstants.collectionOrders)
+        .where('Order_type', isEqualTo: orderType)
+        .where('branchId', whereIn: branchIds.take(10).toList()); // Firestore limit: 10 items in whereIn
+    
+    // Apply status/timestamp filters to both queries
     if (status == 'all') {
       final startOfBusinessDay = TimeUtils.getBusinessStartTimestamp();
       final endOfBusinessDay = TimeUtils.getBusinessEndTimestamp();
-
-      baseQuery = baseQuery
+      
+      arrayQuery = arrayQuery
           .where('timestamp', isGreaterThanOrEqualTo: startOfBusinessDay)
-          .where('timestamp', isLessThan: endOfBusinessDay);
+          .where('timestamp', isLessThan: endOfBusinessDay)
+          .orderBy('timestamp', descending: true);
+      
+      stringQuery = stringQuery
+          .where('timestamp', isGreaterThanOrEqualTo: startOfBusinessDay)
+          .where('timestamp', isLessThan: endOfBusinessDay)
+          .orderBy('timestamp', descending: true);
     } else {
-      // Handle status normalization for queries
-      // Note: pickedUp vs pickedup - query for the normalized version
       final normalizedStatus = AppConstants.normalizeStatus(status);
-      baseQuery = baseQuery.where('status', isEqualTo: normalizedStatus);
+      arrayQuery = arrayQuery
+          .where('status', isEqualTo: normalizedStatus)
+          .orderBy('timestamp', descending: true);
+      stringQuery = stringQuery
+          .where('status', isEqualTo: normalizedStatus)
+          .orderBy('timestamp', descending: true);
     }
 
-    return baseQuery.orderBy('timestamp', descending: true).snapshots();
+    // Combine both streams
+    final arrayStream = arrayQuery.snapshots();
+    final stringStream = stringQuery.snapshots();
+
+    // Merge and deduplicate
+    return _combineStreams(arrayStream, stringStream);
+  }
+
+  /// Combines two QuerySnapshot streams and deduplicates by document ID
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _combineStreams(
+    Stream<QuerySnapshot<Map<String, dynamic>>> stream1,
+    Stream<QuerySnapshot<Map<String, dynamic>>> stream2,
+  ) {
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs1 = [];
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs2 = [];
+
+    // Use StreamController to emit merged results
+    final controller = StreamController<List<QueryDocumentSnapshot<Map<String, dynamic>>>>.broadcast();
+
+    void emitMerged() {
+      // Merge and deduplicate by document ID
+      final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> merged = {};
+      for (final doc in docs1) {
+        merged[doc.id] = doc;
+      }
+      for (final doc in docs2) {
+        merged[doc.id] = doc;
+      }
+      
+      // Sort by timestamp descending
+      final sortedDocs = merged.values.toList()
+        ..sort((a, b) {
+          final tsA = a.data()['timestamp'] as Timestamp?;
+          final tsB = b.data()['timestamp'] as Timestamp?;
+          if (tsA == null && tsB == null) return 0;
+          if (tsA == null) return 1;
+          if (tsB == null) return -1;
+          return tsB.compareTo(tsA);
+        });
+      
+      controller.add(sortedDocs);
+    }
+
+    final sub1 = stream1.listen((snapshot) {
+      docs1 = snapshot.docs;
+      emitMerged();
+    }, onError: (e) => debugPrint('Stream1 error: $e'));
+
+    final sub2 = stream2.listen((snapshot) {
+      docs2 = snapshot.docs;
+      emitMerged();
+    }, onError: (e) => debugPrint('Stream2 error: $e'));
+
+    controller.onCancel = () {
+      sub1.cancel();
+      sub2.cancel();
+    };
+
+    return controller.stream;
   }
 
   // STANDARD QUERY HELPERS (Refactored from DashboardScreen)
@@ -112,7 +238,8 @@ class OrderService {
     final billableStatuses = {
       AppConstants.statusDelivered,
       'completed',
-      'paid',
+      AppConstants.statusPaid,      // Takeaway/Dine-in terminal
+      AppConstants.statusCollected, // Pickup terminal
       // AppConstants.statusRefunded // Refunds should NOT count (deducts from revenue)
     };
 
@@ -230,6 +357,14 @@ class OrderService {
           updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
         } else if (newStatus == AppConstants.statusRiderAssigned) {
           updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
+        } else if (newStatus == AppConstants.statusPrepared) {
+          updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
+        } else if (newStatus == AppConstants.statusServed) {
+          updateData['timestamps.served'] = FieldValue.serverTimestamp();
+        } else if (newStatus == AppConstants.statusPaid) {
+          updateData['timestamps.paid'] = FieldValue.serverTimestamp();
+        } else if (newStatus == AppConstants.statusCollected) {
+          updateData['timestamps.collected'] = FieldValue.serverTimestamp();
         }
 
         batch.update(orderRef, updateData);

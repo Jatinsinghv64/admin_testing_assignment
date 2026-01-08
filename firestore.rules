@@ -1,0 +1,196 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =====================
+    // HELPER FUNCTIONS
+    // =====================
+
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user is a rider/driver
+    function isRider() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/Drivers/$(request.auth.uid));
+    }
+
+    // Check if user is staff member (admin or branch admin)
+    function isStaff() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/staff/$(request.auth.uid));
+    }
+
+    // Check if user is super admin
+    function isSuperAdmin() {
+      return isStaff() && 
+        get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role == 'super_admin';
+    }
+
+    // Check if user is branch admin
+    function isBranchAdmin() {
+      return isStaff() && 
+        get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role == 'branchadmin';
+    }
+
+    // Check if status field is being modified
+    function isStatusBeingChanged() {
+      return request.resource.data.status != resource.data.status;
+    }
+
+    // Check if user has access to a specific branch
+    function hasAccessToBranch(branchId) {
+      return isStaff() && (
+        isSuperAdmin() ||
+        branchId in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.branchIds
+      );
+    }
+
+    // =====================
+    // ORDERS COLLECTION
+    // =====================
+    match /Orders/{orderId} {
+      // Read access: staff and riders only (not public)
+      allow read: if isAuthenticated() && (isStaff() || isRider());
+      
+      // Update: Staff can update fully, Riders can update (except status)
+      allow update: if isAuthenticated() && (
+        // Staff can update anything
+        isStaff() ||
+        // Riders can update only non-status fields
+        (isRider() && !isStatusBeingChanged())
+      );
+      
+      // Only staff can create/delete orders
+      allow create, delete: if isStaff();
+    }
+
+    // =====================
+    // RIDER ASSIGNMENTS
+    // =====================
+    match /rider_assignments/{orderId} {
+      // Read: staff and assigned rider only
+      allow read: if isAuthenticated() && (
+        isStaff() || 
+        (isRider() && resource.data.riderId == request.auth.uid)
+      );
+      
+      // Update: Only the assigned rider can accept
+      allow update: if isAuthenticated() &&
+        // Only the assigned rider can accept
+        resource.data.riderId == request.auth.uid &&
+        // Can only change status to 'accepted'
+        request.resource.data.status == 'accepted' &&
+        // Cannot change other fields
+        request.resource.data.orderId == resource.data.orderId &&
+        request.resource.data.riderId == resource.data.riderId &&
+        request.resource.data.branchId == resource.data.branchId;
+      
+      // Only Cloud Functions create/delete (Admin SDK bypasses rules)
+      allow create, delete: if false;
+    }
+
+    // =====================
+    // DRIVERS COLLECTION
+    // =====================
+    match /Drivers/{driverId} {
+      // Read: staff can read all, drivers can read own doc
+      allow read: if isAuthenticated() && (
+        isStaff() ||
+        request.auth.uid == driverId
+      );
+      
+      // Drivers can update their own document (location, availability, etc.)
+      allow update: if isAuthenticated() && request.auth.uid == driverId;
+      
+      // Staff can create/delete drivers
+      allow create, delete: if isStaff();
+    }
+
+    // =====================
+    // BRANCH COLLECTION
+    // =====================
+    match /Branch/{branchId} {
+      // Read: staff members can read branches they have access to
+      allow read: if isAuthenticated() && (
+        isStaff() ||
+        // Riders can read branch info for their assigned branches
+        (isRider() && 
+          branchId in get(/databases/$(database)/documents/Drivers/$(request.auth.uid)).data.branchIds)
+      );
+      
+      // Write: only staff (super_admin for all, branchadmin for their branch)
+      allow write: if isStaff() && (
+        isSuperAdmin() ||
+        hasAccessToBranch(branchId)
+      );
+    }
+
+    // =====================
+    // STAFF COLLECTION
+    // =====================
+    match /staff/{staffId} {
+      // Staff can read their own document
+      allow read: if isAuthenticated() && (
+        request.auth.uid == staffId ||
+        isSuperAdmin()
+      );
+      
+      // Only super admin can create/update/delete staff
+      allow write: if isSuperAdmin();
+    }
+
+    // =====================
+    // MENU ITEMS
+    // =====================
+    match /menu_items/{itemId} {
+      // Publicly readable (for customer apps)
+      allow read: if true;
+      
+      // Only staff can modify
+      allow write: if isStaff();
+    }
+
+    // =====================
+    // MENU CATEGORIES
+    // =====================
+    match /menu_categories/{categoryId} {
+      // Publicly readable
+      allow read: if true;
+      
+      // Only staff can modify
+      allow write: if isStaff();
+    }
+
+    // =====================
+    // COUPONS
+    // =====================
+    match /coupons/{couponId} {
+      // Publicly readable (for customer apps to validate)
+      allow read: if true;
+      
+      // Only staff can modify
+      allow write: if isStaff();
+    }
+
+    // =====================
+    // FCM TOKENS (subcollection)
+    // =====================
+    match /staff/{staffId}/fcm_tokens/{tokenId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == staffId;
+    }
+
+    match /Drivers/{driverId}/fcm_tokens/{tokenId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == driverId;
+    }
+
+    // =====================
+    // DEFAULT DENY
+    // =====================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

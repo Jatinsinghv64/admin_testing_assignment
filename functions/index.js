@@ -22,12 +22,55 @@ const SERVICE_ACCOUNT_EMAIL = `${GCP_PROJECT_ID}@appspot.gserviceaccount.com`;
 const STATUS = {
     PENDING: 'pending',
     PREPARING: 'preparing',
+    PREPARED: 'prepared',                    // NEW: Food ready (non-delivery)
+    SERVED: 'served',                        // NEW: Dine-in served to table
+    PAID: 'paid',                            // NEW: Terminal for takeaway/dine-in
+    COLLECTED: 'collected',                  // NEW: Terminal for pickup (prepaid)
     RIDER_ASSIGNED: 'rider_assigned',
     NEEDS_ASSIGNMENT: 'needs_rider_assignment',
-    PICKED_UP: 'pickedUp',  // Standardized to camelCase
+    PICKED_UP: 'pickedUp',                   // Standardized to camelCase
     DELIVERED: 'delivered',
     CANCELLED: 'cancelled',
 };
+
+// --- ORDER TYPE CONSTANTS ---
+const ORDER_TYPE = {
+    DELIVERY: 'delivery',
+    PICKUP: 'pickup',
+    TAKEAWAY: 'takeaway',
+    DINE_IN: 'dine_in',
+};
+
+// Helper to normalize order type
+// IMPORTANT: Returns 'unknown' instead of defaulting to DELIVERY to prevent blocking valid transitions
+function normalizeOrderType(orderType) {
+    if (!orderType || typeof orderType !== 'string') return 'unknown';
+    const cleaned = orderType.toLowerCase().trim().replace(/-/g, '_').replace(/ /g, '_');
+
+    // Dine-in variants
+    if (cleaned === 'dinein' || cleaned === 'dine_in' || cleaned === 'dine' ||
+        cleaned === 'dine_in_order' || cleaned === 'dineinorder') {
+        return ORDER_TYPE.DINE_IN;
+    }
+    // Pickup variants  
+    if (cleaned === 'pickup' || cleaned === 'pick_up' ||
+        cleaned === 'pickup_order' || cleaned === 'pickuporder') {
+        return ORDER_TYPE.PICKUP;
+    }
+    // Takeaway variants
+    if (cleaned === 'takeaway' || cleaned === 'take_away' ||
+        cleaned === 'takeaway_order' || cleaned === 'takeawayorder') {
+        return ORDER_TYPE.TAKEAWAY;
+    }
+    // Delivery variants
+    if (cleaned === 'delivery' || cleaned === 'deliver' ||
+        cleaned === 'delivery_order' || cleaned === 'deliveryorder') {
+        return ORDER_TYPE.DELIVERY;
+    }
+
+    // Return unknown - don't default to delivery as that blocks valid transitions
+    return 'unknown';
+}
 
 // Helper to normalize status (handles legacy 'pickedup' vs 'pickedUp')
 function normalizeStatus(status) {
@@ -40,7 +83,14 @@ function normalizeStatus(status) {
 // Helper to check if status is terminal
 function isTerminalStatus(status) {
     const normalized = normalizeStatus(status);
-    return [STATUS.DELIVERED, STATUS.CANCELLED, 'pickedup', STATUS.PICKED_UP].includes(normalized);
+    return [
+        STATUS.DELIVERED,
+        STATUS.CANCELLED,
+        STATUS.PAID,      // Terminal for takeaway/dine-in
+        STATUS.COLLECTED, // Terminal for pickup
+        'pickedup',
+        STATUS.PICKED_UP
+    ].includes(normalized);
 }
 
 /**
@@ -636,26 +686,117 @@ function _calculateDistance(lat1, lon1, lat2, lon2) {
 // --- STATUS TRANSITION VALIDATION ---
 
 /**
- * Valid status transition map.
- * Each key is a status, and the value is an array of valid next statuses.
- * Supports both 'pickedUp' and 'pickedup' for backwards compatibility.
+ * Industry-Level Order Type-Aware State Machine
+ * 
+ * Order Flows:
+ * - DELIVERY:  pending → preparing → needs_rider_assignment → rider_assigned → pickedUp → delivered
+ * - PICKUP:    pending → preparing → prepared → collected (prepaid orders)
+ * - TAKEAWAY:  pending → preparing → prepared → paid (pay at counter)
+ * - DINE_IN:   pending → preparing → prepared → served → paid
+ * 
+ * Each status maps to valid next statuses. The validateOrderStatusTransition
+ * function uses order type to determine if a transition is valid.
  */
 const VALID_TRANSITIONS = {
+    // Common starting point
     'pending': ['preparing', 'cancelled'],
-    'pending_payment': ['pending', 'preparing', 'cancelled'], // Added to allow handling
-    'preparing': ['rider_assigned', 'needs_rider_assignment', 'cancelled'],
-    'needs_rider_assignment': ['rider_assigned', 'cancelled', 'pickedUp', 'pickedup', 'delivered'], // Added terminal states for manual override
+    'pending_payment': ['pending', 'preparing', 'cancelled'],
+
+    // Preparing can go to different states based on order type
+    // - Delivery: needs_rider_assignment or rider_assigned
+    // - Non-delivery: prepared
+    'preparing': [
+        'prepared',                 // Non-delivery orders
+        'rider_assigned',           // Delivery (direct assignment)
+        'needs_rider_assignment',   // Delivery (auto-assign failed)
+        'cancelled'
+    ],
+
+    // NEW: Prepared status for non-delivery orders
+    // - Pickup: goes to collected
+    // - Takeaway: goes to paid
+    // - Dine-in: goes to served
+    'prepared': [
+        'served',       // Dine-in only
+        'paid',         // Takeaway only
+        'collected',    // Pickup only (prepaid)
+        'cancelled'
+    ],
+
+    // NEW: Served status (dine-in only)
+    'served': ['paid', 'cancelled'],
+
+    // NEW: Terminal statuses for non-delivery
+    'paid': ['refunded'],       // Terminal for takeaway/dine-in
+    'collected': ['refunded'],  // Terminal for pickup
+
+    // Delivery flow (unchanged)
+    'needs_rider_assignment': ['rider_assigned', 'cancelled', 'pickedUp', 'pickedup', 'delivered'],
     'rider_assigned': ['pickedUp', 'pickedup', 'cancelled'],
-    'pickedup': ['delivered', 'cancelled', 'preparing'], // Added 'preparing' for Exchange
-    'pickedUp': ['delivered', 'cancelled', 'refunded', 'preparing'], // Added 'preparing' for Exchange
-    'delivered': ['refunded', 'preparing'],  // Added 'preparing' for Exchange
-    'cancelled': ['refunded', 'preparing'],  // Added 'preparing' for Re-opening/Exchange
+    'pickedup': ['delivered', 'cancelled', 'preparing'],
+    'pickedUp': ['delivered', 'cancelled', 'refunded', 'preparing'],
+    'delivered': ['refunded', 'preparing'],
+
+    // Cancellation and refunds
+    'cancelled': ['refunded', 'preparing'],
     'refunded': [], // Terminal state
 };
 
 /**
+ * Get valid next statuses for a given order type and current status.
+ * This provides stricter validation based on order type.
+ */
+function getValidTransitionsForOrderType(currentStatus, orderType) {
+    const normalized = normalizeOrderType(orderType);
+    const baseTransitions = VALID_TRANSITIONS[currentStatus] || [];
+
+    // Filter based on order type
+    switch (normalized) {
+        case ORDER_TYPE.DELIVERY:
+            // Delivery orders skip prepared/served/paid/collected
+            return baseTransitions.filter(s =>
+                !['prepared', 'served', 'paid', 'collected'].includes(s)
+            );
+
+        case ORDER_TYPE.PICKUP:
+            // Pickup: prepared → collected (prepaid) OR paid (cash)
+            if (currentStatus === 'preparing') return ['prepared', 'cancelled'];
+            if (currentStatus === 'prepared') return ['collected', 'paid', 'cancelled'];
+            return baseTransitions.filter(s =>
+                !['served', 'rider_assigned', 'needs_rider_assignment', 'pickedUp', 'pickedup', 'delivered'].includes(s)
+            );
+
+        case ORDER_TYPE.TAKEAWAY:
+            // Takeaway: prepared → paid (skip served, collected)
+            if (currentStatus === 'preparing') return ['prepared', 'cancelled'];
+            if (currentStatus === 'prepared') return ['paid', 'cancelled'];
+            return baseTransitions.filter(s =>
+                !['served', 'collected', 'rider_assigned', 'needs_rider_assignment', 'pickedUp', 'pickedup', 'delivered'].includes(s)
+            );
+
+        case ORDER_TYPE.DINE_IN:
+            // Dine-in: prepared → served → paid (skip collected)
+            if (currentStatus === 'preparing') return ['prepared', 'cancelled'];
+            if (currentStatus === 'prepared') return ['served', 'cancelled'];
+            if (currentStatus === 'served') return ['paid', 'cancelled'];
+            return baseTransitions.filter(s =>
+                !['collected', 'rider_assigned', 'needs_rider_assignment', 'pickedUp', 'pickedup', 'delivered'].includes(s)
+            );
+
+        default:
+            return baseTransitions;
+    }
+}
+
+/**
  * FUNCTION 4: Status Transition Validator (Failsafe)
  * Triggered on ANY order update. Validates status transitions and reverts invalid ones.
+ * 
+ * Industry-Level Features:
+ * - Order-type-aware validation (different flows for delivery/pickup/takeaway/dine-in)
+ * - Backward compatibility with legacy statuses
+ * - Detailed logging for debugging
+ * - Auto-correction for invalid transitions
  */
 exports.validateOrderStatusTransition = onDocumentUpdated(
     { document: "Orders/{orderId}", region: GCP_LOCATION },
@@ -676,15 +817,43 @@ exports.validateOrderStatusTransition = onDocumentUpdated(
             return null;
         }
 
+        // Get order type for type-aware validation
+        const rawOrderType = afterData.Order_type || afterData.orderType || 'delivery';
+        const orderType = normalizeOrderType(rawOrderType);
+
         // Normalize statuses for comparison
         const normalizedOld = normalizeStatus(oldStatus);
         const normalizedNew = normalizeStatus(newStatus);
 
-        // Check if the transition is valid
-        const allowedNextStatuses = VALID_TRANSITIONS[normalizedOld] || VALID_TRANSITIONS[oldStatus] || [];
+        // Get valid transitions based on order type
+        const allowedNextStatuses = getValidTransitionsForOrderType(normalizedOld, rawOrderType);
 
-        if (!allowedNextStatuses.includes(newStatus) && !allowedNextStatuses.includes(normalizedNew)) {
-            logger.warn(`⚠️ [${orderId}] Invalid status transition: ${oldStatus} → ${newStatus}. Reverting...`);
+        // Also check base transitions for PERMISSIVE backward compatibility
+        // If the base state machine allows the transition, we always allow it
+        // This prevents blocking valid transitions when order type detection fails
+        const baseTransitions = VALID_TRANSITIONS[normalizedOld] || VALID_TRANSITIONS[oldStatus] || [];
+
+        // IMPORTANT: Allow if EITHER the order-type-specific OR the base allows it
+        const isValidTransition = allowedNextStatuses.includes(newStatus) ||
+            allowedNextStatuses.includes(normalizedNew) ||
+            baseTransitions.includes(newStatus) ||
+            baseTransitions.includes(normalizedNew);
+
+        // Additional safety: Always allow transitions to new non-delivery statuses
+        const isNewNonDeliveryStatus = ['prepared', 'served', 'paid', 'collected'].includes(newStatus);
+        const fromPreparing = normalizedOld === 'preparing';
+        const fromPrepared = normalizedOld === 'prepared';
+        const fromServed = normalizedOld === 'served';
+
+        // Always allow: preparing -> prepared, prepared -> served/paid/collected, served -> paid
+        const isValidNonDeliveryFlow =
+            (fromPreparing && newStatus === 'prepared') ||
+            (fromPrepared && ['served', 'paid', 'collected'].includes(newStatus)) ||
+            (fromServed && newStatus === 'paid');
+
+        if (!isValidTransition && !isValidNonDeliveryFlow) {
+            logger.warn(`⚠️ [${orderId}] Invalid status transition for ${orderType}: ${oldStatus} → ${newStatus}. Reverting...`);
+            logger.warn(`[${orderId}] Valid transitions from '${oldStatus}': order-type=${JSON.stringify(allowedNextStatuses)}, base=${JSON.stringify(baseTransitions)}`);
 
             let correctedStatus = oldStatus;
 
@@ -694,11 +863,21 @@ exports.validateOrderStatusTransition = onDocumentUpdated(
                 logger.log(`[${orderId}] Cannot skip to rider_assigned from pending. Setting to preparing`);
             }
 
+            // Special case: Non-delivery trying to go to needs_rider_assignment
+            if (newStatus === STATUS.NEEDS_ASSIGNMENT && orderType !== ORDER_TYPE.DELIVERY) {
+                if (oldStatus === STATUS.PREPARING) {
+                    correctedStatus = STATUS.PREPARED;
+                    logger.log(`[${orderId}] Non-delivery order cannot go to needs_rider_assignment. Setting to prepared`);
+                }
+            }
+
             await event.data.after.ref.update({
                 'status': correctedStatus,
                 '_cloudFunctionUpdate': true,
                 '_invalidTransitionLog': FieldValue.arrayUnion({
                     attemptedTransition: `${oldStatus} → ${newStatus}`,
+                    orderType: orderType,
+                    allowedTransitions: allowedNextStatuses,
                     correctedTo: correctedStatus,
                     timestamp: new Date().toISOString(),
                 }),

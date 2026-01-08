@@ -8,6 +8,7 @@ import 'package:vibration/vibration.dart';
 
 import '../Screens/MainScreen.dart';
 import '../main.dart'; // Imports UserScopeService
+import 'PrintingService.dart';
 import 'RiderAssignment.dart';
 
 class OrderNotificationService with ChangeNotifier {
@@ -233,6 +234,20 @@ class OrderNotificationService with ChangeNotifier {
                     'acceptedAt': FieldValue.serverTimestamp(),
                   });
                 });
+
+                // Auto-print receipt after successful acceptance
+                try {
+                  final orderDoc = await FirebaseFirestore.instance
+                      .collection('Orders')
+                      .doc(orderId)
+                      .get();
+                  if (orderDoc.exists && context.mounted) {
+                    await PrintingService.printReceipt(context, orderDoc);
+                    debugPrint("✅ Auto-printed receipt for order $orderId");
+                  }
+                } catch (printError) {
+                  debugPrint("⚠️ Auto-print failed (non-blocking): $printError");
+                }
 
               } catch (e) {
                 debugPrint("❌ Failed to accept order: $e");

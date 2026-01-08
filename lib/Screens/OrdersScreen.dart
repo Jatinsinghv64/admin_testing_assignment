@@ -400,6 +400,10 @@ class _OrdersScreenState extends State<OrdersScreen>
                     Icons.schedule_rounded),
                 _buildEnhancedStatusChip('Preparing',
                     AppConstants.statusPreparing, Icons.restaurant_rounded),
+                _buildEnhancedStatusChip('Prepared',
+                    AppConstants.statusPrepared, Icons.check_circle_outline_rounded),
+                _buildEnhancedStatusChip('Served',
+                    AppConstants.statusServed, Icons.restaurant_menu_rounded),
                 _buildEnhancedStatusChip('Needs Assign',
                     AppConstants.statusNeedsAssignment, Icons.person_pin_circle_outlined),
                 _buildEnhancedStatusChip('Rider Assigned',
@@ -408,6 +412,10 @@ class _OrdersScreenState extends State<OrdersScreen>
                     AppConstants.statusPickedUp, Icons.local_shipping_rounded),
                 _buildEnhancedStatusChip('Delivered',
                     AppConstants.statusDelivered, Icons.check_circle_rounded),
+                _buildEnhancedStatusChip('Paid',
+                    AppConstants.statusPaid, Icons.payments_rounded),
+                _buildEnhancedStatusChip('Collected',
+                    AppConstants.statusCollected, Icons.shopping_bag_rounded),
                 _buildEnhancedStatusChip('Cancelled',
                     AppConstants.statusCancelled, Icons.cancel_rounded),
               ],
@@ -512,8 +520,9 @@ class _OrdersScreenState extends State<OrdersScreen>
         await Future.delayed(const Duration(milliseconds: 300));
       },
       color: Colors.deepPurple,
-      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _orderService.getOrdersStream(
+      // ✅ FIX: Use getOrdersStreamMerged to handle both branchId and branchIds fields
+      child: StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+        stream: _orderService.getOrdersStreamMerged(
           orderType: orderType,
           status: _selectedStatus,
           userScope: userScope,
@@ -538,6 +547,7 @@ class _OrdersScreenState extends State<OrdersScreen>
 
           if (snapshot.hasError) {
             // ✅ IMPROVED: User-friendly error display
+            debugPrint('❌ OrdersScreen StreamBuilder error: ${snapshot.error}');
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -558,7 +568,9 @@ class _OrdersScreenState extends State<OrdersScreen>
             );
           }
 
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          final docs = snapshot.data ?? [];
+          
+          if (docs.isEmpty) {
             // ✅ IMPROVED: Wrap in ListView for pull-to-refresh to work on empty state
             return ListView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -584,8 +596,6 @@ class _OrdersScreenState extends State<OrdersScreen>
               ],
             );
           }
-
-          final docs = snapshot.data!.docs;
 
           return ListView.separated(
             controller: _scrollController,
@@ -1048,19 +1058,30 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
-    // 2. Ready & Completion Logic for non-delivery orders (pickup, takeaway, dine-in)
+    // 2. Order-type-specific flow logic
+    // ========================================
+    
+    // DELIVERY: preparing → needs_rider_assignment → rider_assigned → pickedUp → delivered
+    // PICKUP (prepaid): preparing → prepared → collected
+    // TAKEAWAY (pay at counter): preparing → prepared → paid
+    // DINE-IN: preparing → prepared → served → paid
+    
+    final bool isPickup = AppConstants.normalizeOrderType(orderType) == AppConstants.orderTypePickup;
+    final bool isTakeaway = AppConstants.normalizeOrderType(orderType) == AppConstants.orderTypeTakeaway;
+    
     if (!isDelivery) {
-      // Step A: Mark as Ready (Preparing -> Ready)
+      // ===== NON-DELIVERY ORDER FLOWS =====
+      
+      // Step A: Mark as Prepared (Preparing → Prepared)
       if (status == AppConstants.statusPreparing) {
         buttons.add(
           ElevatedButton.icon(
             icon: const Icon(Icons.check_circle_outlined, size: 16),
-            label: const Text('Mark as Ready'),
-            // "needs_rider_assignment" is used as the "Ready" state for non-delivery orders
+            label: const Text('Mark Prepared'),
             onPressed: () => widget.onStatusChange(
-                widget.order.id, AppConstants.statusNeedsAssignment),
+                widget.order.id, AppConstants.statusPrepared),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
+              backgroundColor: Colors.teal.shade600,
               foregroundColor: Colors.white,
               padding: btnPadding,
               minimumSize: btnMinSize,
@@ -1070,14 +1091,121 @@ class _OrderCardState extends State<_OrderCard> {
         );
       }
       
-      // Step B: Complete Order (Ready -> Delivered)
+      // Step B: Order-type-specific next action after Prepared
+      if (status == AppConstants.statusPrepared) {
+        if (isDineIn) {
+          // DINE-IN: Prepared → Served
+          buttons.add(
+            ElevatedButton.icon(
+              icon: const Icon(Icons.restaurant_menu, size: 16),
+              label: const Text('Mark Served'),
+              onPressed: () => widget.onStatusChange(
+                  widget.order.id, AppConstants.statusServed),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green.shade600,
+                foregroundColor: Colors.white,
+                padding: btnPadding,
+                minimumSize: btnMinSize,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          );
+        } else if (isPickup) {
+          // PICKUP: Check payment method
+          // - Prepaid (online payment): Prepared → Collected
+          // - Cash on pickup: Prepared → Paid
+          final String paymentMethod = (data['payment_method'] ?? data['paymentMethod'] ?? '').toString().toLowerCase();
+          final bool isPrepaid = paymentMethod == 'online' || 
+                                  paymentMethod == 'card' || 
+                                  paymentMethod == 'prepaid' ||
+                                  paymentMethod == 'apple_pay' ||
+                                  paymentMethod == 'google_pay';
+          
+          if (isPrepaid) {
+            // Prepaid pickup: Just mark as collected
+            buttons.add(
+              ElevatedButton.icon(
+                icon: const Icon(Icons.shopping_bag_outlined, size: 16),
+                label: const Text('Collected'),
+                onPressed: () => widget.onStatusChange(
+                    widget.order.id, AppConstants.statusCollected),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade700,
+                  foregroundColor: Colors.white,
+                  padding: btnPadding,
+                  minimumSize: btnMinSize,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            );
+          } else {
+            // Cash on pickup: Need to collect payment
+            buttons.add(
+              ElevatedButton.icon(
+                icon: const Icon(Icons.payments, size: 16),
+                label: const Text('Paid & Collected'),
+                onPressed: () => widget.onStatusChange(
+                    widget.order.id, AppConstants.statusPaid),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue.shade700,
+                  foregroundColor: Colors.white,
+                  padding: btnPadding,
+                  minimumSize: btnMinSize,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            );
+          }
+        } else if (isTakeaway) {
+          // TAKEAWAY: Prepared → Paid
+          buttons.add(
+            ElevatedButton.icon(
+              icon: const Icon(Icons.payments, size: 16),
+              label: const Text('Mark Paid'),
+              onPressed: () => widget.onStatusChange(
+                  widget.order.id, AppConstants.statusPaid),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue.shade700,
+                foregroundColor: Colors.white,
+                padding: btnPadding,
+                minimumSize: btnMinSize,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          );
+        }
+      }
+      
+      // Step C: Dine-in Served → Paid
+      if (status == AppConstants.statusServed && isDineIn) {
+        buttons.add(
+          ElevatedButton.icon(
+            icon: const Icon(Icons.payments, size: 16),
+            label: const Text('Mark Paid'),
+            onPressed: () => widget.onStatusChange(
+                widget.order.id, AppConstants.statusPaid),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade700,
+              foregroundColor: Colors.white,
+              padding: btnPadding,
+              minimumSize: btnMinSize,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        );
+      }
+      
+      // LEGACY SUPPORT: Handle old orders stuck on needs_rider_assignment
+      // This ensures backward compatibility with orders created before this update
       if (status == AppConstants.statusNeedsAssignment) {
         buttons.add(
           ElevatedButton.icon(
             icon: Icon(isDineIn ? Icons.restaurant_menu : Icons.local_mall, size: 16),
-            label: Text(AppConstants.getCompletionButtonText(orderType)),
+            label: Text(isDineIn ? 'Mark Served' : (isPickup ? 'Collected' : 'Mark Paid')),
             onPressed: () => widget.onStatusChange(
-                widget.order.id, AppConstants.statusDelivered),
+                widget.order.id, 
+                isDineIn ? AppConstants.statusServed : 
+                  (isPickup ? AppConstants.statusCollected : AppConstants.statusPaid)),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade700,
               foregroundColor: Colors.white,
@@ -1267,10 +1395,12 @@ class _OrderCardState extends State<_OrderCard> {
       );
     }
 
-    // 5. Cancel Order Logic
+    // 5. Cancel Order Logic (hide for terminal statuses)
     if (status != AppConstants.statusCancelled &&
         status != AppConstants.statusDelivered &&
-        status != 'refunded') {
+        status != AppConstants.statusPaid &&
+        status != AppConstants.statusCollected &&
+        status != AppConstants.statusRefunded) {
       buttons.add(
         ElevatedButton.icon(
           icon: const Icon(Icons.cancel, size: 16),
@@ -1435,26 +1565,52 @@ class _OrderCardState extends State<_OrderCard> {
     // Only show branch badge if user has access to multiple branches
     final showBranchBadge = branchId != null && userScope.branchIds.length > 1;
 
+    // --- PAYMENT METHOD DETECTION ---
+    final String paymentMethod = (data['payment_method'] ?? data['paymentMethod'] ?? '').toString().toLowerCase();
+    final bool isCashPayment = paymentMethod == 'cash' || 
+                                paymentMethod == 'cod' || 
+                                paymentMethod == 'cash_on_delivery' ||
+                                paymentMethod.isEmpty; // Treat empty as cash for safety
+    final bool isPrepaid = paymentMethod == 'online' || 
+                           paymentMethod == 'card' || 
+                           paymentMethod == 'prepaid' ||
+                           paymentMethod == 'apple_pay' ||
+                           paymentMethod == 'google_pay';
+
     // --- BANNER LOGIC ---
     Color? bannerColor;
     String? bannerText;
     IconData? bannerIcon;
     bool showBanner = false;
 
+    // Priority 1: Pending refund (highest priority)
     if (hasPendingRefund) {
       bannerColor = Colors.red;
       bannerText = 'RETURN REQUEST';
       bannerIcon = Icons.report_problem_outlined;
       showBanner = true;
-    } else if (status == AppConstants.statusRefunded || status == 'refunded') {
+    } 
+    // Priority 2: Refunded order
+    else if (status == AppConstants.statusRefunded || status == 'refunded') {
       bannerColor = Colors.pink;
       bannerText = 'RETURNED ORDER';
       bannerIcon = Icons.assignment_return_outlined;
       showBanner = true;
-    } else if (data['isExchange'] == true) {
+    } 
+    // Priority 3: Exchange order
+    else if (data['isExchange'] == true) {
       bannerColor = Colors.teal;
       bannerText = 'EXCHANGE ORDER';
       bannerIcon = Icons.swap_horiz_outlined;
+      showBanner = true;
+    }
+    // Priority 4: Cash payment (only for active orders that need payment collection)
+    else if (isCashPayment && 
+             !AppConstants.isTerminalStatus(status) && 
+             status != AppConstants.statusCancelled) {
+      bannerColor = Colors.orange.shade700;
+      bannerText = '💵 CASH PAYMENT';
+      bannerIcon = Icons.attach_money;
       showBanner = true;
     }
 
@@ -1580,33 +1736,108 @@ class _OrderCardState extends State<_OrderCard> {
                                 ? Colors.blue.shade600
                                 : Colors.grey[600],
                             fontSize: 12)),
-                    if (showBranchBadge) ...[
+                    if (showBranchBadge) ...[ 
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          // Branch badge
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.store, size: 10, color: Colors.grey[700]),
+                                const SizedBox(width: 4),
+                                Builder(builder: (context) {
+                                  final branchFilter = context.watch<BranchFilterService>();
+                                  return Text(
+                                    branchFilter.getBranchName(branchId!),
+                                    style: TextStyle(
+                                      color: Colors.grey[800],
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          // Payment method badge
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isCashPayment 
+                                  ? Colors.orange.withOpacity(0.15) 
+                                  : Colors.green.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: isCashPayment 
+                                    ? Colors.orange.withOpacity(0.5) 
+                                    : Colors.green.withOpacity(0.5),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isCashPayment ? Icons.attach_money : Icons.credit_card,
+                                  size: 10,
+                                  color: isCashPayment ? Colors.orange[800] : Colors.green[800],
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  AppConstants.getPaymentDisplayText(paymentMethod),
+                                  style: TextStyle(
+                                    color: isCashPayment ? Colors.orange[900] : Colors.green[900],
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    // Show payment badge even without branch badge
+                    if (!showBranchBadge) ...[
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.grey.withOpacity(0.15),
+                          color: isCashPayment 
+                              ? Colors.orange.withOpacity(0.15) 
+                              : Colors.green.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                          border: Border.all(
+                            color: isCashPayment 
+                                ? Colors.orange.withOpacity(0.5) 
+                                : Colors.green.withOpacity(0.5),
+                          ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.store, size: 10, color: Colors.grey[700]),
+                            Icon(
+                              isCashPayment ? Icons.attach_money : Icons.credit_card,
+                              size: 10,
+                              color: isCashPayment ? Colors.orange[800] : Colors.green[800],
+                            ),
                             const SizedBox(width: 4),
-                            // Safe name lookup
-                            Builder(builder: (context) {
-                              // We use Consumer or context.watch to ensure name updates if loaded lazily
-                              final branchFilter = context.watch<BranchFilterService>();
-                              return Text(
-                                branchFilter.getBranchName(branchId!),
-                                style: TextStyle(
-                                  color: Colors.grey[800],
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              );
-                            }),
+                            Text(
+                              AppConstants.getPaymentDisplayText(paymentMethod),
+                              style: TextStyle(
+                                color: isCashPayment ? Colors.orange[900] : Colors.green[900],
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ],
                         ),
                       ),
