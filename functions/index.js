@@ -1,11 +1,15 @@
 const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler"); // <--- V2 Scheduler
+const { setGlobalOptions } = require("firebase-functions/v2"); // <--- Import Global Options
 const { getFirestore, FieldValue, GeoPoint } = require("firebase-admin/firestore");
 const { CloudTasksClient } = require("@google-cloud/tasks");
 const { logger } = require("firebase-functions");
 const admin = require("firebase-admin");
 const { DateTime } = require("luxon"); // <--- Timezone handling
+
+// --- GLOBAL OPTIONS (Fix for Quota Exceeded) ---
+setGlobalOptions({ maxInstances: 10 });
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -1376,8 +1380,17 @@ function _calculateDistance(lat1, lon1, lat2, lon2) {
  * @param {string} orderId - The order ID
  * @param {object} orderData - Order data for notification content
  */
+/**
+ * PRODUCTION-GRADE FCM: Send Assignment Notification to Rider
+ * Uses V1 API for reliable delivery.
+ * Updates the `notificationSent` flag to track delivery status.
+ * 
+ * @param {string} riderId - The rider's document ID
+ * @param {string} orderId - The order ID
+ * @param {object} orderData - Order data for notification content
+ */
 async function sendAssignmentFCM(riderId, orderId, orderData) {
-    logger.log(`[${orderId}] 📤 PREPARING FCM for rider ${riderId}...`);
+    logger.log(`[${orderId}] 📤 PREPARING FCM (V1) for rider ${riderId}...`);
     try {
         const driverDoc = await db.collection('Drivers').doc(riderId).get();
 
@@ -1396,53 +1409,83 @@ async function sendAssignmentFCM(riderId, orderId, orderData) {
 
         logger.log(`[${orderId}] 🔹 Found FCM token for ${riderId}: ${fcmToken.substring(0, 10)}...`);
 
-        // LEGACY PAYLOAD (Compatible with current Rider App)
-        // Data-only payload prevents duplicate notifications on Flutter
-        const payload = {
+        // V1 API PAYLOAD - PLATFORM SPECIFIC
+        // Avoiding top-level 'notification' to ensure precise control and prevent duplicates
+        const message = {
+            token: fcmToken,
+            // Custom Data (Payload)
             data: {
                 type: 'auto_assignment',
                 title: '📦 New Order Available',
                 body: `New ${orderData.Order_type || 'Delivery'} Order`,
                 orderId: orderId,
-                timeoutSeconds: ASSIGNMENT_TIMEOUT_SECONDS.toString(),
-                click_action: 'FLUTTER_NOTIFICATION_CLICK',
+                timeoutSeconds: String(ASSIGNMENT_TIMEOUT_SECONDS),
+                click_action: 'FLUTTER_NOTIFICATION_CLICK', // For legacy listeners
                 priority: 'high',
                 content_available: 'true',
-                timestamp: Date.now().toString(),
+                timestamp: String(Date.now()),
             },
+            // Android Specifics
             android: {
                 priority: 'high',
+                notification: {
+                    title: '📦 New Order Available',
+                    body: `New ${orderData.Order_type || 'Delivery'} Order`,
+                    clickAction: 'FLUTTER_NOTIFICATION_CLICK', // RESTORED: Critical for routing
+                    sound: 'default',
+                    priority: 'high',
+                    channelId: 'fcm_default_channel' // Safe default for Flutter
+                }
             },
+            // iOS Specifics
             apns: {
-                headers: { 'apns-priority': '10' },
+                headers: {
+                    'apns-priority': '10',
+                },
                 payload: {
                     aps: {
+                        alert: {
+                            title: '📦 New Order Available',
+                            body: `New ${orderData.Order_type || 'Delivery'} Order`,
+                        },
                         contentAvailable: true,
                         sound: 'default',
+                        badge: 1
                     }
                 }
             }
         };
 
-        const options = {
-            priority: 'high',
-            contentAvailable: true, // CRITICAL for iOS background wake-up
-            timeToLive: ASSIGNMENT_TIMEOUT_SECONDS
-        };
+        const response = await admin.messaging().send(message);
 
-        // Use sendToDevice for maximum compatibility
-        await admin.messaging().sendToDevice(fcmToken, payload, options);
-
-        // Mark notification as sent
-        await db.collection('rider_assignments').doc(orderId).update({
-            notificationSent: true
-        });
-
-        logger.log(`[${orderId}] ✅ FCM SENT via Legacy API to ${driverData.name || 'Rider'}`);
-        return true;
+        // V1 API returns a message ID string on success
+        if (response) {
+            await db.collection('rider_assignments').doc(orderId).update({
+                notificationSent: true
+            });
+            logger.log(`[${orderId}] ✅ FCM SENT via V1 API to ${driverData.name || 'Rider'} (MsgID: ${response})`);
+            return true;
+        } else {
+            logger.warn(`[${orderId}] ⚠️ FCM Send returned empty response`);
+            return false;
+        }
 
     } catch (err) {
         logger.error(`[${orderId}] 🔥 FCM FAILURE for rider ${riderId}:`, err);
+
+        // Handle invalid token cleanup
+        if (err.code === 'messaging/registration-token-not-registered' ||
+            err.code === 'messaging/invalid-argument') {
+            logger.warn(`[${orderId}] 🗑️ Removing invalid FCM token for rider ${riderId}`);
+            try {
+                await db.collection('Drivers').doc(riderId).update({
+                    fcmToken: FieldValue.delete()
+                });
+            } catch (e) {
+                logger.error(`Failed to remove token: ${e.message}`);
+            }
+        }
+
         return false;
     }
 }
