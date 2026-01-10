@@ -65,6 +65,82 @@
             ]
         },
         {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "Order_type",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "Order_type",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "Order_type",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "branchId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
             "collectionGroup": "Drivers",
             "queryScope": "COLLECTION",
             "fields": [

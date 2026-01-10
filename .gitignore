@@ -43,3 +43,23 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ========================================
+# Security - NEVER commit these files!
+# ========================================
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+*.env
+functions/.env
+functions/.secret.*
+
+# Service account keys (should never be in repo)
+*-serviceaccount.json
+*-service-account.json
+serviceAccountKey.json
+**/serviceAccountKey.json
+
+# Local configuration that might contain secrets
+local.properties

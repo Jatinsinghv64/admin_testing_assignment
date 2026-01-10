@@ -10,6 +10,7 @@ import '../Widgets/OrderService.dart';
 import '../Widgets/PrintingService.dart';
 import '../Widgets/RiderAssignment.dart';
 import '../Widgets/TimeUtils.dart';
+import '../Widgets/CancellationDialog.dart'; // ✅ Shared cancellation dialog
 import '../main.dart';
 import '../constants.dart';
 import '../Widgets/BranchFilterService.dart'; // ✅ Added
@@ -504,7 +505,8 @@ class _OrdersScreenState extends State<OrdersScreen>
   }
 
   Widget _buildOrdersList(String orderType) {
-    final userScope = context.read<UserScopeService>();
+    // ✅ FIX: Use watch for both so screen reacts to branch changes from backend
+    final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>(); // Watch for filter changes
 
     // Get branches to filter by (respects branch selector)
@@ -1022,6 +1024,12 @@ class _OrderCardState extends State<_OrderCard> {
     final data = widget.order.data();
     final String orderType = widget.orderType;
     final String? riderId = data['riderId'];
+    
+    // Get branch info (Moved here for access in buttons)
+    // Get branch info (Moved here for access in buttons)
+    final branchId = (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty)
+            ? data['branchIds'][0].toString()
+            : null;
 
     // Use normalized order type for consistent comparison
     final bool isDelivery = AppConstants.isDeliveryOrder(orderType);
@@ -1247,20 +1255,65 @@ class _OrderCardState extends State<_OrderCard> {
       // Only show assignment buttons if no rider is currently assigned
       if (canAssign && !isAutoAssigning && (riderId == null || riderId.isEmpty)) {
         buttons.add(
-          ElevatedButton.icon(
-            icon: const Icon(Icons.delivery_dining, size: 16),
-            label: Text(
-                needsManualAssignment ? 'Assign Manually' : 'Assign Rider'),
-            onPressed: () => _assignRiderManually(context),
-            style: ElevatedButton.styleFrom(
-              backgroundColor:
-              needsManualAssignment ? Colors.orange : Colors.blue,
-              foregroundColor: Colors.white,
-              padding: btnPadding,
-              minimumSize: btnMinSize,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 1. Auto Assign Button (New)
+              ElevatedButton.icon(
+                icon: const Icon(Icons.autorenew, size: 16),
+                label: const Text('Auto Assign'),
+                onPressed: () async {
+                  // Trigger auto-assignment
+                  final success = await RiderAssignmentService.autoAssignRider(
+                    orderId: widget.order.id,
+                  );
+                  
+                  if (mounted) {
+                    if (success) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Auto-assignment started! Finding nearest rider...'),
+                          backgroundColor: Colors.blue,
+                        ),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Could not start auto-assignment. Check conditions.'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purple.shade600,
+                  foregroundColor: Colors.white,
+                  padding: btnPadding,
+                  minimumSize: btnMinSize,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              
+              // 2. Manual Assignment Button
+              ElevatedButton.icon(
+                icon: const Icon(Icons.person_add, size: 16),
+                label: Text(
+                    needsManualAssignment ? 'Assign Manually' : 'Manual Assign'),
+                onPressed: () => _assignRiderManually(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor:
+                  needsManualAssignment ? Colors.orange : Colors.grey.shade700,
+                  foregroundColor: Colors.white,
+                  padding: btnPadding,
+                  minimumSize: btnMinSize,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
           ),
         );
       }
@@ -1557,10 +1610,10 @@ class _OrderCardState extends State<_OrderCard> {
         refundRequest != null && refundRequest['status'] == 'pending';
 
     // Get branch info for badge
-    final branchId = data['branchId']?.toString() ?? 
-        (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty 
-            ? data['branchIds'][0].toString() 
-            : null);
+    // Get branch info for badge
+    final branchId = (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty)
+            ? data['branchIds'][0].toString()
+            : null;
     final userScope = context.read<UserScopeService>();
     // Only show branch badge if user has access to multiple branches
     final showBranchBadge = branchId != null && userScope.branchIds.length > 1;
@@ -1611,6 +1664,20 @@ class _OrderCardState extends State<_OrderCard> {
       bannerColor = Colors.orange.shade700;
       bannerText = '💵 CASH PAYMENT';
       bannerIcon = Icons.attach_money;
+      showBanner = true;
+    }
+    // Priority 5: Auto-assigning rider (delivery orders searching for riders)
+    else if (isAutoAssigning) {
+      bannerColor = Colors.blue.shade600;
+      bannerText = '🔍 FINDING RIDER...';
+      bannerIcon = Icons.delivery_dining;
+      showBanner = true;
+    }
+    // Priority 6: Needs manual assignment (auto-assignment failed)
+    else if (needsManualAssignment) {
+      bannerColor = Colors.deepOrange.shade600;
+      bannerText = '⚠️ NEEDS RIDER ASSIGNMENT';
+      bannerIcon = Icons.person_pin_circle_outlined;
       showBanner = true;
     }
 
@@ -2293,6 +2360,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
 
     final List<Widget> buttons = [];
     final data = widget.order.data() as Map<String, dynamic>? ?? {};
+    final String riderId = data['riderId']?.toString() ?? '';
 
     // Use normalized order type for consistent comparison
     final bool isDelivery = AppConstants.isDeliveryOrder(orderType);
@@ -2434,38 +2502,92 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
       }
 
       if (isAutoAssigning) {
+        // Show indicator with Stop button
         buttons.add(
-          ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 40),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.withOpacity(0.3)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation(Colors.blue),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.blue.withOpacity(0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation(Colors.blue),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Auto-assigning...',
+                  style: TextStyle(
+                    color: Colors.blue,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () async {
+                    await RiderAssignmentService.cancelAutoAssignment(orderId);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Auto-assignment stopped')),
+                      );
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'Stop',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
                     ),
                   ),
-                  SizedBox(width: 8),
-                  Text(
-                    'Auto-assigning rider...',
-                    style: TextStyle(
-                      color: Colors.blue,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      
+      // Show "Restart Auto-Assignment" for orders that need assignment but aren't auto-assigning
+      if (needsManualAssignment && !isAutoAssigning && riderId.isEmpty) {
+        buttons.add(
+          OutlinedButton.icon(
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Restart Auto-Assignment'),
+            onPressed: () async {
+              final success = await RiderAssignmentService.autoAssignRider(orderId: orderId);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(success 
+                        ? 'Auto-assignment restarted' 
+                        : 'Failed to restart auto-assignment'),
+                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
-                ],
-              ),
+                );
+              }
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.blue,
+              side: const BorderSide(color: Colors.blue),
+              padding: btnPadding,
+              minimumSize: btnMinSize,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
         );
@@ -2806,227 +2928,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
   Color _getStatusColor(String status) => StatusUtils.getColor(status);
 }
 
+// CancellationReasonDialog is now imported from '../Widgets/CancellationDialog.dart'
 
-class CancellationReasonDialog extends StatefulWidget {
-  const CancellationReasonDialog({super.key});
-
-  @override
-  State<CancellationReasonDialog> createState() =>
-      _CancellationReasonDialogState();
-}
-
-class _CancellationReasonDialogState extends State<CancellationReasonDialog> {
-  String? _selectedReason;
-  final TextEditingController _otherReasonController = TextEditingController();
-  final FocusNode _otherFocusNode = FocusNode();
-
-  final List<String> _reasons = [
-    'Customer Request',
-    'Out of Stock',
-    'Kitchen Busy / Closed',
-    'Duplicate Order',
-    'Other'
-  ];
-
-  @override
-  void dispose() {
-    _otherReasonController.dispose();
-    _otherFocusNode.dispose();
-    super.dispose();
-  }
-
-  void _onReasonSelected(String? value) {
-    setState(() {
-      _selectedReason = value;
-    });
-
-    if (value == 'Other') {
-      Future.delayed(const Duration(milliseconds: 100), () {
-        if (mounted) FocusScope.of(context).requestFocus(_otherFocusNode);
-      });
-    } else {
-      _otherFocusNode.unfocus();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bool isOther = _selectedReason == 'Other';
-    final bool isValid = _selectedReason != null &&
-        (!isOther || _otherReasonController.text.trim().isNotEmpty);
-
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      elevation: 5,
-      backgroundColor: Colors.white,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.warning_amber_rounded, color: Colors.red.shade700),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Cancel Order?',
-                    style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.red.shade900),
-                  ),
-                ],
-              ),
-            ),
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "Please select a reason for cancellation:",
-                      style: TextStyle(
-                          fontWeight: FontWeight.w500, color: Colors.grey),
-                    ),
-                    const SizedBox(height: 10),
-                    ..._reasons.map((reason) {
-                      final bool isSelected = _selectedReason == reason;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8.0),
-                        child: InkWell(
-                          onTap: () => _onReasonSelected(reason),
-                          borderRadius: BorderRadius.circular(8),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                  color: isSelected
-                                      ? Colors.red
-                                      : Colors.grey.shade300,
-                                  width: isSelected ? 2 : 1),
-                              borderRadius: BorderRadius.circular(8),
-                              color: isSelected
-                                  ? Colors.red.shade50
-                                  : Colors.white,
-                            ),
-                            child: RadioListTile<String>(
-                              title: Text(
-                                reason,
-                                style: TextStyle(
-                                    fontWeight: isSelected
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                    color: isSelected
-                                        ? Colors.red.shade900
-                                        : Colors.black87),
-                              ),
-                              value: reason,
-                              groupValue: _selectedReason,
-                              onChanged: _onReasonSelected,
-                              activeColor: Colors.red,
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                              visualDensity: VisualDensity.compact,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8)),
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                    AnimatedCrossFade(
-                      firstChild:
-                      const SizedBox(width: double.infinity, height: 0),
-                      secondChild: Padding(
-                        padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
-                        child: TextField(
-                          controller: _otherReasonController,
-                          focusNode: _otherFocusNode,
-                          onChanged: (_) => setState(() {}),
-                          decoration: InputDecoration(
-                            labelText: 'Specify reason...',
-                            hintText: 'e.g. Customer changed mind',
-                            filled: true,
-                            fillColor: Colors.grey.shade50,
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide:
-                              const BorderSide(color: Colors.red, width: 2),
-                            ),
-                          ),
-                          maxLines: 2,
-                        ),
-                      ),
-                      crossFadeState: isOther
-                          ? CrossFadeState.showSecond
-                          : CrossFadeState.showFirst,
-                      duration: const Duration(milliseconds: 200),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () => Navigator.of(context).pop(null),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        foregroundColor: Colors.grey.shade700,
-                      ),
-                      child: const Text('Keep Order'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: isValid
-                          ? () {
-                        String finalReason = _selectedReason!;
-                        if (finalReason == 'Other') {
-                          finalReason =
-                              _otherReasonController.text.trim();
-                        }
-                        Navigator.of(context).pop(finalReason);
-                      }
-                          : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                        disabledBackgroundColor: Colors.red.shade100,
-                      ),
-                      child: const Text('Confirm Cancel'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _RiderSelectionDialog extends StatelessWidget {
   final String? currentBranchId;

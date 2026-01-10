@@ -42,6 +42,23 @@ class AppConstants {
   static const int maxLoginAttempts = 5;
   static const Duration loginLockoutDuration = Duration(minutes: 15);
 
+  // Session Security
+  static const Duration sessionTimeout = Duration(hours: 24);
+  static const Duration tokenRefreshInterval = Duration(hours: 1);
+
+  // Input Validation Limits
+  static const int maxInputLength = 1000;
+  static const int maxNotesLength = 500;
+  static const int maxNameLength = 100;
+  static const int maxEmailLength = 254;
+  static const int maxPhoneLength = 20;
+  static const int maxAddressLength = 500;
+
+  // Price Limits (for validation)
+  static const double maxPriceValue = 99999.99;
+  static const double maxOrderTotal = 999999.99;
+  static const int maxItemsPerOrder = 50;
+
   // Cache Expiration
   static const Duration branchCacheExpiration = Duration(minutes: 30);
 

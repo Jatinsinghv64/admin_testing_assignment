@@ -55,7 +55,6 @@ class RiderAssignmentService {
   /// This triggers the Cloud Function 'startAssignmentWorkflowV2'.
   static Future<bool> autoAssignRider({
     required String orderId,
-    required String branchId,
   }) async {
     try {
       final orderDoc = await _firestore
@@ -215,9 +214,44 @@ class RiderAssignmentService {
         .snapshots();
   }
 
+  /// Cancel auto-assignment and unlock any pending rider.
+  /// Use this when admin wants to manually assign or cancel the order.
   static Future<void> cancelAutoAssignment(String orderId) async {
     try {
-      // Update order first
+      // 1. Check if there's an active assignment
+      final assignmentDoc = await _firestore
+          .collection(AppConstants.collectionRiderAssignments)
+          .doc(orderId)
+          .get()
+          .timeout(AppConstants.firestoreTimeout);
+      
+      // 2. If assignment exists, unlock the rider first
+      if (assignmentDoc.exists) {
+        final assignmentData = assignmentDoc.data() as Map<String, dynamic>;
+        final riderId = assignmentData['riderId'] as String?;
+        
+        // Unlock the rider if one was assigned
+        if (riderId != null && riderId.isNotEmpty && riderId != 'RETRY_SEARCH') {
+          await _firestore
+              .collection(AppConstants.collectionDrivers)
+              .doc(riderId)
+              .update({
+                'isAvailable': true,
+                'currentOfferOrderId': FieldValue.delete(),
+              })
+              .timeout(AppConstants.firestoreWriteTimeout);
+          debugPrint('Unlocked rider $riderId after cancelling auto-assignment');
+        }
+        
+        // Delete the assignment record
+        await _firestore
+            .collection(AppConstants.collectionRiderAssignments)
+            .doc(orderId)
+            .delete()
+            .timeout(AppConstants.firestoreWriteTimeout);
+      }
+      
+      // 3. Update order to remove auto-assignment markers
       await _firestore
           .collection(AppConstants.collectionOrders)
           .doc(orderId)
@@ -226,25 +260,73 @@ class RiderAssignmentService {
             'assignmentNotes': 'Auto-assignment cancelled by admin',
           })
           .timeout(AppConstants.firestoreWriteTimeout);
-      
-      // Check if assignment record exists before deleting
-      final assignmentDoc = await _firestore
-          .collection(AppConstants.collectionRiderAssignments)
-          .doc(orderId)
-          .get()
-          .timeout(AppConstants.firestoreTimeout);
-      
-      if (assignmentDoc.exists) {
-        await _firestore
-            .collection(AppConstants.collectionRiderAssignments)
-            .doc(orderId)
-            .delete()
-            .timeout(AppConstants.firestoreWriteTimeout);
-      }
+          
     } on TimeoutException {
       debugPrint('Timeout cancelling auto-assignment for order $orderId');
     } catch (e) {
       debugPrint('Error cancelling auto-assignment: $e');
+    }
+  }
+
+  /// Restart auto-assignment workflow for a stuck order.
+  /// This cleans up any existing assignment and starts fresh.
+  /// Use when the previous auto-assignment got stuck or failed.
+  static Future<bool> restartAutoAssignment({
+    required String orderId,
+  }) async {
+    try {
+      // 1. First, cancel any existing assignment
+      await cancelAutoAssignment(orderId);
+      
+      // 2. Short delay to ensure cleanup is complete
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // 3. Verify order still needs a rider
+      final orderDoc = await _firestore
+          .collection(AppConstants.collectionOrders)
+          .doc(orderId)
+          .get()
+          .timeout(AppConstants.firestoreTimeout);
+      
+      if (!orderDoc.exists) {
+        debugPrint('Order $orderId not found for restart');
+        return false;
+      }
+      
+      final data = orderDoc.data() as Map<String, dynamic>;
+      final currentRider = data['riderId'] as String? ?? '';
+      final status = AppConstants.normalizeStatus(data['status'] as String? ?? '');
+      
+      // Don't restart if already assigned or terminal
+      if (currentRider.isNotEmpty) {
+        debugPrint('Order $orderId already has rider assigned');
+        return false;
+      }
+      if (AppConstants.isTerminalStatus(status)) {
+        debugPrint('Order $orderId is in terminal status: $status');
+        return false;
+      }
+      
+      // 4. Trigger fresh auto-assignment
+      await _firestore
+          .collection(AppConstants.collectionOrders)
+          .doc(orderId)
+          .update({
+            'autoAssignStarted': FieldValue.serverTimestamp(),
+            'lastAssignmentUpdate': FieldValue.serverTimestamp(),
+            'assignmentNotes': FieldValue.delete(),
+          })
+          .timeout(AppConstants.firestoreWriteTimeout);
+      
+      debugPrint('✅ Restarted auto-assignment for order $orderId');
+      return true;
+      
+    } on TimeoutException {
+      debugPrint('Timeout restarting auto-assignment for order $orderId');
+      return false;
+    } catch (e) {
+      debugPrint('Error restarting auto-assignment: $e');
+      return false;
     }
   }
 }

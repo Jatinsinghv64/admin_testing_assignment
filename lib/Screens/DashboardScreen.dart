@@ -14,6 +14,7 @@ import '../Widgets/PrintingService.dart';
 import '../Widgets/TimeUtils.dart';
 import '../Widgets/BranchFilterService.dart'; // ✅ Branch filter
 import '../Widgets/OrderUIComponents.dart'; // ✅ Shared UI components
+import '../Widgets/CancellationDialog.dart'; // ✅ Shared cancellation dialog
 
 class DashboardScreen extends StatefulWidget {
   final Function(int) onTabChange;
@@ -526,8 +527,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final OrderService _orderService = OrderService();
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _getTodayOrdersStream(BuildContext context) {
-    final userScope = Provider.of<UserScopeService>(context, listen: false);
-    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
+    // ✅ FIX: Use listen: true to react to branch changes from backend
+    final userScope = Provider.of<UserScopeService>(context, listen: true);
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: true);
     
     // Get branch IDs to filter by (respects branch selector)
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
@@ -539,8 +541,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _getActiveDriversStream(BuildContext context) {
-    final userScope = Provider.of<UserScopeService>(context, listen: false);
-    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
+    // ✅ FIX: Use listen: true to react to branch changes from backend
+    final userScope = Provider.of<UserScopeService>(context, listen: true);
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: true);
     
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
@@ -551,8 +554,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _getAvailableMenuItemsStream(BuildContext context) {
-    final userScope = Provider.of<UserScopeService>(context, listen: false);
-    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
+    // ✅ FIX: Use listen: true to react to branch changes from backend
+    final userScope = Provider.of<UserScopeService>(context, listen: true);
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: true);
     
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
@@ -1167,7 +1171,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
           onPressed: () async {
             final reason = await showDialog<String>(
               context: context,
-              builder: (context) => const _CancellationReasonDialog(),
+              builder: (context) => const CancellationReasonDialog(),
             );
             if (reason != null && reason.trim().isNotEmpty) {
               updateOrderStatus(orderId, AppConstants.statusCancelled,
@@ -1563,94 +1567,4 @@ class _RiderSelectionDialog extends StatelessWidget {
   }
 }
 
-class _CancellationReasonDialog extends StatefulWidget {
-  const _CancellationReasonDialog();
-
-  @override
-  State<_CancellationReasonDialog> createState() =>
-      _CancellationReasonDialogState();
-}
-
-class _CancellationReasonDialogState extends State<_CancellationReasonDialog> {
-  String? _selectedReason;
-  final TextEditingController _otherReasonController = TextEditingController();
-  final List<String> _reasons = [
-    'Items Out of Stock',
-    'Kitchen Too Busy',
-    'Closing Soon / Closed',
-    'Invalid Address',
-    'Customer Request',
-    'Other'
-  ];
-
-  @override
-  void dispose() {
-    _otherReasonController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bool isOther = _selectedReason == 'Other';
-    final bool isValid = _selectedReason != null &&
-        (!isOther || _otherReasonController.text.trim().isNotEmpty);
-
-    return AlertDialog(
-      title: const Text('Cancel Order',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Please select a reason for cancellation:'),
-            const SizedBox(height: 10),
-            ..._reasons.map((reason) => RadioListTile<String>(
-              title: Text(reason),
-              value: reason,
-              groupValue: _selectedReason,
-              onChanged: (value) {
-                setState(() {
-                  _selectedReason = value;
-                });
-              },
-              contentPadding: EdgeInsets.zero,
-              activeColor: Colors.red,
-            )),
-            if (isOther)
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: TextField(
-                  controller: _otherReasonController,
-                  decoration: const InputDecoration(
-                    labelText: 'Enter reason',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, null),
-          child: const Text('Close', style: TextStyle(color: Colors.grey)),
-        ),
-        ElevatedButton(
-          onPressed: isValid
-              ? () {
-            String finalReason = _selectedReason!;
-            if (finalReason == 'Other') {
-              finalReason = _otherReasonController.text.trim();
-            }
-            Navigator.pop(context, finalReason);
-          }
-              : null,
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-          child: const Text('Confirm Cancel'),
-        ),
-      ],
-    );
-  }
-}
+// CancellationReasonDialog is now imported from '../Widgets/CancellationDialog.dart'

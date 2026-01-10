@@ -9,16 +9,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
-
 import 'Screens/ConnectionUtils.dart';
-import 'Screens/LoginScreen.dart';
 import 'Screens/MainScreen.dart';
 import 'Widgets/Authorization.dart';
 import 'Widgets/RestaurantStatusService.dart';
 import 'Widgets/notification.dart';
 import 'Widgets/FCM_Service.dart';
 import 'firebase_options.dart';
-import 'Screens/OfflineScreen.dart';
 import 'constants.dart'; // ✅ Added
 import 'Widgets/AccessDeniedWidget.dart'; // ✅ Added
 import 'Widgets/BranchFilterService.dart'; // ✅ Branch filter for multi-branch users

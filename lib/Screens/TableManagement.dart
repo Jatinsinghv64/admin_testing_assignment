@@ -5,8 +5,15 @@ import 'package:provider/provider.dart';
 import '../main.dart'; // UserScopeService
 import '../Widgets/BranchFilterService.dart';
 
-class TableManagementScreen extends StatelessWidget {
+class TableManagementScreen extends StatefulWidget {
   const TableManagementScreen({super.key});
+
+  @override
+  State<TableManagementScreen> createState() => _TableManagementScreenState();
+}
+
+class _TableManagementScreenState extends State<TableManagementScreen> {
+  String _searchQuery = '';
 
   @override
   Widget build(BuildContext context) {
@@ -48,6 +55,12 @@ class TableManagementScreen extends StatelessWidget {
               decoration: InputDecoration(
                 hintText: 'Search branches...',
                 prefixIcon: const Icon(Icons.search, color: Colors.deepPurple),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.grey),
+                        onPressed: () => setState(() => _searchQuery = ''),
+                      )
+                    : null,
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 20,
@@ -55,7 +68,7 @@ class TableManagementScreen extends StatelessWidget {
                 ),
               ),
               onChanged: (query) {
-                // TODO: Implement search filtering
+                setState(() => _searchQuery = query.toLowerCase().trim());
               },
             ),
           ),
@@ -174,7 +187,43 @@ class TableManagementScreen extends StatelessWidget {
           );
         }
 
-        final branches = snapshot.data!.docs;
+        final allBranches = snapshot.data!.docs;
+        
+        // Apply client-side search filtering
+        final branches = _searchQuery.isEmpty
+            ? allBranches
+            : allBranches.where((doc) {
+                final branchData = doc.data() as Map<String, dynamic>;
+                final name = (branchData['name'] ?? '').toString().toLowerCase();
+                final branchId = doc.id.toLowerCase();
+                return name.contains(_searchQuery) || branchId.contains(_searchQuery);
+              }).toList();
+        
+        if (branches.isEmpty && _searchQuery.isNotEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.search_off_rounded, size: 64, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                Text(
+                  'No branches match "$_searchQuery"',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 18,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Try a different search term.',
+                  style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                ),
+              ],
+            ),
+          );
+        }
+        
         return ListView.builder(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           itemCount: branches.length,

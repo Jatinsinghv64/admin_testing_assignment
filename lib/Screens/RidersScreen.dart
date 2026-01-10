@@ -1391,17 +1391,17 @@ class _DriverDialogState extends State<_DriverDialog> {
     _isEdit = widget.driverDoc != null;
     final data = widget.driverDoc?.data();
 
-    _nameCtrl = TextEditingController(text: data?['name'] ?? '');
-    _emailCtrl = TextEditingController(text: data?['email'] ?? '');
-    _phoneCtrl = TextEditingController(text: data?['phone'] ?? '');
-    _profileImgCtrl = TextEditingController(text: data?['profileImageUrl'] ?? '');
-    _status = data?['status'] ?? 'offline';
+    _nameCtrl = TextEditingController(text: data?['name']?.toString() ?? '');
+    _emailCtrl = TextEditingController(text: data?['email']?.toString() ?? '');
+    _phoneCtrl = TextEditingController(text: data?['phone']?.toString() ?? '');
+    _profileImgCtrl = TextEditingController(text: data?['profileImageUrl']?.toString() ?? '');
+    _status = data?['status']?.toString() ?? 'offline';
     _isAvailable = data?['isAvailable'] ?? false;
     _selectedBranchIds = List<String>.from(data?['branchIds'] ?? []);
 
     final vehicle = data?['vehicle'] as Map<String, dynamic>? ?? {};
-    _vehicleTypeCtrl = TextEditingController(text: vehicle['type'] ?? 'Motorcycle');
-    _vehicleNumCtrl = TextEditingController(text: vehicle['number'] ?? '');
+    _vehicleTypeCtrl = TextEditingController(text: vehicle['type']?.toString() ?? 'Motorcycle');
+    _vehicleNumCtrl = TextEditingController(text: vehicle['number']?.toString() ?? '');
   }
 
   @override
@@ -2680,8 +2680,8 @@ class Vehicle {
 
   factory Vehicle.fromMap(Map<String, dynamic> data) {
     return Vehicle(
-      type: data['type'] ?? 'Unknown',
-      number: data['number'] ?? 'N/A',
+      type: data['type']?.toString() ?? 'Unknown',
+      number: data['number']?.toString() ?? 'N/A',
     );
   }
 }

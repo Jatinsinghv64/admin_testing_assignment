@@ -195,43 +195,43 @@ class _MultiBranchSelectorState extends State<MultiBranchSelector> {
                   borderRadius: BorderRadius.circular(8),
                   color: Colors.white,
                 ),
-                child: ListView.builder(
-                  itemCount: branches.length,
-                  itemBuilder: (context, index) {
-                    final doc = branches[index];
-                    final data = doc.data() as Map<String, dynamic>;
-                    final branchName = data['name']?.toString() ?? doc.id;
-                    final isSelected = _selectedIds.contains(doc.id);
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: branches.map((doc) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      final branchName = data['name']?.toString() ?? doc.id;
+                      final isSelected = _selectedIds.contains(doc.id);
 
-                    return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isSelected ? Colors.deepPurple.withOpacity(0.05) : null,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: isSelected ? Colors.deepPurple.withOpacity(0.3) : Colors.transparent,
-                        ),
-                      ),
-                      child: CheckboxListTile(
-                        dense: true,
-                        title: Text(
-                          branchName,
-                          style: TextStyle(
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                            color: isSelected ? Colors.deepPurple : Colors.black87,
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isSelected ? Colors.deepPurple.withOpacity(0.05) : null,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isSelected ? Colors.deepPurple.withOpacity(0.3) : Colors.transparent,
                           ),
                         ),
-                        value: isSelected,
-                        onChanged: (bool? selected) {
-                          if (selected != null) {
-                            _handleSelectionChange(doc.id, selected);
-                          }
-                        },
-                        activeColor: Colors.deepPurple,
-                        controlAffinity: ListTileControlAffinity.leading,
-                      ),
-                    );
-                  },
+                        child: CheckboxListTile(
+                          dense: true,
+                          title: Text(
+                            branchName,
+                            style: TextStyle(
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                              color: isSelected ? Colors.deepPurple : Colors.black87,
+                            ),
+                          ),
+                          value: isSelected,
+                          onChanged: (bool? selected) {
+                            if (selected != null) {
+                              _handleSelectionChange(doc.id, selected);
+                            }
+                          },
+                          activeColor: Colors.deepPurple,
+                          controlAffinity: ListTileControlAffinity.leading,
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ),
               ),
             ],

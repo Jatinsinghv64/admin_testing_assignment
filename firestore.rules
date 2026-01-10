@@ -42,10 +42,50 @@ service cloud.firestore {
 
     // Check if user has access to a specific branch
     function hasAccessToBranch(branchId) {
-      return isStaff() && (
+      return isAuthenticated() && (
         isSuperAdmin() ||
         branchId in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.branchIds
       );
+    }
+
+    // =====================
+    // DATA VALIDATION HELPERS
+    // =====================
+    // SECURITY: Validate data before writes to prevent injection and data corruption
+    
+    // Validate string field length
+    function isValidStringField(field, maxLength) {
+      return field is string && field.size() <= maxLength;
+    }
+    
+    // Validate number within range
+    function isValidNumber(field, minVal, maxVal) {
+      return field is number && field >= minVal && field <= maxVal;
+    }
+    
+    // Validate order data on write
+    function isValidOrderData() {
+      let data = request.resource.data;
+      
+      // Status must be a valid string (max 50 chars)
+      let validStatus = !('status' in data) || isValidStringField(data.status, 50);
+      
+      // Total amount must be a non-negative number (max 999999.99)
+      let validAmount = !('totalAmount' in data) || isValidNumber(data.totalAmount, 0, 999999.99);
+      
+      // Notes must not exceed 500 characters
+      let validNotes = !('notes' in data) || isValidStringField(data.notes, 500);
+      
+      // Cancellation reason must not exceed 500 characters
+      let validCancelReason = !('cancellationReason' in data) || isValidStringField(data.cancellationReason, 500);
+      
+      // Customer name must not exceed 100 characters
+      let validCustomerName = !('customerName' in data) || isValidStringField(data.customerName, 100);
+      
+      // Address must not exceed 500 characters
+      let validAddress = !('deliveryAddress' in data) || isValidStringField(data.deliveryAddress, 500);
+      
+      return validStatus && validAmount && validNotes && validCancelReason && validCustomerName && validAddress;
     }
 
     // =====================
@@ -55,16 +95,18 @@ service cloud.firestore {
       // Read access: staff and riders only (not public)
       allow read: if isAuthenticated() && (isStaff() || isRider());
       
-      // Update: Staff can update fully, Riders can update (except status)
-      allow update: if isAuthenticated() && (
+      // Update: Staff can update with validation, Riders can update non-status fields
+      // SECURITY: All writes must pass data validation
+      allow update: if isAuthenticated() && isValidOrderData() && (
         // Staff can update anything
         isStaff() ||
         // Riders can update only non-status fields
         (isRider() && !isStatusBeingChanged())
       );
       
-      // Only staff can create/delete orders
-      allow create, delete: if isStaff();
+      // Only staff can create/delete orders, must pass validation
+      allow create: if isStaff() && isValidOrderData();
+      allow delete: if isStaff();
     }
 
     // =====================
@@ -168,29 +210,31 @@ service cloud.firestore {
     // COUPONS
     // =====================
     match /coupons/{couponId} {
-      // Publicly readable (for customer apps to validate)
-      allow read: if true;
+      // Staff can read all coupons
+      // Authenticated users can read coupons to check validity
+      allow read: if isAuthenticated();
       
-      // Only staff can modify
+      // Only staff can modify coupons
       allow write: if isStaff();
     }
 
     // =====================
-    // FCM TOKENS (subcollection)
+    // FCM TOKENS (Subcollection under staff)
     // =====================
-    match /staff/{staffId}/fcm_tokens/{tokenId} {
+    match /staff/{staffId}/tokens/{tokenId} {
+      // Staff can read/write own tokens
       allow read, write: if isAuthenticated() && request.auth.uid == staffId;
     }
 
-    match /Drivers/{driverId}/fcm_tokens/{tokenId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == driverId;
-    }
-
     // =====================
-    // DEFAULT DENY
+    // CUSTOMERS (Optional - for customer app)
     // =====================
-    match /{document=**} {
-      allow read, write: if false;
+    match /customers/{customerId} {
+      // Customers can read/write their own data
+      allow read, write: if isAuthenticated() && request.auth.uid == customerId;
+      
+      // Staff can read customer data
+      allow read: if isStaff();
     }
   }
 }

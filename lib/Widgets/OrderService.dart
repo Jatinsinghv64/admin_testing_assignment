@@ -6,46 +6,31 @@ import '../main.dart';
 import 'TimeUtils.dart';
 import '../Widgets/RiderAssignment.dart';
 import '../constants.dart';
+import '../utils/security_utils.dart'; // SECURITY: Input validation utilities
 
 class OrderService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  /// Gets orders stream, handling both legacy `branchId` (string) and new `branchIds` (array) fields
+
+  /// @Deprecated: Use [getOrdersStreamMerged] instead.
+  /// This method is kept for backward compatibility but will be removed in a future version.
+  /// 
+  /// Returns an empty stream. All callers should migrate to getOrdersStreamMerged.
+  @Deprecated('Use getOrdersStreamMerged instead. This method returns empty stream.')
   Stream<QuerySnapshot<Map<String, dynamic>>> getOrdersStream({
     required String orderType,
     required String status,
     required UserScopeService userScope,
-    List<String>? filterBranchIds, // ✅ Optional filter
+    List<String>? filterBranchIds,
   }) {
-    debugPrint('🔍 OrderService.getOrdersStream called:');
-    debugPrint('   - orderType: $orderType');
-    debugPrint('   - status: $status');
-    debugPrint('   - filterBranchIds: $filterBranchIds');
-    debugPrint('   - userScope.branchIds: ${userScope.branchIds}');
+    // Log deprecation warning in debug mode
+    assert(() {
+      debugPrint('⚠️ DEPRECATED: getOrdersStream called. Use getOrdersStreamMerged instead.');
+      return true;
+    }());
     
-    final effectiveBranchIds = filterBranchIds ?? userScope.branchIds;
-    
-    if (effectiveBranchIds.isEmpty) {
-      return const Stream.empty();
-    }
-
-    // ✅ FIX: Query for BOTH branchId (singular string) AND branchIds (array)
-    // Some orders (like takeaway) use branchId, others use branchIds
-    
-    // Build two separate streams and merge them
-    final Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> mergedStream = 
-        _getMergedOrdersStream(
-          orderType: orderType,
-          status: status,
-          branchIds: effectiveBranchIds,
-        );
-    
-    // Convert merged list back to a QuerySnapshot-like stream
-    // We'll return a custom stream that OrdersScreen can consume
-    return mergedStream.map((docs) {
-      // Create a fake QuerySnapshot wrapper - but actually we need to return
-      // QuerySnapshot type. Let's use a different approach.
-      throw UnimplementedError('Use getOrdersStreamMerged instead');
-    });
+    // Return empty stream instead of throwing error
+    // This prevents crashes if any code path still uses this method
+    return const Stream.empty();
   }
 
   /// ✅ NEW: Returns merged stream of order documents (handles both branchId and branchIds)
@@ -74,13 +59,12 @@ class OrderService {
     );
   }
 
-  /// Internal: Creates merged stream from both branchId and branchIds queries
   Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _getMergedOrdersStream({
     required String orderType,
     required String status,
     required List<String> branchIds,
   }) {
-    // Query 1: Orders with branchIds array field
+    // Only query orders with branchIds array field
     Query<Map<String, dynamic>> arrayQuery = _db
         .collection(AppConstants.collectionOrders)
         .where('Order_type', isEqualTo: orderType);
@@ -91,14 +75,7 @@ class OrderService {
       arrayQuery = arrayQuery.where('branchIds', arrayContainsAny: branchIds);
     }
     
-    // Query 2: Orders with singular branchId string field (for each branch)
-    // We need to use whereIn for branchId since it's a simple string field
-    Query<Map<String, dynamic>> stringQuery = _db
-        .collection(AppConstants.collectionOrders)
-        .where('Order_type', isEqualTo: orderType)
-        .where('branchId', whereIn: branchIds.take(10).toList()); // Firestore limit: 10 items in whereIn
-    
-    // Apply status/timestamp filters to both queries
+    // Apply status/timestamp filters
     if (status == 'all') {
       final startOfBusinessDay = TimeUtils.getBusinessStartTimestamp();
       final endOfBusinessDay = TimeUtils.getBusinessEndTimestamp();
@@ -107,81 +84,17 @@ class OrderService {
           .where('timestamp', isGreaterThanOrEqualTo: startOfBusinessDay)
           .where('timestamp', isLessThan: endOfBusinessDay)
           .orderBy('timestamp', descending: true);
-      
-      stringQuery = stringQuery
-          .where('timestamp', isGreaterThanOrEqualTo: startOfBusinessDay)
-          .where('timestamp', isLessThan: endOfBusinessDay)
-          .orderBy('timestamp', descending: true);
     } else {
       final normalizedStatus = AppConstants.normalizeStatus(status);
       arrayQuery = arrayQuery
           .where('status', isEqualTo: normalizedStatus)
           .orderBy('timestamp', descending: true);
-      stringQuery = stringQuery
-          .where('status', isEqualTo: normalizedStatus)
-          .orderBy('timestamp', descending: true);
     }
 
-    // Combine both streams
-    final arrayStream = arrayQuery.snapshots();
-    final stringStream = stringQuery.snapshots();
-
-    // Merge and deduplicate
-    return _combineStreams(arrayStream, stringStream);
+    return arrayQuery.snapshots().map((snapshot) => snapshot.docs);
   }
 
-  /// Combines two QuerySnapshot streams and deduplicates by document ID
-  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _combineStreams(
-    Stream<QuerySnapshot<Map<String, dynamic>>> stream1,
-    Stream<QuerySnapshot<Map<String, dynamic>>> stream2,
-  ) {
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs1 = [];
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs2 = [];
 
-    // Use StreamController to emit merged results
-    final controller = StreamController<List<QueryDocumentSnapshot<Map<String, dynamic>>>>.broadcast();
-
-    void emitMerged() {
-      // Merge and deduplicate by document ID
-      final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> merged = {};
-      for (final doc in docs1) {
-        merged[doc.id] = doc;
-      }
-      for (final doc in docs2) {
-        merged[doc.id] = doc;
-      }
-      
-      // Sort by timestamp descending
-      final sortedDocs = merged.values.toList()
-        ..sort((a, b) {
-          final tsA = a.data()['timestamp'] as Timestamp?;
-          final tsB = b.data()['timestamp'] as Timestamp?;
-          if (tsA == null && tsB == null) return 0;
-          if (tsA == null) return 1;
-          if (tsB == null) return -1;
-          return tsB.compareTo(tsA);
-        });
-      
-      controller.add(sortedDocs);
-    }
-
-    final sub1 = stream1.listen((snapshot) {
-      docs1 = snapshot.docs;
-      emitMerged();
-    }, onError: (e) => debugPrint('Stream1 error: $e'));
-
-    final sub2 = stream2.listen((snapshot) {
-      docs2 = snapshot.docs;
-      emitMerged();
-    }, onError: (e) => debugPrint('Stream2 error: $e'));
-
-    controller.onCancel = () {
-      sub1.cancel();
-      sub2.cancel();
-    };
-
-    return controller.stream;
-  }
 
   // STANDARD QUERY HELPERS (Refactored from DashboardScreen)
 
@@ -224,7 +137,7 @@ class OrderService {
     required UserScopeService userScope,
     List<String>? filterBranchIds,
   }) {
-    Query<Map<String, dynamic>> query = _db.collection('menu_items'); // Hardcoded collection name from Dashboard
+    Query<Map<String, dynamic>> query = _db.collection(AppConstants.collectionMenuItems);
 
     // Apply Branch Filter
     query = _applyBranchFilter(query, userScope, filterBranchIds);
@@ -299,7 +212,40 @@ class OrderService {
       String newStatus,
       {String? reason, String? currentUserEmail}
       ) async {
-    final orderRef = _db.collection(AppConstants.collectionOrders).doc(orderId);
+    // =========================================================
+    // SECURITY: Input Validation
+    // =========================================================
+    // Validate orderId format
+    final orderIdError = InputValidator.validateDocumentId(orderId, fieldName: 'Order ID');
+    if (orderIdError != null) {
+      debugPrint('🔒 SECURITY: Invalid orderId: $orderId');
+      throw Exception('Invalid order ID format');
+    }
+    
+    // Sanitize orderId (extra safety)
+    final sanitizedOrderId = InputSanitizer.sanitizeDocumentId(orderId);
+    
+    // Validate and sanitize cancellation reason if provided
+    String? sanitizedReason;
+    if (reason != null && reason.isNotEmpty) {
+      final reasonError = InputValidator.validateText(
+        reason, 
+        maxLength: InputLimits.maxCancellationReason,
+        fieldName: 'Cancellation reason',
+      );
+      if (reasonError != null) {
+        debugPrint('🔒 SECURITY: Invalid cancellation reason');
+        throw Exception(reasonError);
+      }
+      sanitizedReason = InputSanitizer.sanitizeNotes(reason);
+    }
+    
+    // Sanitize email if provided
+    final sanitizedEmail = currentUserEmail != null 
+        ? InputSanitizer.sanitizeEmail(currentUserEmail)
+        : 'Admin';
+    
+    final orderRef = _db.collection(AppConstants.collectionOrders).doc(sanitizedOrderId);
 
     try {
       if (newStatus == AppConstants.statusCancelled) {
@@ -320,8 +266,8 @@ class OrderService {
             'riderId': FieldValue.delete(),
           };
 
-          if (reason != null) updates['cancellationReason'] = reason;
-          updates['cancelledBy'] = currentUserEmail ?? 'Admin';
+          if (sanitizedReason != null) updates['cancellationReason'] = sanitizedReason;
+          updates['cancelledBy'] = sanitizedEmail;
 
           transaction.update(orderRef, updates);
 
@@ -335,11 +281,38 @@ class OrderService {
           }
         }).timeout(AppConstants.firestoreWriteTimeout);
 
-        await RiderAssignmentService.cancelAutoAssignment(orderId);
+        await RiderAssignmentService.cancelAutoAssignment(sanitizedOrderId);
 
       } else {
         final WriteBatch batch = _db.batch();
         final Map<String, dynamic> updateData = {'status': newStatus};
+
+        // ========================================================
+        // AUTO RIDER ASSIGNMENT: Trigger for delivery orders
+        // ========================================================
+        // When a delivery order moves to 'preparing', automatically start
+        // the rider assignment workflow by setting the 'autoAssignStarted'
+        // timestamp. This triggers the Cloud Function 'startAssignmentWorkflowV2'
+        // which finds the nearest available rider and sends them an offer.
+        if (newStatus == AppConstants.statusPreparing) {
+          final orderDoc = await orderRef.get().timeout(AppConstants.firestoreTimeout);
+          final data = orderDoc.data() as Map<String, dynamic>? ?? {};
+          
+          // Check both Order_type (primary) and orderType (fallback) field names
+          final String orderType = (data['Order_type'] ?? data['orderType'] ?? '').toString().toLowerCase();
+          final String? existingRiderId = data['riderId'];
+          final bool hasAutoAssignStarted = data['autoAssignStarted'] != null;
+          
+          // Only trigger for delivery orders without an assigned rider
+          // and where auto-assignment hasn't already been started
+          if (orderType == 'delivery' && 
+              (existingRiderId == null || existingRiderId.isEmpty) &&
+              !hasAutoAssignStarted) {
+            updateData['autoAssignStarted'] = FieldValue.serverTimestamp();
+            updateData['lastAssignmentUpdate'] = FieldValue.serverTimestamp();
+            debugPrint('🚀 Auto-assignment triggered for delivery order: $orderId');
+          }
+        }
 
         if (newStatus == AppConstants.statusDelivered) {
           updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
@@ -351,7 +324,11 @@ class OrderService {
 
           if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
             final driverRef = _db.collection(AppConstants.collectionDrivers).doc(riderId);
-            batch.update(driverRef, {'assignedOrderId': '', 'isAvailable': true});
+            batch.update(driverRef, {
+              'assignedOrderId': '',
+              'isAvailable': true,
+              'status': 'online', // Force online to correct any drift
+            });
           }
         } else if (AppConstants.statusEquals(newStatus, AppConstants.statusPickedUp)) {
           updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();

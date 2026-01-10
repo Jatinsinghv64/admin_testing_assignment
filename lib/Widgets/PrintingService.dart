@@ -23,30 +23,49 @@ class _CachedBranch {
 
 class PrintingService {
   static ByteData? _cachedArabicFont;
+  static ByteData? _cachedRegularFont;
   static ByteData? _cachedLogo;
-  static bool _logoLoadAttempted = false; // Track if we tried loading the logo
+  static bool _logoLoadAttempted = false;
   
   // Cache with expiration tracking
   static final Map<String, _CachedBranch> _branchCache = {};
 
   static Future<void> _loadAssets() async {
-    // 1. Load Font
+    // 1. Load Arabic Font (supports Arabic text)
     if (_cachedArabicFont == null) {
       try {
         _cachedArabicFont = await rootBundle.load("assets/fonts/NotoSansArabic-Regular.ttf");
+        debugPrint("✅ Arabic font loaded successfully");
       } catch (e) {
-        debugPrint("⚠️ Error loading font: $e");
+        debugPrint("⚠️ Error loading Arabic font: $e");
+        // Try alternative font paths
+        try {
+          _cachedArabicFont = await rootBundle.load("assets/fonts/Amiri-Regular.ttf");
+          debugPrint("✅ Fallback Arabic font (Amiri) loaded");
+        } catch (e2) {
+          debugPrint("⚠️ No Arabic font available. Arabic text may not display correctly.");
+        }
       }
     }
-    // 2. Load Logo (only attempt once to avoid repeated errors)
+    
+    // 2. Load Regular Font (for English text - more complete glyph set)
+    if (_cachedRegularFont == null) {
+      try {
+        _cachedRegularFont = await rootBundle.load("assets/fonts/Roboto-Regular.ttf");
+        debugPrint("✅ Regular font loaded successfully");
+      } catch (e) {
+        debugPrint("⚠️ Roboto font not found, will use Arabic font for all text");
+      }
+    }
+    
+    // 3. Load Logo (only attempt once to avoid repeated errors)
     if (_cachedLogo == null && !_logoLoadAttempted) {
       _logoLoadAttempted = true;
       try {
-        // Ensure this file exists in your assets folder and pubspec.yaml
         _cachedLogo = await rootBundle.load("assets/mitranlogo.jpg");
+        debugPrint("✅ Logo loaded successfully");
       } catch (e) {
-        debugPrint("⚠️ Logo asset not found - receipts will print without logo. "
-            "Add 'assets/mitranlogo.jpg' to pubspec.yaml to fix.");
+        debugPrint("⚠️ Logo asset not found - receipts will print without logo.");
       }
     }
   }
@@ -81,12 +100,23 @@ class PrintingService {
     try {
       await _loadAssets();
 
-      // Fallback Font
-      final fontData = _cachedArabicFont ?? await rootBundle.load("assets/fonts/NotoSansArabic-Regular.ttf");
-      final pw.Font arabicFont = pw.Font.ttf(fontData);
+      // Fonts - Use separate fonts for English and Arabic to avoid missing glyphs
+      // Arabic font for RTL text
+      pw.Font? arabicFont;
+      if (_cachedArabicFont != null) {
+        arabicFont = pw.Font.ttf(_cachedArabicFont!);
+      }
+      
+      // Regular font for English text (use Roboto or built-in PDF font)
+      pw.Font? regularFont;
+      if (_cachedRegularFont != null) {
+        regularFont = pw.Font.ttf(_cachedRegularFont!);
+      }
 
       // Logo Image Provider
-      final pw.ImageProvider? logoImage = _cachedLogo != null ? pw.MemoryImage(_cachedLogo!.buffer.asUint8List()) : null;
+      final pw.ImageProvider? logoImage = _cachedLogo != null 
+          ? pw.MemoryImage(_cachedLogo!.buffer.asUint8List()) 
+          : null;
 
       await Printing.layoutPdf(
           onLayout: (PdfPageFormat format) async {
@@ -175,12 +205,20 @@ class PrintingService {
             const double fontSizeSmall = 8;
             const double fontSizeRegular = 9;
 
-            final pw.TextStyle fontReg = pw.TextStyle(fontSize: fontSizeRegular);
-            final pw.TextStyle fontBold = pw.TextStyle(fontSize: fontSizeRegular, fontWeight: pw.FontWeight.bold);
-            final pw.TextStyle fontArReg = pw.TextStyle(font: arabicFont, fontSize: fontSizeRegular);
-            final pw.TextStyle fontArBold = pw.TextStyle(font: arabicFont, fontSize: fontSizeRegular, fontWeight: pw.FontWeight.bold);
+            // English text styles - use regularFont if available, otherwise default PDF font
+            final pw.TextStyle fontReg = pw.TextStyle(font: regularFont, fontSize: fontSizeRegular);
+            final pw.TextStyle fontBold = pw.TextStyle(font: regularFont, fontSize: fontSizeRegular, fontWeight: pw.FontWeight.bold);
+            final pw.TextStyle fontSmall = pw.TextStyle(font: regularFont, fontSize: fontSizeSmall);
+            
+            // Arabic text styles - use arabic font, skip if not loaded
+            final pw.TextStyle fontArReg = arabicFont != null 
+                ? pw.TextStyle(font: arabicFont, fontSize: fontSizeRegular)
+                : fontReg; // Fallback to regular font
+            final pw.TextStyle fontArBold = arabicFont != null 
+                ? pw.TextStyle(font: arabicFont, fontSize: fontSizeRegular, fontWeight: pw.FontWeight.bold)
+                : fontBold;
 
-            // Helper: Bilingual Row
+            // Helper: Bilingual Row - only shows Arabic if font is loaded
             pw.Widget bilingualRow(String en, String ar, String value, {bool isBold = false}) {
               return pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -189,7 +227,9 @@ class PrintingService {
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
                       pw.Text(en, style: isBold ? fontBold : fontReg),
-                      if(ar.isNotEmpty) pw.Text(ar, style: isBold ? fontArBold : fontArReg, textDirection: pw.TextDirection.rtl),
+                      // Only show Arabic text if Arabic font is loaded
+                      if(ar.isNotEmpty && arabicFont != null) 
+                        pw.Text(ar, style: isBold ? fontArBold : fontArReg, textDirection: pw.TextDirection.rtl),
                     ],
                   ),
                   pw.Text(value, style: isBold ? fontBold : fontReg),
@@ -215,7 +255,8 @@ class PrintingService {
                               ),
 
                             pw.Text(branchName, style: fontBold.copyWith(fontSize: 12)),
-                            pw.Text(branchNameAr, style: fontArBold.copyWith(fontSize: 12), textDirection: pw.TextDirection.rtl),
+                            if (arabicFont != null)
+                              pw.Text(branchNameAr, style: fontArBold.copyWith(fontSize: 12), textDirection: pw.TextDirection.rtl),
 
                             if(branchAddress.isNotEmpty)
                               pw.Text(branchAddress, style: fontReg.copyWith(fontSize: fontSizeSmall), textAlign: pw.TextAlign.center),
@@ -226,7 +267,7 @@ class PrintingService {
                             pw.Divider(thickness: 1),
 
                             // --- TITLE ---
-                            pw.Text("SALES RECEIPT / إيصال بيع", style: fontBold.copyWith(fontSize: 11)),
+                            pw.Text(arabicFont != null ? "SALES RECEIPT / إيصال بيع" : "SALES RECEIPT", style: fontBold.copyWith(fontSize: 11)),
                             pw.SizedBox(height: 5),
 
                             // --- DETAILS BOX ---
@@ -275,7 +316,7 @@ class PrintingService {
                                   pw.TableRow(
                                       decoration: const pw.BoxDecoration(color: PdfColors.grey200),
                                       children: [
-                                        pw.Padding(padding: const pw.EdgeInsets.all(2), child: pw.Text("ITEM / الصنف", style: fontBold)),
+                                        pw.Padding(padding: const pw.EdgeInsets.all(2), child: pw.Text(arabicFont != null ? "ITEM / الصنف" : "ITEM", style: fontBold)),
                                         pw.Padding(padding: const pw.EdgeInsets.all(2), child: pw.Text("QTY", style: fontBold, textAlign: pw.TextAlign.center)),
                                         pw.Padding(padding: const pw.EdgeInsets.all(2), child: pw.Text("AMT", style: fontBold, textAlign: pw.TextAlign.right)),
                                       ]
@@ -291,7 +332,7 @@ class PrintingService {
                                                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                                                   children: [
                                                     pw.Text(item['name'], style: fontReg),
-                                                    if (item['name_ar'].isNotEmpty)
+                                                    if (item['name_ar'].isNotEmpty && arabicFont != null)
                                                       pw.Text(item['name_ar'], style: fontArReg, textDirection: pw.TextDirection.rtl),
                                                   ]
                                               )
@@ -344,10 +385,11 @@ class PrintingService {
                                                   pw.Text("QAR ${totalAmount.toStringAsFixed(2)}", style: fontBold.copyWith(fontSize: 14)),
                                                 ]
                                             ),
-                                            pw.Align(
-                                              alignment: pw.Alignment.centerRight,
-                                              child: pw.Text("المجموع الكلي", style: fontArBold, textDirection: pw.TextDirection.rtl),
-                                            ),
+                                            if (arabicFont != null)
+                                              pw.Align(
+                                                alignment: pw.Alignment.centerRight,
+                                                child: pw.Text("المجموع الكلي", style: fontArBold, textDirection: pw.TextDirection.rtl),
+                                              ),
                                           ]
                                       )
                                   )
@@ -375,7 +417,8 @@ class PrintingService {
                                           crossAxisAlignment: pw.CrossAxisAlignment.end,
                                           children: [
                                             pw.Text("Thank you for dining with us!", style: fontBold),
-                                            pw.Text("شكرا لزيارتكم!", style: fontArBold, textDirection: pw.TextDirection.rtl),
+                                            if (arabicFont != null)
+                                              pw.Text("شكرا لزيارتكم!", style: fontArBold, textDirection: pw.TextDirection.rtl),
                                             pw.SizedBox(height: 2),
                                             pw.Text("www.mitran-restaurant.com", style: fontReg.copyWith(fontSize: 7, color: PdfColors.grey600)),
                                           ]
