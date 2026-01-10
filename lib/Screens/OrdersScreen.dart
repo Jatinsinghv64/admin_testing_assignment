@@ -1052,8 +1052,18 @@ class _OrderCardState extends State<_OrderCard> {
         ElevatedButton.icon(
           icon: const Icon(Icons.check, size: 16),
           label: const Text('Accept Order'),
-          onPressed: () => widget.onStatusChange(
-              widget.order.id, AppConstants.statusPreparing),
+          onPressed: () async {
+            await widget.onStatusChange(
+                widget.order.id, AppConstants.statusPreparing);
+
+            // ✅ FIX: Explicitly start auto-assignment for delivery orders
+            // This ensures the workflow is triggered immediately
+            if (isDelivery) {
+              await RiderAssignmentService.autoAssignRider(
+                orderId: widget.order.id,
+              );
+            }
+          },
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.green,
             foregroundColor: Colors.white,

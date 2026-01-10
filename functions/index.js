@@ -315,6 +315,19 @@ exports.startAssignmentWorkflowV2 = onDocumentUpdated(
             }
 
             logger.log(`[${orderId}] ✅ Assignment workflow started. Rider ${lockedRiderId} has ${ASSIGNMENT_TIMEOUT_SECONDS}s to respond.`);
+
+            // ============================================================
+            // STEP 7: UI SYNC - Ensure 'autoAssignStarted' is set
+            // ============================================================
+            // If triggered by status change (not manual button), the UI needs this flag
+            if (!manualTrigger && !afterData.autoAssignStarted) {
+                await db.collection('Orders').doc(orderId).update({
+                    'autoAssignStarted': FieldValue.serverTimestamp(),
+                    'lastAssignmentUpdate': FieldValue.serverTimestamp()
+                });
+                logger.log(`[${orderId}] 🔄 Synced autoAssignStarted flag for UI`);
+            }
+
             return null;
 
         } catch (error) {
@@ -362,34 +375,49 @@ exports.handleOrderCancellation = onDocumentUpdated(
         try {
             // Check if there's an active assignment for this order
             const assignDoc = await db.collection('rider_assignments').doc(orderId).get();
+            let riderId = null;
 
-            if (!assignDoc.exists) {
-                logger.log(`[${orderId}] No active assignment to clean up`);
-                return null;
+            if (assignDoc.exists) {
+                const assignData = assignDoc.data();
+                riderId = assignData.riderId;
+            } else {
+                // FALLBACK: If assignment is missing (e.g. rider accepted then delivered),
+                // check if the order itself has a riderId that needs unlocking
+                if (afterData.riderId) {
+                    riderId = afterData.riderId;
+                    logger.log(`[${orderId}] Assignment doc missing, using riderId from order: ${riderId}`);
+                } else {
+                    logger.log(`[${orderId}] No active assignment or rider to clean up`);
+                    return null;
+                }
             }
-
-            const assignData = assignDoc.data();
-            const riderId = assignData.riderId;
 
             // Unlock the rider if they were waiting for this order
             if (riderId && riderId !== 'RETRY_SEARCH') {
                 await db.collection('Drivers').doc(riderId).update({
                     'isAvailable': true,
                     'status': 'online',
-                    'currentOfferOrderId': FieldValue.delete()
+                    'currentOfferOrderId': FieldValue.delete(),
+                    'assignedOrderId': FieldValue.delete() // Ensure we clear the assigned order too
                 });
-                logger.log(`[${orderId}] ✅ Unlocked rider ${riderId} after order cancellation`);
+                logger.log(`[${orderId}] ✅ Unlocked rider ${riderId} after order terminal state`);
             }
 
-            // Delete the assignment record
-            await db.collection('rider_assignments').doc(orderId).delete();
-            logger.log(`[${orderId}] ✅ Assignment record deleted`);
+            // Delete the assignment record if it exists
+            if (assignDoc.exists) {
+                await db.collection('rider_assignments').doc(orderId).delete();
+                logger.log(`[${orderId}] ✅ Assignment record deleted`);
+            }
 
             // Clean up order fields
-            await event.data.after.ref.update({
-                'autoAssignStarted': FieldValue.delete(),
-                'assignmentNotes': `Order ${afterStatus} - assignment cancelled`,
-            });
+            // Only update if these fields actually exist to save writes
+            const updates = {};
+            if (afterData.autoAssignStarted) updates['autoAssignStarted'] = FieldValue.delete();
+            if (afterData.assignmentNotes) updates['assignmentNotes'] = `Order ${afterStatus} - assignment cancelled`;
+
+            if (Object.keys(updates).length > 0) {
+                await event.data.after.ref.update(updates);
+            }
 
             return null;
         } catch (error) {
@@ -860,8 +888,9 @@ exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, 
                     return res.status(200).json({ message: 'Rider unavailable, retrying...' });
                 }
 
-                // Fetch order data for FCM
-                const orderData = orderDoc.data();
+                // Fetch FRESH order data for FCM
+                const freshOrderDoc = await orderRef.get();
+                const orderData = freshOrderDoc.exists ? freshOrderDoc.data() : orderDoc.data();
 
                 // 🔔 Send notification to rider
                 await sendAssignmentFCM(nextRider.riderId, sanitizedOrderId, orderData);
@@ -953,8 +982,9 @@ exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, 
             return res.status(200).json({ message: 'Rider unavailable, retrying...' });
         }
 
-        // Fetch order data for FCM
-        const orderData = orderDoc.data();
+        // Fetch FRESH order data for FCM
+        const freshOrderDoc = await orderRef.get();
+        const orderData = freshOrderDoc.exists ? freshOrderDoc.data() : orderDoc.data();
 
         // 🔔 Send notification to the new rider
         await sendAssignmentFCM(nextRider.riderId, sanitizedOrderId, orderData);
@@ -1018,7 +1048,8 @@ exports.handleRiderAcceptance = onDocumentUpdated(
                 await event.data.after.ref.update({
                     status: 'searching', // Mark as searching again
                     rejectedBy: FieldValue.arrayUnion(riderId),
-                    lastRejectionAt: FieldValue.serverTimestamp()
+                    lastRejectionAt: FieldValue.serverTimestamp(),
+                    notificationSent: false, // RESET FLAG so next rider gets notified
                 });
 
                 // Step 3: IMMEDIATELY trigger search for next rider
@@ -1346,11 +1377,12 @@ function _calculateDistance(lat1, lon1, lat2, lon2) {
  * @param {object} orderData - Order data for notification content
  */
 async function sendAssignmentFCM(riderId, orderId, orderData) {
+    logger.log(`[${orderId}] 📤 PREPARING FCM for rider ${riderId}...`);
     try {
         const driverDoc = await db.collection('Drivers').doc(riderId).get();
 
         if (!driverDoc.exists) {
-            logger.warn(`[${orderId}] Rider ${riderId} not found for FCM`);
+            logger.warn(`[${orderId}] ❌ Rider ${riderId} not found for FCM`);
             return false;
         }
 
@@ -1358,12 +1390,14 @@ async function sendAssignmentFCM(riderId, orderId, orderData) {
         const fcmToken = driverData.fcmToken;
 
         if (!fcmToken) {
-            logger.warn(`[${orderId}] Rider ${riderId} has no FCM token`);
+            logger.warn(`[${orderId}] ❌ Rider ${riderId} has no FCM token`);
             return false;
         }
 
-        // Data-only payload - prevents duplicate notifications
-        // The rider app will create the local notification from this data
+        logger.log(`[${orderId}] 🔹 Found FCM token for ${riderId}: ${fcmToken.substring(0, 10)}...`);
+
+        // LEGACY PAYLOAD (Compatible with current Rider App)
+        // Data-only payload prevents duplicate notifications on Flutter
         const payload = {
             data: {
                 type: 'auto_assignment',
@@ -1390,18 +1424,25 @@ async function sendAssignmentFCM(riderId, orderId, orderData) {
             }
         };
 
-        // Use sendToDevice for more reliable delivery with legacy tokens
-        await admin.messaging().sendToDevice(fcmToken, payload);
+        const options = {
+            priority: 'high',
+            contentAvailable: true, // CRITICAL for iOS background wake-up
+            timeToLive: ASSIGNMENT_TIMEOUT_SECONDS
+        };
 
-        // Mark notification as sent to prevent duplicates
+        // Use sendToDevice for maximum compatibility
+        await admin.messaging().sendToDevice(fcmToken, payload, options);
+
+        // Mark notification as sent
         await db.collection('rider_assignments').doc(orderId).update({
             notificationSent: true
         });
 
-        logger.log(`[${orderId}] 📱 FCM sent to rider ${riderId} (${driverData.name || 'Unknown'})`);
+        logger.log(`[${orderId}] ✅ FCM SENT via Legacy API to ${driverData.name || 'Rider'}`);
         return true;
+
     } catch (err) {
-        logger.error(`[${orderId}] FCM Error for rider ${riderId}:`, err.message);
+        logger.error(`[${orderId}] 🔥 FCM FAILURE for rider ${riderId}:`, err);
         return false;
     }
 }
