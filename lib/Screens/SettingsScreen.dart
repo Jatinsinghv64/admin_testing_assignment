@@ -24,9 +24,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _darkModeEnabled = false;
-  String _selectedLanguage = 'English';
-
   // State to track logout process
   bool _isLoggingOut = false;
 
@@ -38,25 +35,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadPreferences();
     _notificationService = context.read<OrderNotificationService>();
-  }
-
-  Future<void> _loadPreferences() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _darkModeEnabled = prefs.getBool('dark_mode_enabled') ?? false;
-      _selectedLanguage = prefs.getString('selected_language') ?? 'English';
-    });
-  }
-
-  Future<void> _savePreference(String key, dynamic value) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (value is bool) {
-      await prefs.setBool(key, value);
-    } else if (value is String) {
-      await prefs.setString(key, value);
-    }
   }
 
   @override
@@ -278,7 +257,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 24),
                 ],
 
-                // App Preferences Section
+                // App Preferences Section - Only Notifications
                 _buildSectionTitle('App Preferences', Icons.tune_rounded),
                 const SizedBox(height: 12),
                 _buildGroupedSettingsCard([
@@ -288,100 +267,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     subtitle: 'Push alerts & sounds',
                     iconColor: Colors.red,
                     onTap: () => _showNotificationSettings(context),
-                  ),
-                  _SettingsItem(
-                    icon: Icons.dark_mode_outlined,
-                    title: 'Dark Mode',
-                    subtitle: _darkModeEnabled ? 'Enabled' : 'Disabled',
-                    iconColor: Colors.blueGrey,
-                    trailing: Switch.adaptive(
-                      value: _darkModeEnabled,
-                      activeColor: Colors.deepPurple,
-                      onChanged: (val) {
-                        setState(() => _darkModeEnabled = val);
-                        _savePreference('dark_mode_enabled', val);
-                        _showSnackBar(context,
-                            'Dark mode ${val ? 'enabled' : 'disabled'}');
-                      },
-                    ),
-                  ),
-                  _SettingsItem(
-                    icon: Icons.language_outlined,
-                    title: 'Language',
-                    subtitle: _selectedLanguage,
-                    iconColor: Colors.purple,
-                    onTap: () => _showLanguageDialog(context),
-                  ),
-                  _SettingsItem(
-                    icon: Icons.palette_outlined,
-                    title: 'Theme Color',
-                    subtitle: 'Customize appearance',
-                    iconColor: Colors.pink,
-                    onTap: () => _showThemeColorDialog(context),
-                  ),
-                ]),
-                const SizedBox(height: 24),
-
-                // Support Section
-                _buildSectionTitle(
-                    'Support & Help', Icons.support_agent_rounded),
-                const SizedBox(height: 12),
-                _buildGroupedSettingsCard([
-                  _SettingsItem(
-                    icon: Icons.help_center_outlined,
-                    title: 'Help Center',
-                    subtitle: 'FAQs & guides',
-                    iconColor: Colors.blue,
-                    onTap: () => _contactSupport(context),
-                  ),
-                  _SettingsItem(
-                    icon: Icons.bug_report_outlined,
-                    title: 'Report Bug',
-                    subtitle: 'Found an issue?',
-                    iconColor: Colors.red,
-                    onTap: () => _reportBug(context),
-                  ),
-                  _SettingsItem(
-                    icon: Icons.feedback_outlined,
-                    title: 'Send Feedback',
-                    subtitle: 'Share suggestions',
-                    iconColor: Colors.amber,
-                    onTap: () => _sendFeedback(context),
-                  ),
-                ]),
-                const SizedBox(height: 24),
-
-                // Legal & Info Section
-                _buildSectionTitle('Legal & Info', Icons.info_outline_rounded),
-                const SizedBox(height: 12),
-                _buildGroupedSettingsCard([
-                  _SettingsItem(
-                    icon: Icons.privacy_tip_outlined,
-                    title: 'Privacy Policy',
-                    subtitle: 'How we use your data',
-                    iconColor: Colors.teal,
-                    onTap: () => _viewPrivacyPolicy(context),
-                  ),
-                  _SettingsItem(
-                    icon: Icons.description_outlined,
-                    title: 'Terms of Service',
-                    subtitle: 'User agreement',
-                    iconColor: Colors.brown,
-                    onTap: () => _viewTermsOfService(context),
-                  ),
-                  _SettingsItem(
-                    icon: Icons.system_update_outlined,
-                    title: 'Check for Updates',
-                    subtitle: 'v1.2.0 (Build 45)',
-                    iconColor: Colors.green,
-                    onTap: () => _checkForUpdates(context),
-                  ),
-                  _SettingsItem(
-                    icon: Icons.info_outline,
-                    title: 'About App',
-                    subtitle: 'App information',
-                    iconColor: Colors.grey,
-                    onTap: () => _showAppInfo(context),
                   ),
                 ]),
                 const SizedBox(height: 32),
@@ -513,14 +398,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
-          // Edit button
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
+          // Edit button - navigates to Staff Management
+          GestureDetector(
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const StaffManagementScreen(),
+              ),
             ),
-            child: Icon(Icons.edit_outlined, size: 20, color: Colors.grey[600]),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(Icons.edit_outlined, size: 20, color: Colors.grey[600]),
+            ),
           ),
         ],
       ),
@@ -820,15 +712,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showSnackBar(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
   void _showNotificationSettings(BuildContext context) {
     showDialog(
       context: context,
@@ -868,253 +751,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
-    );
-  }
-
-  void _showLanguageDialog(BuildContext context) {
-    final languages = ['English', 'Arabic', 'Hindi', 'Spanish', 'French'];
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Language'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: languages
-              .map((language) => _LanguageOption(
-                    language: language,
-                    code: _getLanguageCode(language),
-                    isSelected: language == _selectedLanguage,
-                    onTap: () {
-                      setState(() => _selectedLanguage = language);
-                      _savePreference('selected_language', language);
-                      Navigator.pop(context);
-                      _showSnackBar(context, 'Language changed to $language');
-                    },
-                  ))
-              .toList(),
-        ),
-      ),
-    );
-  }
-
-  void _showThemeColorDialog(BuildContext context) {
-    final colors = [
-      Colors.deepPurple,
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.pink,
-      Colors.teal,
-    ];
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Theme Color'),
-        content: Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: colors
-              .map((color) => GestureDetector(
-                    onTap: () {
-                      Navigator.pop(context);
-                      _showSnackBar(context, 'Theme color updated');
-                    },
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                    ),
-                  ))
-              .toList(),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _contactSupport(BuildContext context) async {
-    // WhatsApp support number - replace with actual support number
-    const phoneNumber = '97412345678'; // Qatar country code + number without +
-    const message = 'Hello, I need help with the Zayka Admin app.';
-    final encodedMessage = Uri.encodeComponent(message);
-    final uri = Uri.parse('https://wa.me/$phoneNumber?text=$encodedMessage');
-    
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      _showSnackBar(context, 'Could not launch WhatsApp');
-    }
-  }
-
-  Future<void> _reportBug(BuildContext context) async {
-    const email = 'bugs@yourapp.com';
-    const subject = 'Bug Report - Admin App';
-    const body =
-        'Bug Description:\nSteps to reproduce:\nExpected behavior:\nActual behavior:';
-    final uri = Uri.parse('mailto:$email?subject=$subject&body=$body');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
-      _showSnackBar(context, 'Could not launch email app');
-    }
-  }
-
-  Future<void> _sendFeedback(BuildContext context) async {
-    const email = 'feedback@yourapp.com';
-    const subject = 'App Feedback - Admin App';
-    const body = 'I would like to share the following feedback:';
-    final uri = Uri.parse('mailto:$email?subject=$subject&body=$body');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
-      _showSnackBar(context, 'Could not launch email app');
-    }
-  }
-
-  Future<void> _viewPrivacyPolicy(BuildContext context) async {
-    const url = 'https://yourapp.com/privacy';
-    try {
-      final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) _showSnackBar(context, 'Could not open privacy policy');
-      }
-    } catch (e) {
-      debugPrint('Error launching URL: $e');
-      if (mounted) _showSnackBar(context, 'Error opening privacy policy');
-    }
-  }
-
-  Future<void> _viewTermsOfService(BuildContext context) async {
-    const url = 'https://yourapp.com/terms';
-    try {
-      final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) _showSnackBar(context, 'Could not open terms of service');
-      }
-    } catch (e) {
-      debugPrint('Error launching URL: $e');
-      if (mounted) _showSnackBar(context, 'Error opening terms of service');
-    }
-  }
-
-  void _showAppInfo(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Icon(Icons.info_outline, color: Colors.deepPurple),
-            const SizedBox(width: 12),
-            const Text('App Information'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _AppInfoItem(title: 'Version', value: '1.2.0'),
-            _AppInfoItem(title: 'Build Number', value: '45'),
-            _AppInfoItem(title: 'Last Updated', value: '2024-01-15'),
-            _AppInfoItem(title: 'Developer', value: 'Zayka Admin'),
-            _AppInfoItem(title: 'Package Name', value: 'com.zayka.admin'),
-            const SizedBox(height: 8),
-            const Divider(),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(Icons.flutter_dash, size: 16, color: Colors.blue[400]),
-                const SizedBox(width: 8),
-                Text('Built with Flutter',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _checkForUpdates(BuildContext context) {
-    // Show initial loading state
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        // Simulate checking after 1.5 seconds
-        Future.delayed(const Duration(milliseconds: 1500), () {
-          if (Navigator.of(dialogContext).canPop()) {
-            Navigator.of(dialogContext).pop();
-            // Show result
-            showDialog(
-              context: context,
-              builder: (context) => AlertDialog(
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
-                title: Row(
-                  children: [
-                    Icon(Icons.check_circle, color: Colors.green[600]),
-                    const SizedBox(width: 12),
-                    const Text('Up to Date'),
-                  ],
-                ),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'You are using the latest version (v1.2.0)',
-                      style: TextStyle(color: Colors.grey[700]),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Last checked: Just now',
-                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
-                    ),
-                  ],
-                ),
-                actions: [
-                  ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.deepPurple),
-                    child: const Text('OK'),
-                  ),
-                ],
-              ),
-            );
-          }
-        });
-
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Checking for Updates'),
-          content: const Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(height: 16),
-              CircularProgressIndicator(color: Colors.deepPurple),
-              SizedBox(height: 24),
-              Text('Checking for the latest version...'),
-              SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
     );
   }
 
@@ -1177,23 +813,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
-
-  String _getLanguageCode(String language) {
-    switch (language) {
-      case 'English':
-        return 'US';
-      case 'Arabic':
-        return 'SA';
-      case 'Hindi':
-        return 'IN';
-      case 'Spanish':
-        return 'ES';
-      case 'French':
-        return 'FR';
-      default:
-        return 'US';
-    }
-  }
 }
 
 class _NotificationSettingItem extends StatelessWidget {
@@ -1218,64 +837,6 @@ class _NotificationSettingItem extends StatelessWidget {
         value: value,
         onChanged: onChanged,
         activeColor: Colors.deepPurple,
-      ),
-    );
-  }
-}
-
-class _LanguageOption extends StatelessWidget {
-  final String language;
-  final String code;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _LanguageOption({
-    required this.language,
-    required this.code,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: Text(
-        _getFlagEmoji(code),
-        style: const TextStyle(fontSize: 20),
-      ),
-      title: Text(language),
-      trailing: isSelected
-          ? const Icon(Icons.check_circle, color: Colors.deepPurple)
-          : null,
-      onTap: onTap,
-    );
-  }
-
-  String _getFlagEmoji(String countryCode) {
-    final int firstLetter = countryCode.codeUnitAt(0) - 0x41 + 0x1F1E6;
-    final int secondLetter = countryCode.codeUnitAt(1) - 0x41 + 0x1F1E6;
-    return String.fromCharCode(firstLetter) + String.fromCharCode(secondLetter);
-  }
-}
-
-class _AppInfoItem extends StatelessWidget {
-  final String title;
-  final String value;
-
-  const _AppInfoItem({required this.title, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Text(
-            '$title: ',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          Text(value),
-        ],
       ),
     );
   }
