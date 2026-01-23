@@ -1,0 +1,78 @@
+name: mdd
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.2.1+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0' # Widened for better compatibility
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Production Dependencies
+  cupertino_icons: ^1.0.8
+  firebase_core: ^3.15.1
+  cloud_firestore: ^5.6.11
+  intl: ^0.20.2
+  firebase_auth: ^5.6.2
+  google_sign_in: ^6.1.5
+  provider: ^6.1.5
+  pdf: ^3.10.7
+  printing: ^5.12.0
+  audioplayers: ^5.2.0
+  syncfusion_flutter_charts: ^29.1.38
+  syncfusion_flutter_datepicker: ^29.1.38
+  url_launcher: ^6.3.0
+  firebase_storage: ^12.4.9
+  image_picker: ^1.2.0
+  flutter_image_compress: ^2.4.0
+  flutter_map: ^6.1.0
+  geolocator: ^11.0.0
+  http: ^1.2.1
+  latlong2: ^0.9.0
+  firebase_messaging: ^15.2.10
+  connectivity_plus: ^7.0.0
+  shared_preferences: ^2.5.3
+  cloud_functions: ^5.6.2
+  vibration: ^3.1.4
+  flutter_local_notifications: ^19.5.0
+  flutter_background_service: ^5.1.0
+  flutter_background_service_android: ^6.3.1
+  wakelock_plus: ^1.4.0
+  permission_handler: ^12.0.1
+  timezone: ^0.10.1
+  firebase_crashlytics: ^4.3.10
+  firebase_app_check: ^0.3.2+7  # Security: Protect against API abuse
+  package_info_plus: ^9.0.0  # Added for dynamic app version
+  excel: ^4.0.6
+  universal_html: ^2.3.0
+  share_plus: ^12.0.1
+  file_saver: ^0.3.1
+  open_file: ^3.5.11
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+  # The icon package belongs in dev_dependencies
+  flutter_launcher_icons: "^0.13.1"
+
+# Configuration for the icon package
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/admin.jpg"
+
+# Flutter-specific configuration
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/google_logo.png
+    - assets/admin.jpg
+    - assets/notification.mp3
+    - assets/placeholder_avatar.png
+    - assets/fonts/NotoSansArabic-Regular.ttf
+    - assets/mitranlogo.jpg  # Added for receipt printing
