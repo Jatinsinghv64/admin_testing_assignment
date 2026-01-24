@@ -36,6 +36,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _notificationService = context.read<OrderNotificationService>();
+    // Load branch names immediately when settings screen opens
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final userScope = context.read<UserScopeService>();
+      final branchFilter = context.read<BranchFilterService>();
+      if (userScope.branchIds.isNotEmpty) {
+        branchFilter.loadBranchNames(userScope.branchIds);
+      }
+    });
   }
 
   @override
@@ -58,6 +66,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final userScope = context.watch<UserScopeService>();
     final authService = context.read<AuthService>();
+    // Listen to branch filter changes to rebuild when names are loaded
+    final branchFilter = context.watch<BranchFilterService>();
 
     // Cache permission state when first loaded
     if (_hadPermissionOnInit == null && userScope.isLoaded) {
@@ -291,6 +301,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final initials = identifier.isNotEmpty
         ? identifier.substring(0, 2).toUpperCase()
         : 'U';
+    
+    // Get branch names
+    final branchFilter = context.read<BranchFilterService>();
+    String branchText = '';
+    
+    if (userScope.branchIds.isEmpty) {
+      branchText = 'No Branch Assigned';
+    } else if (userScope.branchIds.length == 1) {
+      branchText = branchFilter.getBranchName(userScope.branchIds.first);
+    } else {
+      // Multiple branches
+      final names = userScope.branchIds
+          .map((id) => branchFilter.getBranchName(id))
+          .toList();
+      if (names.length > 2) {
+        branchText = '${names.take(2).join(", ")} +${names.length - 2} more';
+      } else {
+        branchText = names.join(", ");
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -378,7 +408,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                if (userScope.branchId.isNotEmpty) ...[
+                if (userScope.branchIds.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Row(
                     children: [
@@ -386,10 +416,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
-                          userScope.branchId,
+                          branchText,
                           style:
                               TextStyle(color: Colors.grey[600], fontSize: 12),
                           overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                       ),
                     ],
@@ -842,21 +873,6 @@ class _NotificationSettingItem extends StatelessWidget {
   }
 }
 
-class _BranchSettingItem extends StatelessWidget {
-  final String title;
-  final VoidCallback onTap;
-
-  const _BranchSettingItem({required this.title, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      title: Text(title),
-      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-      onTap: onTap,
-    );
-  }
-}
 
 // -----------------------------------------------------------------------------
 // STAFF MANAGEMENT SCREEN (Unchanged from previous fix, included for completeness)
@@ -1872,61 +1888,6 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
   }
 }
 
-class _InfoChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
-
-  const _InfoChip({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: color,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ✅ NEW: SuperAdmin-aware status card with branch selector
 class _SuperAdminStatusCard extends StatefulWidget {
@@ -2040,8 +2001,77 @@ class _SuperAdminStatusCardState extends State<_SuperAdminStatusCard> {
         ][now.weekday - 1];
         final daySchedule = workingHours[dayName];
         if (daySchedule != null && daySchedule['isOpen'] == true) {
-          isScheduleOpen = true;
+          // ✅ FIX: Check if current time is within working hour slots
+          final List slots = daySchedule['slots'] ?? [];
+          for (var slot in slots) {
+            try {
+              final openStr = slot['open'] as String?;
+              final closeStr = slot['close'] as String?;
+              if (openStr == null || closeStr == null) continue;
+              
+              final openParts = openStr.split(':').map(int.parse).toList();
+              final closeParts = closeStr.split(':').map(int.parse).toList();
+              
+              final openTime = DateTime(now.year, now.month, now.day, openParts[0], openParts[1]);
+              var closeTime = DateTime(now.year, now.month, now.day, closeParts[0], closeParts[1]);
+              
+              // Handle overnight shifts (e.g., 22:00 - 02:00)
+              if (closeTime.isBefore(openTime) || closeTime.isAtSameMomentAs(openTime)) {
+                closeTime = closeTime.add(const Duration(days: 1));
+              }
+              
+              if (now.isAfter(openTime) && now.isBefore(closeTime)) {
+                isScheduleOpen = true;
+                break;
+              }
+            } catch (e) {
+              debugPrint('Error parsing slot times: $e');
+            }
+          }
         }
+      }
+
+      // ✅ CHECK: If trying to OPEN but schedule says CLOSED - show dialog
+      if (newStatus == true && !isScheduleOpen) {
+        setState(() => _isToggling = false);
+        if (!mounted) return;
+        
+        showDialog(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Row(
+              children: const [
+                Icon(Icons.schedule, color: Colors.orange),
+                SizedBox(width: 10),
+                Text('Outside Schedule'),
+              ],
+            ),
+            content: const Text(
+              'The restaurant is closed according to the current schedule.\n\nTo open now, please update your Timings settings.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const RestaurantTimingScreen()),
+                  );
+                },
+                icon: const Icon(Icons.edit_calendar, size: 16),
+                label: const Text('Update Timings'),
+                style:
+                    ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+              ),
+            ],
+          ),
+        );
+        return;
       }
 
       // Set appropriate flags

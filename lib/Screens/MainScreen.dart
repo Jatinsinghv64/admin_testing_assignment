@@ -1071,8 +1071,78 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
         ][now.weekday - 1];
         final daySchedule = workingHours[dayName];
         if (daySchedule != null && daySchedule['isOpen'] == true) {
-          isScheduleOpen = true;
+          // ✅ FIX: Check if current time is within working hour slots
+          final List slots = daySchedule['slots'] ?? [];
+          for (var slot in slots) {
+            try {
+              final openStr = slot['open'] as String?;
+              final closeStr = slot['close'] as String?;
+              if (openStr == null || closeStr == null) continue;
+              
+              final openParts = openStr.split(':').map(int.parse).toList();
+              final closeParts = closeStr.split(':').map(int.parse).toList();
+              
+              final openTime = DateTime(now.year, now.month, now.day, openParts[0], openParts[1]);
+              var closeTime = DateTime(now.year, now.month, now.day, closeParts[0], closeParts[1]);
+              
+              // Handle overnight shifts (e.g., 22:00 - 02:00)
+              if (closeTime.isBefore(openTime) || closeTime.isAtSameMomentAs(openTime)) {
+                closeTime = closeTime.add(const Duration(days: 1));
+              }
+              
+              if (now.isAfter(openTime) && now.isBefore(closeTime)) {
+                isScheduleOpen = true;
+                break;
+              }
+            } catch (e) {
+              debugPrint('Error parsing slot times: $e');
+            }
+          }
         }
+      }
+
+      // ✅ CHECK: If trying to OPEN but schedule says CLOSED - show dialog
+      if (newStatus == true && !isScheduleOpen) {
+        setState(() => _togglingIds.remove(branchId));
+        if (!mounted) return;
+        
+        showDialog(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Row(
+              children: const [
+                Icon(Icons.schedule, color: Colors.orange),
+                SizedBox(width: 10),
+                Text('Outside Schedule'),
+              ],
+            ),
+            content: const Text(
+              'The restaurant is closed according to the current schedule.\n\nTo open now, please update your Timings settings.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  Navigator.pop(context); // Close the branch sheet
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const RestaurantTimingScreen()),
+                  );
+                },
+                icon: const Icon(Icons.edit_calendar, size: 16),
+                label: const Text('Update Timings'),
+                style:
+                    ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+              ),
+            ],
+          ),
+        );
+        return;
       }
 
       Map<String, dynamic> updateData = {

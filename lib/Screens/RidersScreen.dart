@@ -247,11 +247,14 @@ class _RidersScreenState extends State<RidersScreen> {
         branchFilter.getFilterBranchIds(userScope.branchIds);
 
     // Always filter by branches - SuperAdmin sees only their assigned branches
+    // Firestore's arrayContainsAny has a limit of 10 items
     if (filterBranchIds.isNotEmpty) {
       if (filterBranchIds.length == 1) {
         query = query.where('branchIds', arrayContains: filterBranchIds.first);
       } else {
-        query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+        // Limit to first 10 branch IDs to comply with Firestore limit
+        final limitedBranchIds = filterBranchIds.take(10).toList();
+        query = query.where('branchIds', arrayContainsAny: limitedBranchIds);
       }
     } else if (userScope.branchIds.isNotEmpty) {
       // Fall back to user's assigned branches
@@ -259,7 +262,9 @@ class _RidersScreenState extends State<RidersScreen> {
         query =
             query.where('branchIds', arrayContains: userScope.branchIds.first);
       } else {
-        query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+        // Limit to first 10 branch IDs to comply with Firestore limit
+        final limitedUserBranchIds = userScope.branchIds.take(10).toList();
+        query = query.where('branchIds', arrayContainsAny: limitedUserBranchIds);
       }
     } else {
       // User with no branches - force empty result
@@ -468,6 +473,9 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
   late Animation<double> _scaleAnimation;
   bool _isExpanded = false;
   bool _isActionLoading = false;
+  int? _realDeliveryCount;
+  double? _realAverageRating;
+  bool _isLoadingStats = true;
 
   @override
   void initState() {
@@ -483,6 +491,53 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
       parent: _animationController,
       curve: Curves.easeInOut,
     ));
+    _fetchRealStats();
+  }
+
+  Future<void> _fetchRealStats() async {
+    try {
+      final ordersSnapshot = await FirebaseFirestore.instance
+          .collection('Orders')
+          .where('riderId', isEqualTo: widget.driver.id)
+          .where('status', isEqualTo: 'delivered')
+          .get();
+
+      double totalRating = 0.0;
+      int ratedOrdersCount = 0;
+
+      for (final doc in ordersSnapshot.docs) {
+        final data = doc.data();
+        // Check 'riderRating' first, then fallback to 'rating'
+        final rawRating = data['riderRating'] ?? data['rating'];
+        double? ratingVal;
+
+        if (rawRating is num) {
+          ratingVal = rawRating.toDouble();
+        } else if (rawRating is String) {
+          ratingVal = double.tryParse(rawRating);
+        }
+
+        if (ratingVal != null && ratingVal > 0) {
+          totalRating += ratingVal;
+          ratedOrdersCount++;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _realDeliveryCount = ordersSnapshot.docs.length;
+          _realAverageRating = ratedOrdersCount > 0 ? totalRating / ratedOrdersCount : 0.0;
+          _isLoadingStats = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching real driver stats: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingStats = false;
+        });
+      }
+    }
   }
 
   @override
@@ -757,13 +812,13 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
       children: [
         _buildStatChip(
           icon: Icons.star_rounded,
-          value: driverInfo.rating,
+          value: _isLoadingStats ? '...' : (_realAverageRating?.toStringAsFixed(1) ?? '0.0'),
           color: Colors.amber,
           backgroundColor: Colors.amber.withOpacity(0.1),
         ),
         _buildStatChip(
           icon: Icons.local_shipping_outlined,
-          value: '${driverInfo.totalDeliveries}',
+          value: _isLoadingStats ? '...' : '${_realDeliveryCount ?? driverInfo.totalDeliveries}',
           color: Colors.blue,
           backgroundColor: Colors.blue.withOpacity(0.1),
         ),
@@ -1971,7 +2026,7 @@ class _DriverDialogState extends State<_DriverDialog> {
 
 /// Bottom Sheet for detailed driver information
 /// Bottom Sheet for detailed driver information
-class _DriverDetailsBottomSheet extends StatelessWidget {
+class _DriverDetailsBottomSheet extends StatefulWidget {
   final DocumentSnapshot driver;
   final VoidCallback? onEdit;
 
@@ -1981,8 +2036,71 @@ class _DriverDetailsBottomSheet extends StatelessWidget {
   });
 
   @override
+  State<_DriverDetailsBottomSheet> createState() => _DriverDetailsBottomSheetState();
+}
+
+class _DriverDetailsBottomSheetState extends State<_DriverDetailsBottomSheet> {
+  int _realDeliveryCount = 0;
+  double _realAverageRating = 0.0;
+  bool _isLoadingStats = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchRealStats();
+  }
+
+  Future<void> _fetchRealStats() async {
+    try {
+      // Fetch completed orders for this rider
+      final ordersSnapshot = await FirebaseFirestore.instance
+          .collection('Orders')
+          .where('riderId', isEqualTo: widget.driver.id)
+          .where('status', isEqualTo: 'delivered')
+          .get();
+
+      int totalDeliveries = ordersSnapshot.docs.length;
+      double totalRating = 0.0;
+      int ratedOrdersCount = 0;
+
+      for (final doc in ordersSnapshot.docs) {
+        final data = doc.data();
+        // Check 'rating' first, then fallback to 'riderRating'
+        final rawRating = data['rating'] ?? data['riderRating'];
+        double? ratingVal;
+
+        if (rawRating is num) {
+          ratingVal = rawRating.toDouble();
+        } else if (rawRating is String) {
+          ratingVal = double.tryParse(rawRating);
+        }
+
+        if (ratingVal != null && ratingVal > 0) {
+          totalRating += ratingVal;
+          ratedOrdersCount++;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _realDeliveryCount = totalDeliveries;
+          _realAverageRating = ratedOrdersCount > 0 ? totalRating / ratedOrdersCount : 0.0;
+          _isLoadingStats = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching real driver stats: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingStats = false;
+        });
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final data = driver.data() as Map<String, dynamic>;
+    final data = widget.driver.data() as Map<String, dynamic>;
     final driverInfo = DriverInfo.fromFirestore(data);
 
     return Container(
@@ -2274,6 +2392,14 @@ class _DriverDetailsBottomSheet extends StatelessWidget {
   }
 
   Widget _buildStatistics(DriverInfo driverInfo) {
+    // Use real-time fetched values instead of static Firestore values
+    final displayRating = _isLoadingStats 
+        ? '...' 
+        : _realAverageRating.toStringAsFixed(1);
+    final displayDeliveries = _isLoadingStats 
+        ? '...' 
+        : _realDeliveryCount.toString();
+    
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -2285,13 +2411,13 @@ class _DriverDetailsBottomSheet extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           _buildStatItem(
-            value: driverInfo.rating,
-            label: 'Rating',
+            value: displayRating,
+            label: 'Avg Rating',
             icon: Icons.star_rounded,
             color: Colors.amber,
           ),
           _buildStatItem(
-            value: driverInfo.totalDeliveries.toString(),
+            value: displayDeliveries,
             label: 'Deliveries',
             icon: Icons.local_shipping_rounded,
             color: Colors.blue,
@@ -2614,7 +2740,7 @@ class _DriverDetailsBottomSheet extends StatelessWidget {
   }
 
   void _viewOrderHistory(BuildContext context) {
-    final data = driver.data() as Map<String, dynamic>;
+    final data = widget.driver.data() as Map<String, dynamic>;
     final driverName = data['name']?.toString() ?? '';
 
     Navigator.of(context)
@@ -2622,7 +2748,7 @@ class _DriverDetailsBottomSheet extends StatelessWidget {
       ..push(
         MaterialPageRoute(
           builder: (_) => _DriverOrderHistoryScreen(
-            driverId: driver.id,
+            driverId: widget.driver.id,
             driverName: driverName,
           ),
         ),
@@ -2630,8 +2756,8 @@ class _DriverDetailsBottomSheet extends StatelessWidget {
   }
 
   void _editDriver(BuildContext context) {
-    if (onEdit != null) {
-      onEdit!();
+    if (widget.onEdit != null) {
+      widget.onEdit!();
     } else {
       // Fallback if no callback provided
       Navigator.of(context).pop();
@@ -2643,7 +2769,7 @@ class _DriverDetailsBottomSheet extends StatelessWidget {
     try {
       await FirebaseFirestore.instance
           .collection('Drivers')
-          .doc(driver.id)
+          .doc(widget.driver.id)
           .update({
         'isAvailable': !driverInfo.isAvailable,
       });
@@ -2957,6 +3083,16 @@ class _OrderHistoryCard extends StatelessWidget {
         double.tryParse(data['totalAmount']?.toString() ?? '0') ?? 0.0;
     final orderType = data['Order_type']?.toString() ?? 'delivery';
 
+    // ✅ Extract Rating
+    double rating = 0.0;
+    // Check 'rating' first, then fallback to 'riderRating'
+    final rawRating = data['rating'] ?? data['riderRating'];
+    if (rawRating is num) {
+      rating = rawRating.toDouble();
+    } else if (rawRating is String) {
+      rating = double.tryParse(rawRating) ?? 0.0;
+    }
+
     // ✅ Fix Delivery Address Crash (Handle Map vs String)
     String address = 'No address';
     final addrRaw = data['deliveryAddress'];
@@ -2990,39 +3126,66 @@ class _OrderHistoryCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Order Number',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey[600],
-                        fontWeight: FontWeight.w500,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Order Number',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    SelectableText(
-                      '#$orderId',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        fontFamily: 'monospace',
-                        color: Colors.deepPurple,
+                      const SizedBox(height: 2),
+                      SelectableText(
+                        '#$orderId',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          fontFamily: 'monospace',
+                          color: Colors.deepPurple,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                      color: _getStatusColor(status).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Text(status.toUpperCase(),
-                      style: TextStyle(
-                          color: _getStatusColor(status),
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                          color: _getStatusColor(status).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8)),
+                      child: Text(status.toUpperCase(),
+                          style: TextStyle(
+                              color: _getStatusColor(status),
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                    // ✅ Show Rating if available
+                    if (rating > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
+                            const SizedBox(width: 4),
+                            Text(
+                              rating.toStringAsFixed(1),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: Colors.amber,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
