@@ -63,3 +63,11 @@ serviceAccountKey.json
 
 # Local configuration that might contain secrets
 local.properties
+
+# ========================================
+# Android Release Signing (NEVER commit!)
+# ========================================
+key.properties
+*.jks
+*.keystore
+upload-keystore.jks
