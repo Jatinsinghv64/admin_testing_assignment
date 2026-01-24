@@ -284,68 +284,99 @@ class OrderService {
         await RiderAssignmentService.cancelAutoAssignment(sanitizedOrderId);
 
       } else {
-        final WriteBatch batch = _db.batch();
-        final Map<String, dynamic> updateData = {'status': newStatus};
+        // ✅ OPTIMISTIC LOCKING: Use transaction for all status updates
+        // This prevents race conditions when multiple admins update the same order
+        await _db.runTransaction((transaction) async {
+          final snapshot = await transaction.get(orderRef);
+          if (!snapshot.exists) throw Exception("Order does not exist!");
 
-        // ========================================================
-        // AUTO RIDER ASSIGNMENT: Trigger for delivery orders
-        // ========================================================
-        // When a delivery order moves to 'preparing', automatically start
-        // the rider assignment workflow by setting the 'autoAssignStarted'
-        // timestamp. This triggers the Cloud Function 'startAssignmentWorkflowV2'
-        // which finds the nearest available rider and sends them an offer.
-        if (newStatus == AppConstants.statusPreparing) {
-          final orderDoc = await orderRef.get().timeout(AppConstants.firestoreTimeout);
-          final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-          
-          // Check both Order_type (primary) and orderType (fallback) field names
-          final String orderType = (data['Order_type'] ?? data['orderType'] ?? '').toString().toLowerCase();
-          final String? existingRiderId = data['riderId'];
-          final bool hasAutoAssignStarted = data['autoAssignStarted'] != null;
-          
-          // Only trigger for delivery orders without an assigned rider
-          // and where auto-assignment hasn't already been started
-          if (orderType == 'delivery' && 
-              (existingRiderId == null || existingRiderId.isEmpty) &&
-              !hasAutoAssignStarted) {
-            updateData['autoAssignStarted'] = FieldValue.serverTimestamp();
-            updateData['lastAssignmentUpdate'] = FieldValue.serverTimestamp();
-            debugPrint('🚀 Auto-assignment triggered for delivery order: $orderId');
+          final data = snapshot.data() as Map<String, dynamic>;
+          final currentStatus = AppConstants.normalizeStatus(data['status']);
+
+          // ✅ VALIDATION: Prevent invalid status transitions
+          // Cannot update terminal orders (delivered, cancelled, paid, collected)
+          if (AppConstants.isTerminalStatus(currentStatus)) {
+            throw Exception("Cannot update order - it is already $currentStatus");
           }
-        }
 
-        if (newStatus == AppConstants.statusDelivered) {
-          updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
+          // ✅ VALIDATION: Prevent backwards transitions (except for special cases)
+          final statusOrder = [
+            AppConstants.statusPending,
+            AppConstants.statusPreparing,
+            AppConstants.statusPrepared,           // Non-delivery
+            AppConstants.statusNeedsAssignment,    // Delivery
+            AppConstants.statusRiderAssigned,
+            AppConstants.statusPickedUp,
+            AppConstants.statusServed,             // Dine-in
+            AppConstants.statusPaid,               // Terminal: takeaway/dine-in
+            AppConstants.statusCollected,          // Terminal: pickup
+            AppConstants.statusDelivered,          // Terminal: delivery
+          ];
 
-          final orderDoc = await orderRef.get().timeout(AppConstants.firestoreTimeout);
-          final data = orderDoc.data() as Map<String, dynamic>? ?? {};
-          final String orderType = (data['Order_type'] as String?)?.toLowerCase() ?? '';
-          final String? riderId = data['riderId'] as String?;
-
-          if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
-            final driverRef = _db.collection(AppConstants.collectionDrivers).doc(riderId);
-            batch.update(driverRef, {
-              'assignedOrderId': '',
-              'isAvailable': true,
-              'status': 'online', // Force online to correct any drift
-            });
+          final currentIndex = statusOrder.indexOf(currentStatus);
+          final newIndex = statusOrder.indexOf(newStatus);
+          
+          // Allow same status (idempotent) or forward transitions
+          if (currentIndex != -1 && newIndex != -1 && newIndex < currentIndex) {
+            throw Exception("Cannot move order backwards from $currentStatus to $newStatus");
           }
-        } else if (AppConstants.statusEquals(newStatus, AppConstants.statusPickedUp)) {
-          updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
-        } else if (newStatus == AppConstants.statusRiderAssigned) {
-          updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
-        } else if (newStatus == AppConstants.statusPrepared) {
-          updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
-        } else if (newStatus == AppConstants.statusServed) {
-          updateData['timestamps.served'] = FieldValue.serverTimestamp();
-        } else if (newStatus == AppConstants.statusPaid) {
-          updateData['timestamps.paid'] = FieldValue.serverTimestamp();
-        } else if (newStatus == AppConstants.statusCollected) {
-          updateData['timestamps.collected'] = FieldValue.serverTimestamp();
-        }
 
-        batch.update(orderRef, updateData);
-        await batch.commit().timeout(AppConstants.firestoreWriteTimeout);
+          final Map<String, dynamic> updateData = {'status': newStatus};
+
+          // ========================================================
+          // AUTO RIDER ASSIGNMENT: Trigger for delivery orders
+          // ========================================================
+          if (newStatus == AppConstants.statusPreparing) {
+            // Check both Order_type (primary) and orderType (fallback) field names
+            final String orderType = (data['Order_type'] ?? data['orderType'] ?? '').toString().toLowerCase();
+            final String? existingRiderId = data['riderId'];
+            final bool hasAutoAssignStarted = data['autoAssignStarted'] != null;
+            
+            // Only trigger for delivery orders without an assigned rider
+            if (orderType == 'delivery' && 
+                (existingRiderId == null || existingRiderId.isEmpty) &&
+                !hasAutoAssignStarted) {
+              updateData['autoAssignStarted'] = FieldValue.serverTimestamp();
+              updateData['lastAssignmentUpdate'] = FieldValue.serverTimestamp();
+              debugPrint('🚀 Auto-assignment triggered for delivery order: $orderId');
+            }
+          }
+
+          // Add status-specific timestamps
+          if (newStatus == AppConstants.statusDelivered) {
+            updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
+          } else if (AppConstants.statusEquals(newStatus, AppConstants.statusPickedUp)) {
+            updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
+          } else if (newStatus == AppConstants.statusRiderAssigned) {
+            updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
+          } else if (newStatus == AppConstants.statusPrepared) {
+            updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
+          } else if (newStatus == AppConstants.statusServed) {
+            updateData['timestamps.served'] = FieldValue.serverTimestamp();
+          } else if (newStatus == AppConstants.statusPaid) {
+            updateData['timestamps.paid'] = FieldValue.serverTimestamp();
+          } else if (newStatus == AppConstants.statusCollected) {
+            updateData['timestamps.collected'] = FieldValue.serverTimestamp();
+          }
+
+          // Perform the update within the transaction
+          transaction.update(orderRef, updateData);
+
+          // Handle driver release for delivered orders
+          if (newStatus == AppConstants.statusDelivered) {
+            final String orderType = (data['Order_type'] as String?)?.toLowerCase() ?? '';
+            final String? riderId = data['riderId'] as String?;
+
+            if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
+              final driverRef = _db.collection(AppConstants.collectionDrivers).doc(riderId);
+              transaction.update(driverRef, {
+                'assignedOrderId': '',
+                'isAvailable': true,
+                'status': 'online', // Force online to correct any drift
+              });
+            }
+          }
+        }).timeout(AppConstants.firestoreWriteTimeout);
       }
     } on TimeoutException {
       debugPrint("Timeout updating order: $orderId");

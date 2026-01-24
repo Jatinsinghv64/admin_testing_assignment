@@ -1,9 +1,11 @@
 // lib/Screens/LoginScreen.dart
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../Widgets/Authorization.dart';
 import '../constants.dart';
+import '../utils/security_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -18,6 +20,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
 
   bool _isLoading = false;
+  bool _isResettingPassword = false;
   bool _isPasswordVisible = false;
   String? _errorMessage;
 
@@ -140,16 +143,65 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _resetPassword() async {
-    if (_emailController.text.isEmpty) {
-      setState(
-        () => _errorMessage = "Please enter your email to reset password.",
-      );
+    final email = _emailController.text.trim();
+    
+    // Validate email before attempting reset
+    final emailError = InputValidator.validateEmail(email);
+    if (emailError != null) {
+      setState(() => _errorMessage = emailError);
       return;
     }
-    // Call your Auth Service reset password logic here
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Password reset link sent to your email.")),
-    );
+
+    setState(() {
+      _isResettingPassword = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      
+      if (mounted) {
+        setState(() => _isResettingPassword = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Password reset link sent to $email',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isResettingPassword = false;
+          if (e.code == 'user-not-found') {
+            _errorMessage = 'No account found with this email address.';
+          } else if (e.code == 'invalid-email') {
+            _errorMessage = 'Please enter a valid email address.';
+          } else {
+            _errorMessage = 'Failed to send reset email. Please try again.';
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isResettingPassword = false;
+          _errorMessage = 'An unexpected error occurred. Please try again.';
+        });
+      }
+    }
   }
 
   Future<void> _contactSupport() async {
@@ -227,10 +279,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
-                    validator: (value) =>
-                        (value == null || !value.contains('@'))
-                        ? 'Invalid email address'
-                        : null,
+                    validator: (value) {
+                      // Use proper email validation from security_utils
+                      final error = InputValidator.validateEmail(value);
+                      return error;
+                    },
                   ),
                   const SizedBox(height: 20),
                   TextFormField(

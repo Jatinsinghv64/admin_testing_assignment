@@ -13,12 +13,15 @@ class ImageUploadService {
   /// Picks an image from gallery and uploads it to Firebase Storage.
   /// 
   /// Returns the download URL of the uploaded image, or null if cancelled/failed.
+  /// 
+  /// [maxFileSizeBytes] - Maximum allowed file size (default 2MB)
   Future<String?> pickAndUploadImage({
     required BuildContext context,
     required String storageFolder,
     int quality = 90,
     int maxWidth = 1200,
     int maxHeight = 1200,
+    int maxFileSizeBytes = 2 * 1024 * 1024, // 2MB default
   }) async {
     try {
       final ImagePicker picker = ImagePicker();
@@ -33,6 +36,30 @@ class ImageUploadService {
 
       // Check if context is still valid
       if (!context.mounted) return null;
+
+      // ✅ Fix 7: Validate file size before upload
+      final File imageFile = File(image.path);
+      final int fileSizeBytes = await imageFile.length();
+      
+      if (fileSizeBytes > maxFileSizeBytes) {
+        final double fileSizeMB = fileSizeBytes / (1024 * 1024);
+        final double maxSizeMB = maxFileSizeBytes / (1024 * 1024);
+        
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '❌ Image too large (${fileSizeMB.toStringAsFixed(1)}MB). '
+                'Maximum size is ${maxSizeMB.toStringAsFixed(0)}MB.',
+              ),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+        return null;
+      }
 
       // Show upload progress dialog
       showDialog(

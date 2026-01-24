@@ -505,10 +505,11 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
       double totalRating = 0.0;
       int ratedOrdersCount = 0;
 
-      for (final doc in ordersSnapshot.docs) {
+        for (final doc in ordersSnapshot.docs) {
         final data = doc.data();
-        // Check 'riderRating' first, then fallback to 'rating'
-        final rawRating = data['riderRating'] ?? data['rating'];
+        // Strictly use 'riderRating' for driver validation.
+        // We do NOT fallback to 'rating' as that is often the restaurant rating.
+        final rawRating = data['riderRating'];
         double? ratingVal;
 
         if (rawRating is num) {
@@ -2065,8 +2066,8 @@ class _DriverDetailsBottomSheetState extends State<_DriverDetailsBottomSheet> {
 
       for (final doc in ordersSnapshot.docs) {
         final data = doc.data();
-        // Check 'rating' first, then fallback to 'riderRating'
-        final rawRating = data['rating'] ?? data['riderRating'];
+        // Strictly use 'riderRating' for driver validation.
+        final rawRating = data['riderRating'];
         double? ratingVal;
 
         if (rawRating is num) {

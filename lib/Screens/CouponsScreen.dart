@@ -1035,33 +1035,105 @@ class _CouponDialogState extends State<CouponDialog> {
 
   Future<void> _addCoupon() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    
+    // ✅ VALIDATION: Check date range - valid_from must be before valid_until
+    if (_validFrom != null && _validUntil != null) {
+      if (_validFrom!.isAfter(_validUntil!)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ "Valid From" date must be before "Valid Until" date'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+    
     setState(() => _loading = true);
-    final data = _formData(newCoupon: true);
-    final code = _codeCtrl.text.trim();
-    await FirebaseFirestore.instance.collection('coupons').doc(code).set(data);
-    setState(() => _loading = false);
-    if (mounted) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Coupon added successfully')),
-      );
+    final code = _codeCtrl.text.trim().toUpperCase();
+    
+    // ✅ VALIDATION: Check if coupon code already exists
+    try {
+      final existingCoupon = await FirebaseFirestore.instance
+          .collection('coupons')
+          .doc(code)
+          .get();
+      
+      if (existingCoupon.exists) {
+        if (mounted) {
+          setState(() => _loading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Coupon code "$code" already exists. Please use a different code.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+      
+      final data = _formData(newCoupon: true);
+      await FirebaseFirestore.instance.collection('coupons').doc(code).set(data);
+      setState(() => _loading = false);
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Coupon added successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
   Future<void> _editCoupon() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    
+    // ✅ VALIDATION: Check date range - valid_from must be before valid_until
+    if (_validFrom != null && _validUntil != null) {
+      if (_validFrom!.isAfter(_validUntil!)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ "Valid From" date must be before "Valid Until" date'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+    
     setState(() => _loading = true);
-    final data = _formData(newCoupon: false);
-    await FirebaseFirestore.instance
-        .collection('coupons')
-        .doc(widget.docId)
-        .update(data);
-    setState(() => _loading = false);
-    if (mounted) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Coupon updated successfully')),
-      );
+    try {
+      final data = _formData(newCoupon: false);
+      await FirebaseFirestore.instance
+          .collection('coupons')
+          .doc(widget.docId)
+          .update(data);
+      setState(() => _loading = false);
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Coupon updated successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error updating coupon: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 

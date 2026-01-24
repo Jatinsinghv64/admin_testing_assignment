@@ -12,6 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_app_check/firebase_app_check.dart'; // ✅ App Check for security
 import 'Screens/ConnectionUtils.dart';
 import 'Screens/MainScreen.dart';
+import 'Screens/SplashScreen.dart';
 import 'Widgets/Authorization.dart';
 import 'Widgets/RestaurantStatusService.dart';
 import 'Widgets/notification.dart';
@@ -229,7 +230,7 @@ class MyApp extends StatelessWidget {
         builder: (context, child) {
           return OfflineBanner(child: child!);
         },
-        home: const AuthWrapper(),
+        home: const SplashScreen(),
         debugShowCheckedModeBanner: false,
       ),
     );
