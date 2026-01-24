@@ -8,6 +8,7 @@ import '../Widgets/Authorization.dart';
 import '../Widgets/Permissions.dart';
 import '../Widgets/notification.dart';
 import '../Widgets/BranchFilterService.dart';
+import '../Widgets/RestaurantStatusService.dart';
 import '../main.dart';
 import 'AnalyticsScreen.dart';
 import 'BranchManagement.dart';
@@ -1977,61 +1978,11 @@ class _SuperAdminStatusCardState extends State<_SuperAdminStatusCard> {
     setState(() => _isToggling = true);
 
     try {
-      // Determine if schedule is open (simplified - just use current status context)
-      final doc = await FirebaseFirestore.instance
-          .collection('Branch')
-          .doc(_selectedBranchId)
-          .get();
+      // Use centralized helper for accurate timezone-aware schedule check
+      final scheduleStatus = await RestaurantStatusService.checkBranchScheduleStatus(_selectedBranchId!);
+      final isScheduleOpen = scheduleStatus['isScheduleOpen'] as bool;
 
-      final data = doc.data() ?? {};
-      final workingHours = data['workingHours'] as Map<String, dynamic>? ?? {};
-
-      // Simple schedule check
-      bool isScheduleOpen = false;
-      if (workingHours.isNotEmpty) {
-        final now = DateTime.now();
-        final dayName = [
-          'monday',
-          'tuesday',
-          'wednesday',
-          'thursday',
-          'friday',
-          'saturday',
-          'sunday'
-        ][now.weekday - 1];
-        final daySchedule = workingHours[dayName];
-        if (daySchedule != null && daySchedule['isOpen'] == true) {
-          // ✅ FIX: Check if current time is within working hour slots
-          final List slots = daySchedule['slots'] ?? [];
-          for (var slot in slots) {
-            try {
-              final openStr = slot['open'] as String?;
-              final closeStr = slot['close'] as String?;
-              if (openStr == null || closeStr == null) continue;
-              
-              final openParts = openStr.split(':').map(int.parse).toList();
-              final closeParts = closeStr.split(':').map(int.parse).toList();
-              
-              final openTime = DateTime(now.year, now.month, now.day, openParts[0], openParts[1]);
-              var closeTime = DateTime(now.year, now.month, now.day, closeParts[0], closeParts[1]);
-              
-              // Handle overnight shifts (e.g., 22:00 - 02:00)
-              if (closeTime.isBefore(openTime) || closeTime.isAtSameMomentAs(openTime)) {
-                closeTime = closeTime.add(const Duration(days: 1));
-              }
-              
-              if (now.isAfter(openTime) && now.isBefore(closeTime)) {
-                isScheduleOpen = true;
-                break;
-              }
-            } catch (e) {
-              debugPrint('Error parsing slot times: $e');
-            }
-          }
-        }
-      }
-
-      // ✅ CHECK: If trying to OPEN but schedule says CLOSED - show dialog
+      // CHECK: If trying to OPEN but schedule says CLOSED - show dialog
       if (newStatus == true && !isScheduleOpen) {
         setState(() => _isToggling = false);
         if (!mounted) return;
@@ -2074,29 +2025,62 @@ class _SuperAdminStatusCardState extends State<_SuperAdminStatusCard> {
         return;
       }
 
-      // Set appropriate flags
-      Map<String, dynamic> updateData = {
-        'isOpen': newStatus,
-        'lastStatusUpdate': FieldValue.serverTimestamp(),
-      };
+      // CHECK: If trying to CLOSE but schedule says OPEN - show confirmation
+      if (newStatus == false && isScheduleOpen) {
+        setState(() => _isToggling = false);
+        if (!mounted) return;
 
-      if (isScheduleOpen) {
-        if (!newStatus) {
-          updateData['manuallyClosed'] = true;
-          updateData['manuallyOpened'] = false;
-        } else {
-          updateData['manuallyClosed'] = false;
-          updateData['manuallyOpened'] = false;
-        }
-      } else {
-        if (newStatus) {
-          updateData['manuallyOpened'] = true;
-          updateData['manuallyClosed'] = false;
-        } else {
-          updateData['manuallyClosed'] = false;
-          updateData['manuallyOpened'] = false;
-        }
+        showDialog(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Row(
+              children: const [
+                Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                SizedBox(width: 10),
+                Text('Schedule is Active'),
+              ],
+            ),
+            content: const Text(
+              'The restaurant is currently scheduled to be OPEN.\n\nClosing it now will manually override the schedule. Are you sure?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(dialogContext);
+                  await _executeToggle(false, isScheduleOpen);
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                child: const Text('Yes, Close'),
+              ),
+            ],
+          ),
+        );
+        return;
       }
+
+      // Standard case - execute toggle directly
+      await _executeToggle(newStatus, isScheduleOpen);
+    } catch (e) {
+      debugPrint('Error in toggle status: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+      setState(() => _isToggling = false);
+    }
+  }
+
+  Future<void> _executeToggle(bool newStatus, bool isScheduleOpen) async {
+    setState(() => _isToggling = true);
+    
+    try {
+      // Use centralized helper to build correct update data
+      final updateData = RestaurantStatusService.buildStatusUpdateData(newStatus, isScheduleOpen);
 
       await FirebaseFirestore.instance
           .collection('Branch')

@@ -309,4 +309,143 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
       notifyListeners();
     }
   }
+
+  /// Static helper to check if a branch is within schedule hours.
+  /// Can be used by any screen without needing an initialized service instance.
+  /// Returns a Map with:
+  /// - 'isScheduleOpen': bool - whether the branch is within schedule hours
+  /// - 'isManuallyOverridden': bool - whether the status is manually overridden
+  /// - 'currentIsOpen': bool - the current isOpen status
+  static Future<Map<String, dynamic>> checkBranchScheduleStatus(String branchId) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection(AppConstants.collectionBranch)
+          .doc(branchId)
+          .get();
+
+      if (!doc.exists) {
+        return {
+          'isScheduleOpen': false,
+          'isManuallyOverridden': false,
+          'currentIsOpen': false,
+          'error': 'Branch not found',
+        };
+      }
+
+      final data = doc.data()!;
+      final currentIsOpen = data['isOpen'] ?? false;
+      final timezone = data['timezone'] ?? 'UTC';
+      final workingHours = Map<String, dynamic>.from(data['workingHours'] ?? {});
+
+      // If no working hours configured, consider schedule as "always open"
+      if (workingHours.isEmpty) {
+        return {
+          'isScheduleOpen': true,
+          'isManuallyOverridden': false,
+          'currentIsOpen': currentIsOpen,
+        };
+      }
+
+      // Check schedule using branch timezone
+      tz_data.initializeTimeZones();
+      final location = tz.getLocation(timezone);
+      final now = tz.TZDateTime.now(location);
+
+      bool isScheduleOpen = _checkDayScheduleStatic(now, 0, workingHours) || 
+                            _checkDayScheduleStatic(now, -1, workingHours);
+
+      // Determine if manually overridden
+      bool isManuallyOverridden = false;
+      if (isScheduleOpen && !currentIsOpen) {
+        isManuallyOverridden = true; // Closed during scheduled hours
+      } else if (!isScheduleOpen && currentIsOpen) {
+        isManuallyOverridden = true; // Open outside scheduled hours
+      }
+
+      return {
+        'isScheduleOpen': isScheduleOpen,
+        'isManuallyOverridden': isManuallyOverridden,
+        'currentIsOpen': currentIsOpen,
+      };
+    } catch (e) {
+      debugPrint('Error checking branch schedule: $e');
+      return {
+        'isScheduleOpen': true, // Fail-open to allow toggling
+        'isManuallyOverridden': false,
+        'currentIsOpen': false,
+        'error': e.toString(),
+      };
+    }
+  }
+
+  /// Static version of schedule check for a specific day
+  static bool _checkDayScheduleStatic(tz.TZDateTime now, int dayOffset, Map<String, dynamic> workingHours) {
+    final checkDate = now.add(Duration(days: dayOffset));
+    const days = {1: 'monday', 2: 'tuesday', 3: 'wednesday', 4: 'thursday', 5: 'friday', 6: 'saturday', 7: 'sunday'};
+    final dayName = days[checkDate.weekday] ?? 'monday';
+    
+    final dayData = workingHours[dayName];
+    if (dayData == null || dayData['isOpen'] != true) return false;
+    
+    final List slots = dayData['slots'] ?? [];
+    if (slots.isEmpty) return false;
+
+    for (var slot in slots) {
+      try {
+        final openStr = slot['open'] as String?;
+        final closeStr = slot['close'] as String?;
+        if (openStr == null || closeStr == null) continue;
+
+        final openParts = openStr.split(':').map(int.parse).toList();
+        final closeParts = closeStr.split(':').map(int.parse).toList();
+
+        final openTime = tz.TZDateTime(now.location, checkDate.year, checkDate.month, checkDate.day, openParts[0], openParts[1]);
+        var closeTime = tz.TZDateTime(now.location, checkDate.year, checkDate.month, checkDate.day, closeParts[0], closeParts[1]);
+
+        // Handle overnight shifts (e.g., 22:00 - 02:00)
+        if (closeTime.isBefore(openTime) || closeTime.isAtSameMomentAs(openTime)) {
+          closeTime = closeTime.add(const Duration(days: 1));
+        }
+
+        if (now.isAfter(openTime) && now.isBefore(closeTime)) {
+          return true;
+        }
+      } catch (e) {
+        debugPrint('Error parsing slot times: $e');
+      }
+    }
+    return false;
+  }
+
+  /// Static helper to build the correct update data for toggling branch status
+  static Map<String, dynamic> buildStatusUpdateData(bool newStatus, bool isScheduleOpen) {
+    Map<String, dynamic> updateData = {
+      'isOpen': newStatus,
+      'lastStatusUpdate': FieldValue.serverTimestamp(),
+    };
+
+    if (isScheduleOpen) {
+      if (!newStatus) {
+        // Closing during scheduled hours → manual override
+        updateData['manuallyClosed'] = true;
+        updateData['manuallyOpened'] = false;
+      } else {
+        // Opening during scheduled hours → following schedule
+        updateData['manuallyClosed'] = false;
+        updateData['manuallyOpened'] = false;
+      }
+    } else {
+      if (newStatus) {
+        // Opening during off-hours → manual override
+        updateData['manuallyOpened'] = true;
+        updateData['manuallyClosed'] = false;
+      } else {
+        // Closing during off-hours → following schedule
+        updateData['manuallyClosed'] = false;
+        updateData['manuallyOpened'] = false;
+      }
+    }
+
+    return updateData;
+  }
 }

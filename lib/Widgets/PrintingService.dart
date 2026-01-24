@@ -134,28 +134,61 @@ class PrintingService {
                     order['deliveryCharge'] as num? ??
                     order['deliveryFee'] as num?)
                 ?.toDouble() ??
-            0.0; // ✅ Added Delivery Charge (supports all key names)
+            0.0;
         final double totalAmount =
             (order['totalAmount'] as num?)?.toDouble() ?? 0.0;
 
-        // Items
+        // Coupon/Discount details
+        final String couponCode = (order['couponCode'] ?? '').toString();
+        final double discountPercent =
+            (order['discountPercent'] as num?)?.toDouble() ?? 0.0;
+
+        // Items - with original price and discount support
         final List<dynamic> rawItems = (order['items'] ?? []) as List<dynamic>;
         int totalItemCount = 0;
+        double totalOriginalPrice = 0.0;
         final List<Map<String, dynamic>> items = rawItems.map((e) {
           final m = Map<String, dynamic>.from(e as Map);
           final int qty =
               int.tryParse((m['quantity'] ?? m['qty'] ?? '1').toString()) ?? 1;
           totalItemCount += qty;
+          
+          // Get current price (may be discounted)
+          final double price = double.tryParse(
+                  (m['price'] ?? m['unitPrice'] ?? m['amount'] ?? '0')
+                      .toString()) ??
+              0.0;
+          
+          // Get original price if available (for items with individual discounts)
+          final double originalPrice = double.tryParse(
+                  (m['originalPrice'] ?? m['original_price'] ?? '0')
+                      .toString()) ??
+              0.0;
+          
+          // Track total original price for savings calculation
+          if (originalPrice > 0) {
+            totalOriginalPrice += originalPrice * qty;
+          } else {
+            totalOriginalPrice += price * qty;
+          }
+          
           return {
             'name': (m['name'] ?? 'Item').toString(),
             'name_ar': (m['name_ar'] ?? '').toString(),
             'qty': qty,
-            'price': double.tryParse(
-                    (m['price'] ?? m['unitPrice'] ?? m['amount'] ?? '0')
-                        .toString()) ??
-                0.0,
+            'price': price,
+            'originalPrice': originalPrice > price ? originalPrice : 0.0,
           };
         }).toList();
+        
+        // Calculate total savings
+        final double totalSavings = discount > 0 
+            ? discount 
+            : (totalOriginalPrice > subtotal ? totalOriginalPrice - subtotal : 0.0);
+
+        final double itemLevelSavings = totalOriginalPrice > subtotal 
+            ? totalOriginalPrice - subtotal 
+            : 0.0;
 
         // Dates
         final DateTime? rawDate = (order['timestamp'] as Timestamp?)?.toDate();
@@ -316,11 +349,19 @@ class PrintingService {
                     pw.Divider(thickness: 1),
 
                     // --- TITLE ---
-                    pw.Text(
-                        arabicFont != null
-                            ? "SALES RECEIPT / إيصال بيع"
-                            : "SALES RECEIPT",
-                        style: fontBold.copyWith(fontSize: 11)),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.center,
+                      children: [
+                        pw.Text("SALES RECEIPT",
+                            style: fontBold.copyWith(fontSize: 11)),
+                        if (arabicFont != null) ...[
+                          pw.Text(" / ", style: fontBold.copyWith(fontSize: 11)),
+                          pw.Text("إيصال بيع",
+                              style: fontArBold.copyWith(fontSize: 11),
+                              textDirection: pw.TextDirection.rtl),
+                        ],
+                      ],
+                    ),
                     pw.SizedBox(height: 5),
 
                     // --- DETAILS BOX ---
@@ -386,11 +427,18 @@ class PrintingService {
                               children: [
                                 pw.Padding(
                                     padding: const pw.EdgeInsets.all(2),
-                                    child: pw.Text(
-                                        arabicFont != null
-                                            ? "ITEM / الصنف"
-                                            : "ITEM",
-                                        style: fontBold)),
+                                    child: pw.Row(
+                                      mainAxisSize: pw.MainAxisSize.min,
+                                      children: [
+                                        pw.Text("ITEM", style: fontBold),
+                                        if (arabicFont != null) ...[
+                                          pw.Text(" / ", style: fontBold),
+                                          pw.Text("الصنف",
+                                              style: fontArBold,
+                                              textDirection: pw.TextDirection.rtl),
+                                        ],
+                                      ],
+                                    )),
                                 pw.Padding(
                                     padding: const pw.EdgeInsets.all(2),
                                     child: pw.Text("QTY",
@@ -406,6 +454,10 @@ class PrintingService {
                           ...items.map((item) {
                             final itemTotal =
                                 (item['price'] * item['qty']).toDouble();
+                            final double origPrice = item['originalPrice'] as double;
+                            final bool hasItemDiscount = origPrice > 0;
+                            final double origTotal = hasItemDiscount ? origPrice * item['qty'] : 0.0;
+                            
                             return pw.TableRow(children: [
                               pw.Padding(
                                   padding: const pw.EdgeInsets.symmetric(
@@ -415,6 +467,23 @@ class PrintingService {
                                           pw.CrossAxisAlignment.start,
                                       children: [
                                         pw.Text(item['name'], style: fontReg),
+                                        // Show Unit Price
+                                        pw.Row(children: [
+                                          pw.Text(
+                                            "@ ${item['price'].toStringAsFixed(2)}",
+                                             style: fontSmall.copyWith(color: PdfColors.grey700),
+                                          ),
+                                          if (hasItemDiscount) ...[
+                                            pw.SizedBox(width: 4),
+                                            pw.Text(
+                                              origPrice.toStringAsFixed(2),
+                                              style: fontSmall.copyWith(
+                                                  decoration: pw.TextDecoration.lineThrough,
+                                                  color: PdfColors.grey500,
+                                                  fontSize: 7),
+                                            ),
+                                          ]
+                                        ]),
                                         if (item['name_ar'].isNotEmpty &&
                                             arabicFont != null)
                                           pw.Text(item['name_ar'],
@@ -431,9 +500,23 @@ class PrintingService {
                               pw.Padding(
                                   padding: const pw.EdgeInsets.symmetric(
                                       vertical: 4),
-                                  child: pw.Text(itemTotal.toStringAsFixed(2),
-                                      style: fontReg,
-                                      textAlign: pw.TextAlign.right)),
+                                  child: pw.Column(
+                                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                                    children: [
+                                      // Show original price with strikethrough if discounted
+                                      if (hasItemDiscount)
+                                        pw.Text(origTotal.toStringAsFixed(2),
+                                            style: fontSmall.copyWith(
+                                                decoration: pw.TextDecoration.lineThrough,
+                                                color: PdfColors.grey600),
+                                            textAlign: pw.TextAlign.right),
+                                      pw.Text(itemTotal.toStringAsFixed(2),
+                                          style: hasItemDiscount 
+                                              ? fontReg.copyWith(color: PdfColors.green800)
+                                              : fontReg,
+                                          textAlign: pw.TextAlign.right),
+                                    ],
+                                  )),
                             ]);
                           }).toList()
                         ]),
@@ -445,7 +528,7 @@ class PrintingService {
                         mainAxisAlignment: pw.MainAxisAlignment.end,
                         children: [
                           pw.Container(
-                              width: 140,
+                              width: 150,
                               child: pw.Column(children: [
                                 // Total Items Count
                                 pw.Row(
@@ -463,15 +546,53 @@ class PrintingService {
                                     ]),
                                 pw.SizedBox(height: 4),
 
-                                bilingualRow("Subtotal", "المجموع",
-                                    subtotal.toStringAsFixed(2)),
+                                // If we have item level savings, show the breakdown
+                                if (itemLevelSavings > 0.1) ...[
+                                  // Show Original Price as Subtotal
+                                  bilingualRow("Subtotal", "المجموع",
+                                      totalOriginalPrice.toStringAsFixed(2)),
+                                  
+                                  pw.SizedBox(height: 2),
+                                  bilingualRow("Item Discounts", "خصم الأصناف",
+                                      "- ${itemLevelSavings.toStringAsFixed(2)}"),
+                                ] else ...[
+                                  // Standard Subtotal
+                                  bilingualRow("Subtotal", "المجموع",
+                                      subtotal.toStringAsFixed(2)),
+                                ],
 
-                                if (discount > 0)
-                                  bilingualRow("Discount", "الخصم",
-                                      "- ${discount.toStringAsFixed(2)}"),
+                                // Show coupon code if applied
+                                if (couponCode.isNotEmpty) ...[
+                                  pw.SizedBox(height: 2),
+                                  pw.Container(
+                                    padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    decoration: pw.BoxDecoration(
+                                      border: pw.Border.all(color: PdfColors.green700, width: 0.5),
+                                      borderRadius: pw.BorderRadius.circular(3),
+                                    ),
+                                    child: pw.Row(
+                                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        pw.Text("Coupon: ${couponCode.toUpperCase()}",
+                                            style: fontSmall.copyWith(
+                                                fontWeight: pw.FontWeight.bold,
+                                                color: PdfColors.green800)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
 
-                                if (deliveryCharge >
-                                    0) // ✅ Added Delivery Charge Row
+                                // Show Coupon/Extra discount if available
+                                if (discount > 0) ...[
+                                  pw.SizedBox(height: 2),
+                                  bilingualRow(
+                                    "Coupon Discount", 
+                                    "خصم الكوبون", 
+                                    "- ${discount.toStringAsFixed(2)}"
+                                  ),
+                                ],
+
+                                if (deliveryCharge > 0)
                                   bilingualRow("Delivery", "التوصيل",
                                       deliveryCharge.toStringAsFixed(2)),
 

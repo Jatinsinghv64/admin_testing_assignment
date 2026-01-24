@@ -10,7 +10,9 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/responsive_helper.dart'; // ✅ Added
+import '../utils/responsive_helper.dart';
+import '../Widgets/RestaurantStatusService.dart';
+import 'RestaurantTimingScreen.dart';
 
 class MultiBranchSelector extends StatefulWidget {
   final List<String> selectedIds;
@@ -713,38 +715,10 @@ class _BranchCard extends StatelessWidget {
                               ),
                             ),
                             // Status Switch
-                            Transform.scale(
-                              scale: 0.8,
-                              child: Switch(
-                                value: isOpen,
-                                onChanged: (value) async {
-                                  await FirebaseFirestore.instance
-                                      .collection('Branch')
-                                      .doc(doc.id)
-                                      .update({
-                                    'isOpen': value,
-                                    'manuallyClosed':
-                                        !value, // Set when closing
-                                    'manuallyOpened': value, // Set when opening
-                                    'lastStatusUpdate':
-                                        FieldValue.serverTimestamp(),
-                                  });
-
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          'Branch status updated to ${value ? "Open" : "Closed"}!',
-                                        ),
-                                        backgroundColor: Colors.green,
-                                      ),
-                                    );
-                                  }
-                                },
-                                activeColor: Colors.green,
-                                inactiveThumbColor: Colors.red,
-                                inactiveTrackColor: Colors.red.withOpacity(0.5),
-                              ),
+                            // Status Switch with proper safety checks
+                            _BranchStatusSwitch(
+                              branchId: doc.id,
+                              initialIsOpen: isOpen,
                             ),
                           ],
                         ),
@@ -2212,6 +2186,243 @@ class _BranchDialogState extends State<BranchDialog> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Stateful widget to handle branch status toggling with proper safety checks
+class _BranchStatusSwitch extends StatefulWidget {
+  final String branchId;
+  final bool initialIsOpen;
+
+  const _BranchStatusSwitch({
+    required this.branchId,
+    required this.initialIsOpen,
+  });
+
+  @override
+  State<_BranchStatusSwitch> createState() => _BranchStatusSwitchState();
+}
+
+class _BranchStatusSwitchState extends State<_BranchStatusSwitch> {
+  late bool _isOpen;
+  bool _isToggling = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _isOpen = widget.initialIsOpen;
+  }
+
+  @override
+  void didUpdateWidget(covariant _BranchStatusSwitch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialIsOpen != widget.initialIsOpen) {
+      _isOpen = widget.initialIsOpen;
+    }
+  }
+
+  Future<void> _onToggle(bool newValue) async {
+    // Get schedule status using the centralized helper
+    final scheduleStatus = await RestaurantStatusService.checkBranchScheduleStatus(widget.branchId);
+    final isScheduleOpen = scheduleStatus['isScheduleOpen'] as bool;
+
+    // CHECK: If trying to OPEN but schedule says CLOSED
+    if (newValue == true && !isScheduleOpen) {
+      if (!mounted) return;
+      _showOutsideScheduleDialog();
+      return;
+    }
+
+    // CHECK: If trying to CLOSE but schedule says OPEN
+    if (newValue == false && isScheduleOpen) {
+      if (!mounted) return;
+      _showClosingDuringScheduleDialog(isScheduleOpen);
+      return;
+    }
+
+    // Standard confirmation for other cases
+    _showStandardConfirmation(newValue, isScheduleOpen);
+  }
+
+  void _showOutsideScheduleDialog() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(
+          children: const [
+            Icon(Icons.schedule, color: Colors.orange),
+            SizedBox(width: 10),
+            Text('Outside Schedule'),
+          ],
+        ),
+        content: const Text(
+          'The branch is closed according to the current schedule.\n\nTo open now, please update the Timings settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (context) => const RestaurantTimingScreen()),
+              );
+            },
+            icon: const Icon(Icons.edit_calendar, size: 16),
+            label: const Text('Update Timings'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showClosingDuringScheduleDialog(bool isScheduleOpen) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(
+          children: const [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            SizedBox(width: 10),
+            Text('Schedule is Active'),
+          ],
+        ),
+        content: const Text(
+          'The branch is currently scheduled to be OPEN.\n\nClosing it now will manually override the schedule. Are you sure?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              await _executeToggle(false, isScheduleOpen);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Yes, Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showStandardConfirmation(bool newValue, bool isScheduleOpen) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              newValue ? Icons.storefront : Icons.storefront_outlined,
+              color: newValue ? Colors.green : Colors.red,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              newValue ? 'Open Branch?' : 'Close Branch?',
+              style: TextStyle(
+                color: newValue ? Colors.green : Colors.red,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          newValue
+              ? 'The branch will be set to OPEN.'
+              : 'The branch will be CLOSED immediately.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              await _executeToggle(newValue, isScheduleOpen);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: newValue ? Colors.green : Colors.red,
+            ),
+            child: Text(
+              newValue ? 'Open Branch' : 'Close Branch',
+              style: const TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _executeToggle(bool newValue, bool isScheduleOpen) async {
+    setState(() => _isToggling = true);
+
+    try {
+      // Use the centralized helper to build correct update data
+      final updateData = RestaurantStatusService.buildStatusUpdateData(newValue, isScheduleOpen);
+
+      await FirebaseFirestore.instance
+          .collection('Branch')
+          .doc(widget.branchId)
+          .update(updateData);
+
+      setState(() => _isOpen = newValue);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Branch ${newValue ? "opened" : "closed"} successfully!'),
+            backgroundColor: newValue ? Colors.green : Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error toggling branch status: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isToggling = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isToggling) {
+      return const SizedBox(
+        width: 48,
+        height: 24,
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    return Transform.scale(
+      scale: 0.8,
+      child: Switch(
+        value: _isOpen,
+        onChanged: _onToggle,
+        activeColor: Colors.green,
+        inactiveThumbColor: Colors.red,
+        inactiveTrackColor: Colors.red.withOpacity(0.5),
       ),
     );
   }
