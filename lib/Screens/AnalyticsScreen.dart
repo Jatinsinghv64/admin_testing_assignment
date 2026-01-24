@@ -1197,13 +1197,24 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                                 style: const TextStyle(fontSize: 13),
                               ),
                             ),
-                            Text(
-                              'QAR ${((item['price'] ?? 0) * (item['quantity'] ?? 1)).toStringAsFixed(2)}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[700],
-                                fontWeight: FontWeight.w500,
-                              ),
+                            Builder(
+                              builder: (context) {
+                                // Use discountedPrice if available for accurate display
+                                final originalPrice = (item['price'] as num?)?.toDouble() ?? 0;
+                                final discountedPrice = (item['discountedPrice'] as num?)?.toDouble();
+                                final effectivePrice = (discountedPrice != null && discountedPrice > 0) 
+                                    ? discountedPrice 
+                                    : originalPrice;
+                                final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+                                return Text(
+                                  'QAR ${(effectivePrice * quantity).toStringAsFixed(2)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[700],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         ),
@@ -2484,9 +2495,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       );
       final avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0.0;
 
-      // Aggregate top items
+      // Aggregate top items with detailed pricing info
       final itemCounts = <String, int>{};
       final itemRevenue = <String, double>{};
+      final itemOriginalRevenue = <String, double>{}; // Revenue at original prices
+      final itemHasDiscount = <String, bool>{}; // Track if item ever had discounts
       for (var doc in orders) {
         final data = doc.data();
         final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
@@ -2496,13 +2509,18 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           // Use discountedPrice if available for accurate revenue calculation
           final originalPrice = (item['price'] as num?)?.toDouble() ?? 0;
           final discountedPrice = (item['discountedPrice'] as num?)?.toDouble();
-          final effectivePrice = (discountedPrice != null && discountedPrice > 0) 
-              ? discountedPrice 
-              : originalPrice;
+          final hasDiscount = discountedPrice != null && discountedPrice > 0 && discountedPrice < originalPrice;
+          final effectivePrice = hasDiscount ? discountedPrice! : originalPrice;
+          
           itemCounts.update(itemName, (v) => v + quantity,
               ifAbsent: () => quantity);
           itemRevenue.update(itemName, (v) => v + (effectivePrice * quantity),
               ifAbsent: () => effectivePrice * quantity);
+          itemOriginalRevenue.update(itemName, (v) => v + (originalPrice * quantity),
+              ifAbsent: () => originalPrice * quantity);
+          if (hasDiscount) {
+            itemHasDiscount[itemName] = true;
+          }
         }
       }
       final topItems = itemCounts.entries.toList()
@@ -2513,6 +2531,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                 'name': e.key,
                 'quantity': e.value,
                 'revenue': itemRevenue[e.key] ?? 0,
+                'originalRevenue': itemOriginalRevenue[e.key] ?? 0,
+                'hasDiscount': itemHasDiscount[e.key] ?? false,
+                'savings': (itemOriginalRevenue[e.key] ?? 0) - (itemRevenue[e.key] ?? 0),
               })
           .toList();
 
@@ -2772,16 +2793,21 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         ]);
       }
 
-      // ===== Top Items Sheet =====
+      // ===== Top Items Sheet with Price Breakdown =====
       final itemsSheet = excelFile['Top Items'];
       itemsSheet.appendRow([
         excel_lib.TextCellValue('Item Name'),
         excel_lib.TextCellValue('Quantity Sold'),
-        excel_lib.TextCellValue('Revenue (QAR)'),
+        excel_lib.TextCellValue('Original Revenue (QAR)'),
+        excel_lib.TextCellValue('Actual Revenue (QAR)'),
+        excel_lib.TextCellValue('Discount Given (QAR)'),
+        excel_lib.TextCellValue('Has Discount'),
       ]);
 
       final itemCounts = <String, int>{};
       final itemRevenue = <String, double>{};
+      final itemOriginalRevenue = <String, double>{};
+      final itemHasDiscount = <String, bool>{};
       for (var doc in orders) {
         final data = doc.data();
         final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
@@ -2791,24 +2817,50 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           // Use discountedPrice if available for accurate revenue calculation
           final originalPrice = (item['price'] as num?)?.toDouble() ?? 0;
           final discountedPrice = (item['discountedPrice'] as num?)?.toDouble();
-          final effectivePrice = (discountedPrice != null && discountedPrice > 0) 
-              ? discountedPrice 
-              : originalPrice;
+          final hasDiscount = discountedPrice != null && discountedPrice > 0 && discountedPrice < originalPrice;
+          final effectivePrice = hasDiscount ? discountedPrice! : originalPrice;
+          
           itemCounts.update(itemName, (v) => v + quantity,
               ifAbsent: () => quantity);
           itemRevenue.update(itemName, (v) => v + (effectivePrice * quantity),
               ifAbsent: () => effectivePrice * quantity);
+          itemOriginalRevenue.update(itemName, (v) => v + (originalPrice * quantity),
+              ifAbsent: () => originalPrice * quantity);
+          if (hasDiscount) {
+            itemHasDiscount[itemName] = true;
+          }
         }
       }
       final sortedItems = itemCounts.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
       for (var item in sortedItems.take(20)) {
+        final originalRev = itemOriginalRevenue[item.key] ?? 0;
+        final actualRev = itemRevenue[item.key] ?? 0;
+        final discount = originalRev - actualRev;
+        final hasDiscount = itemHasDiscount[item.key] ?? false;
         itemsSheet.appendRow([
           excel_lib.TextCellValue(item.key),
           excel_lib.IntCellValue(item.value),
-          excel_lib.DoubleCellValue(itemRevenue[item.key] ?? 0),
+          excel_lib.DoubleCellValue(originalRev),
+          excel_lib.DoubleCellValue(actualRev),
+          excel_lib.DoubleCellValue(discount),
+          excel_lib.TextCellValue(hasDiscount ? 'Yes' : 'No'),
         ]);
       }
+      
+      // Add total discounts row
+      final totalOriginal = itemOriginalRevenue.values.fold<double>(0, (a, b) => a + b);
+      final totalActual = itemRevenue.values.fold<double>(0, (a, b) => a + b);
+      final totalDiscount = totalOriginal - totalActual;
+      itemsSheet.appendRow([]);
+      itemsSheet.appendRow([
+        excel_lib.TextCellValue('TOTAL'),
+        excel_lib.TextCellValue(''),
+        excel_lib.DoubleCellValue(totalOriginal),
+        excel_lib.DoubleCellValue(totalActual),
+        excel_lib.DoubleCellValue(totalDiscount),
+        excel_lib.TextCellValue(''),
+      ]);
 
       // Remove the default 'Sheet1'
       excelFile.delete('Sheet1');

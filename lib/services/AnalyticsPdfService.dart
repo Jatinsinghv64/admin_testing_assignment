@@ -183,38 +183,74 @@ class AnalyticsPdfService {
             pw.SizedBox(height: 24),
           ],
 
-          // Top Selling Items
+          // Top Selling Items with Price Breakdown
           if (topItems.isNotEmpty) ...[
             _buildPdfSectionTitle('Top Selling Items'),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              'Shows original prices vs actual revenue (after discounts)',
+              style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600),
+            ),
             pw.SizedBox(height: 8),
             pw.Table.fromTextArray(
               headerStyle: pw.TextStyle(
-                  fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+                  fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 10),
               headerDecoration:
                   const pw.BoxDecoration(color: PdfColors.deepPurple),
-              cellPadding: const pw.EdgeInsets.all(8),
+              cellPadding: const pw.EdgeInsets.all(6),
               headerAlignments: {
                 0: pw.Alignment.center,
                 1: pw.Alignment.centerLeft,
                 2: pw.Alignment.center,
                 3: pw.Alignment.center,
+                4: pw.Alignment.center,
+                5: pw.Alignment.center,
               },
               cellAlignments: {
                 0: pw.Alignment.center,
                 1: pw.Alignment.centerLeft,
                 2: pw.Alignment.center,
                 3: pw.Alignment.center,
+                4: pw.Alignment.center,
+                5: pw.Alignment.center,
               },
-              headers: ['Rank', 'Item Name', 'Quantity Sold', 'Revenue'],
+              headers: ['#', 'Item Name', 'Qty', 'Original (QAR)', 'Actual (QAR)', 'Discount'],
               data: topItems.asMap().entries.map((e) {
                 final item = e.value;
+                final originalRevenue = (item['originalRevenue'] as num?)?.toDouble() ?? 0;
+                final actualRevenue = (item['revenue'] as num?)?.toDouble() ?? 0;
+                final savings = (item['savings'] as num?)?.toDouble() ?? 0;
+                final hasDiscount = item['hasDiscount'] == true;
                 return [
-                  '#${e.key + 1}',
+                  '${e.key + 1}',
                   item['name'] ?? 'Unknown',
                   item['quantity']?.toString() ?? '0',
-                  'QAR ${(item['revenue'] as num?)?.toStringAsFixed(2) ?? '0.00'}',
+                  originalRevenue.toStringAsFixed(2),
+                  actualRevenue.toStringAsFixed(2),
+                  hasDiscount ? '-${savings.toStringAsFixed(2)}' : '-',
                 ];
               }).toList(),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(8),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.green50,
+                borderRadius: pw.BorderRadius.circular(4),
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'Total Discounts Given:',
+                    style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+                  ),
+                  pw.Text(
+                    'QAR ${topItems.fold<double>(0, (sum, item) => sum + ((item['savings'] as num?)?.toDouble() ?? 0)).toStringAsFixed(2)}',
+                    style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.green700),
+                  ),
+                ],
+              ),
             ),
             pw.SizedBox(height: 24),
           ],
