@@ -8,7 +8,7 @@ buildscript { // Add this buildscript block
         // Replace with your current Android Gradle Plugin version
         // For example, if your app/build.gradle.kts uses compileSdk = flutter.compileSdkVersion,
         // you might be on a newer version like 8.x.x or 7.x.x
-        classpath("com.android.tools.build:gradle:7.3.0") // <--- IMPORTANT: Adjust this version if needed.
+        classpath("com.android.tools.build:gradle:8.5.2")
         classpath("com.google.gms:google-services:4.4.1")
     // <--- ADD THIS LINE (use the latest stable version)
     }

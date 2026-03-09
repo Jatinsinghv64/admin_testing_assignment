@@ -22,6 +22,14 @@ class AnalyticsPdfService {
     int refundedCount = 0,
     List<Map<String, dynamic>>? topRiders,
     List<Map<String, dynamic>>? topCustomers,
+    double totalInventoryValue = 0,
+    int lowStockCount = 0,
+    int deadStockCount = 0,
+    double totalWasteCost = 0,
+    int wasteCount = 0,
+    double totalPurchases = 0,
+    int poCount = 0,
+    List<dynamic>? topWastedItems,
   }) async {
     final pdf = pw.Document();
 
@@ -144,6 +152,52 @@ class AnalyticsPdfService {
               ],
             ),
           ),
+          pw.SizedBox(height: 12),
+          // New: Inventory & Purchasing KPI Summary
+          pw.Container(
+            padding: const pw.EdgeInsets.all(16),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.grey100,
+              borderRadius: pw.BorderRadius.circular(8),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+              children: [
+                _buildPdfKpiCard(
+                    'Inventory Value',
+                    'QAR ${totalInventoryValue.toStringAsFixed(0)}',
+                    PdfColors.teal),
+                _buildPdfKpiCard(
+                    'PO Count', poCount.toString(), PdfColors.indigo),
+                _buildPdfKpiCard(
+                    'Total Purchases',
+                    'QAR ${totalPurchases.toStringAsFixed(0)}',
+                    PdfColors.indigo800),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 12),
+          // New: Waste & Stock Warnings KPI Summary
+          pw.Container(
+            padding: const pw.EdgeInsets.all(16),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.grey100,
+              borderRadius: pw.BorderRadius.circular(8),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+              children: [
+                _buildPdfKpiCard(
+                    'Low Stock', lowStockCount.toString(), PdfColors.orange),
+                _buildPdfKpiCard(
+                    'Dead Stock', deadStockCount.toString(), PdfColors.brown),
+                _buildPdfKpiCard(
+                    'Waste Cost ($wasteCount)',
+                    'QAR ${totalWasteCost.toStringAsFixed(0)}',
+                    PdfColors.red900),
+              ],
+            ),
+          ),
           pw.SizedBox(height: 24),
 
           // Order Type Distribution
@@ -194,7 +248,9 @@ class AnalyticsPdfService {
             pw.SizedBox(height: 8),
             pw.Table.fromTextArray(
               headerStyle: pw.TextStyle(
-                  fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 10),
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.white,
+                  fontSize: 10),
               headerDecoration:
                   const pw.BoxDecoration(color: PdfColors.deepPurple),
               cellPadding: const pw.EdgeInsets.all(6),
@@ -214,11 +270,20 @@ class AnalyticsPdfService {
                 4: pw.Alignment.center,
                 5: pw.Alignment.center,
               },
-              headers: ['#', 'Item Name', 'Qty', 'Original (QAR)', 'Actual (QAR)', 'Discount'],
+              headers: [
+                '#',
+                'Item Name',
+                'Qty',
+                'Original (QAR)',
+                'Actual (QAR)',
+                'Discount'
+              ],
               data: topItems.asMap().entries.map((e) {
                 final item = e.value;
-                final originalRevenue = (item['originalRevenue'] as num?)?.toDouble() ?? 0;
-                final actualRevenue = (item['revenue'] as num?)?.toDouble() ?? 0;
+                final originalRevenue =
+                    (item['originalRevenue'] as num?)?.toDouble() ?? 0;
+                final actualRevenue =
+                    (item['revenue'] as num?)?.toDouble() ?? 0;
                 final savings = (item['savings'] as num?)?.toDouble() ?? 0;
                 final hasDiscount = item['hasDiscount'] == true;
                 return [
@@ -243,11 +308,15 @@ class AnalyticsPdfService {
                 children: [
                   pw.Text(
                     'Total Discounts Given:',
-                    style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+                    style: pw.TextStyle(
+                        fontSize: 11, fontWeight: pw.FontWeight.bold),
                   ),
                   pw.Text(
                     'QAR ${topItems.fold<double>(0, (sum, item) => sum + ((item['savings'] as num?)?.toDouble() ?? 0)).toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.green700),
+                    style: pw.TextStyle(
+                        fontSize: 11,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.green700),
                   ),
                 ],
               ),
@@ -318,6 +387,42 @@ class AnalyticsPdfService {
                   customer['name'] ?? 'Unknown',
                   customer['orderCount']?.toString() ?? '0',
                   'QAR ${(customer['totalSpend'] as num?)?.toStringAsFixed(2) ?? '0.00'}',
+                ];
+              }).toList(),
+            ),
+            pw.SizedBox(height: 24),
+          ],
+
+          // Top Wasted Items
+          if (topWastedItems != null && topWastedItems.isNotEmpty) ...[
+            _buildPdfSectionTitle('Top Wasted Items'),
+            pw.SizedBox(height: 8),
+            pw.Table.fromTextArray(
+              headerStyle: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+              headerDecoration:
+                  const pw.BoxDecoration(color: PdfColors.deepPurple),
+              cellPadding: const pw.EdgeInsets.all(8),
+              headerAlignments: {
+                0: pw.Alignment.center,
+                1: pw.Alignment.centerLeft,
+                2: pw.Alignment.center,
+                3: pw.Alignment.center,
+              },
+              cellAlignments: {
+                0: pw.Alignment.center,
+                1: pw.Alignment.centerLeft,
+                2: pw.Alignment.center,
+                3: pw.Alignment.center,
+              },
+              headers: ['#', 'Item Name', 'Wasted Qty', 'Est. Loss (QAR)'],
+              data: topWastedItems.asMap().entries.map((e) {
+                final item = e.value as Map<String, dynamic>;
+                return [
+                  '${e.key + 1}',
+                  item['name'] ?? 'Unknown',
+                  '${item['qty']} ${item['unit']}',
+                  (item['loss'] as double).toStringAsFixed(2),
                 ];
               }).toList(),
             ),

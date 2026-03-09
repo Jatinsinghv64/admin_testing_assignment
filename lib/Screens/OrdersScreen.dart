@@ -15,6 +15,7 @@ import '../constants.dart';
 import '../Widgets/BranchFilterService.dart'; // ✅ Added
 import '../Widgets/OrderUIComponents.dart'; // ✅ Shared UI components
 import '../utils/responsive_helper.dart'; // ✅ Responsive utility
+import 'OrdersScreenLarge.dart'; // ✅ Large Screen Implementation
 
 // Service for handling cross-screen order selection/highlighting
 class OrderSelectionService {
@@ -111,11 +112,7 @@ class _OrdersScreenState extends State<OrdersScreen>
 
     // Load branch names if needed (for multi-branch users)
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final userScope = context.read<UserScopeService>();
-      final branchFilter = context.read<BranchFilterService>();
-      if (userScope.branchIds.length > 1 && !branchFilter.isLoaded) {
-        branchFilter.loadBranchNames(userScope.branchIds);
-      }
+      _initBranchFilter();
     });
 
     _tabController = TabController(
@@ -135,6 +132,14 @@ class _OrdersScreenState extends State<OrdersScreen>
 
     _shouldHighlightOrder =
         widget.initialOrderId != null || _orderToScrollTo != null;
+  }
+
+  void _initBranchFilter() {
+    final userScope = context.read<UserScopeService>();
+    final branchFilter = context.read<BranchFilterService>();
+    if (userScope.branchIds.length > 1 && !branchFilter.isLoaded) {
+      branchFilter.loadBranchNames(userScope.branchIds);
+    }
   }
 
   @override
@@ -224,6 +229,13 @@ class _OrdersScreenState extends State<OrdersScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (ResponsiveHelper.isDesktop(context)) {
+      return OrdersScreenLarge(
+        initialOrderType: widget.initialOrderType,
+        initialOrderId: widget.initialOrderId,
+      );
+    }
+
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
     final bool showBranchSelector = userScope.branchIds.length > 1;
@@ -242,8 +254,8 @@ class _OrdersScreenState extends State<OrdersScreen>
             fontSize: 24,
           ),
         ),
-        actions: [
-          if (showBranchSelector) _buildBranchSelector(userScope, branchFilter),
+        actions: const [
+          // Branch selector removed in favor of global BranchFilterService
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(kToolbarHeight),
@@ -1013,13 +1025,10 @@ class _OrderCardState extends State<_OrderCard> {
 
     // data is not available here, accessing widget.order.data()
     final data = widget.order.data();
-    // ROBUST BRANCH ID EXTRACTION
-    // Try top-level branchId -> branchIds[0] -> items[0].branchId
-    String? orderBranchId = data['branchId']?.toString();
+    // Try top-level branchIds[0] -> items[0].branchId
+    String? orderBranchId;
 
-    if (orderBranchId == null &&
-        data['branchIds'] is List &&
-        (data['branchIds'] as List).isNotEmpty) {
+    if (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty) {
       orderBranchId = data['branchIds'][0].toString();
     }
 
@@ -1100,11 +1109,6 @@ class _OrderCardState extends State<_OrderCard> {
     final String? riderId = data['riderId'];
 
     // Get branch info (Moved here for access in buttons)
-    // Get branch info (Moved here for access in buttons)
-    final branchId =
-        (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty)
-            ? data['branchIds'][0].toString()
-            : null;
 
     // Use normalized order type for consistent comparison
     final bool isDelivery = AppConstants.isDeliveryOrder(orderType);
@@ -1634,33 +1638,169 @@ class _OrderCardState extends State<_OrderCard> {
     final String name = item['name'] ?? 'Unnamed Item';
     final int qty = (item['quantity'] as num? ?? 1).toInt();
     final double price = (item['price'] as num? ?? 0.0).toDouble();
+    final double? discountedPrice =
+        (item['discountedPrice'] as num?)?.toDouble();
+    final double finalPrice =
+        (item['finalPrice'] as num?)?.toDouble() ?? discountedPrice ?? price;
+
+    final bool isCombo = item['isCombo'] == true;
+    final bool hasDiscount = discountedPrice != null && discountedPrice < price;
+
+    // Sub-items for combos
+    final List<Map<String, dynamic>> subItems = [];
+    if (isCombo && item['comboSubItems'] is List) {
+      for (final sub in (item['comboSubItems'] as List)) {
+        if (sub is Map<String, dynamic>) subItems.add(sub);
+      }
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            flex: 5,
-            child: Text.rich(TextSpan(
-                text: name,
-                style:
-                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                children: [
-                  TextSpan(
-                      text: ' (x$qty)',
-                      style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.normal,
-                          color: Colors.black54)),
-                ])),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Name + badges
+              Expanded(
+                flex: 5,
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  children: [
+                    // Combo badge
+                    if (isCombo)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              color: Colors.deepPurple.withOpacity(0.3)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.restaurant_menu,
+                                size: 10, color: Colors.deepPurple),
+                            SizedBox(width: 3),
+                            Text('COMBO',
+                                style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.deepPurple)),
+                          ],
+                        ),
+                      ),
+                    // Promo / sale badge
+                    if (hasDiscount)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(6),
+                          border:
+                              Border.all(color: Colors.green.withOpacity(0.3)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.local_offer,
+                                size: 10, color: Colors.green),
+                            SizedBox(width: 3),
+                            Text('PROMO',
+                                style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.green)),
+                          ],
+                        ),
+                      ),
+                    Text.rich(
+                      TextSpan(
+                        text: name,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w500),
+                        children: [
+                          TextSpan(
+                            text: ' (x$qty)',
+                            style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.normal,
+                                color: Colors.black54),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Price column
+              Expanded(
+                flex: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (hasDiscount)
+                      Text(
+                        'QAR ${(price * qty).toStringAsFixed(2)}',
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey,
+                          decoration: TextDecoration.lineThrough,
+                        ),
+                      ),
+                    Text(
+                      'QAR ${(finalPrice * qty).toStringAsFixed(2)}',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color:
+                            hasDiscount ? Colors.green.shade700 : Colors.black,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          Expanded(
-            flex: 2,
-            child: Text('QAR ${(price * qty).toStringAsFixed(2)}',
-                textAlign: TextAlign.right,
-                style: const TextStyle(fontSize: 13, color: Colors.black)),
-          ),
+          // Combo sub-items
+          if (subItems.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: subItems.map((sub) {
+                  final subName = sub['name']?.toString() ?? 'Item';
+                  final subQty = (sub['quantity'] as num? ?? 1).toInt();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 3),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.subdirectory_arrow_right,
+                            size: 14, color: Colors.deepPurple),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            subQty > 1 ? '$subName (x$subQty)' : subName,
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey[600]),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1710,6 +1850,8 @@ class _OrderCardState extends State<_OrderCard> {
 
     final bool isAutoAssigning =
         data.containsKey('autoAssignStarted') && orderTypeLower == 'delivery';
+    final bool isDineIn = AppConstants.isDineInOrder(orderTypeLower);
+    final bool isTakeaway = AppConstants.isTakeawayOrder(orderTypeLower);
     final bool needsManualAssignment =
         status == AppConstants.statusNeedsAssignment;
 
@@ -1767,6 +1909,13 @@ class _OrderCardState extends State<_OrderCard> {
       bannerColor = Colors.teal;
       bannerText = 'EXCHANGE ORDER';
       bannerIcon = Icons.swap_horiz_outlined;
+      showBanner = true;
+    }
+    // Priority 4: Ongoing Dine-in/Takeaway (New Requirement)
+    else if ((isDineIn || isTakeaway) && !AppConstants.isTerminalStatus(status)) {
+      bannerColor = Colors.blue.shade700;
+      bannerText = 'ON-GOING';
+      bannerIcon = Icons.hourglass_top_rounded;
       showBanner = true;
     }
     // Priority 4: Cash payment (only for active orders that need payment collection)
@@ -2475,7 +2624,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     final navigator = Navigator.of(context);
 
     final userScope = context.read<UserScopeService>();
-    final currentBranchId = userScope.branchId;
+    final currentBranchId = userScope.branchIds.isNotEmpty ? userScope.branchIds.first : '';
 
     final riderId = await showDialog<String>(
       context: context,
@@ -2867,40 +3016,163 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     final String name = item['name'] ?? 'Unnamed Item';
     final int qty = (item['quantity'] as num? ?? 1).toInt();
     final double price = (item['price'] as num? ?? 0.0).toDouble();
+    final double? discountedPrice =
+        (item['discountedPrice'] as num?)?.toDouble();
+    final double finalPrice =
+        (item['finalPrice'] as num?)?.toDouble() ?? discountedPrice ?? price;
+
+    final bool isCombo = item['isCombo'] == true;
+    final bool hasDiscount = discountedPrice != null && discountedPrice < price;
+
+    final List<Map<String, dynamic>> subItems = [];
+    if (isCombo && item['comboSubItems'] is List) {
+      for (final sub in (item['comboSubItems'] as List)) {
+        if (sub is Map<String, dynamic>) subItems.add(sub);
+      }
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            flex: 5,
-            child: Text.rich(
-              TextSpan(
-                text: name,
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                children: [
-                  TextSpan(
-                    text: ' (x$qty)',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.normal,
-                      color: Colors.black54,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 5,
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  children: [
+                    if (isCombo)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              color: Colors.deepPurple.withOpacity(0.3)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.restaurant_menu,
+                                size: 10, color: Colors.deepPurple),
+                            SizedBox(width: 3),
+                            Text('COMBO',
+                                style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.deepPurple)),
+                          ],
+                        ),
+                      ),
+                    if (hasDiscount)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(6),
+                          border:
+                              Border.all(color: Colors.green.withOpacity(0.3)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.local_offer,
+                                size: 10, color: Colors.green),
+                            SizedBox(width: 3),
+                            Text('PROMO',
+                                style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.green)),
+                          ],
+                        ),
+                      ),
+                    Text.rich(
+                      TextSpan(
+                        text: name,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w500),
+                        children: [
+                          TextSpan(
+                            text: ' (x$qty)',
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.normal,
+                                color: Colors.black54),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (hasDiscount)
+                      Text(
+                        'QAR ${(price * qty).toStringAsFixed(2)}',
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                          decoration: TextDecoration.lineThrough,
+                        ),
+                      ),
+                    Text(
+                      'QAR ${(finalPrice * qty).toStringAsFixed(2)}',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color:
+                            hasDiscount ? Colors.green.shade700 : Colors.black,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (subItems.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: subItems.map((sub) {
+                  final subName = sub['name']?.toString() ?? 'Item';
+                  final subQty = (sub['quantity'] as num? ?? 1).toInt();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 3),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.subdirectory_arrow_right,
+                            size: 14, color: Colors.deepPurple),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            subQty > 1 ? '$subName (x$subQty)' : subName,
+                            style: TextStyle(
+                                fontSize: 13, color: Colors.grey[600]),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
               ),
             ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              'QAR ${(price * qty).toStringAsFixed(2)}',
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 14, color: Colors.black),
-            ),
-          ),
+          ],
         ],
       ),
     );

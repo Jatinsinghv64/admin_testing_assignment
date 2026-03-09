@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../main.dart';
+import '../Widgets/BranchFilterService.dart';
 import 'ConnectionUtils.dart';
 
 class RestaurantTimingScreen extends StatefulWidget {
@@ -24,8 +25,6 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
 
   // SuperAdmin branch selection
   String? _selectedBranchId;
-  List<Map<String, dynamic>> _allBranches = [];
-  bool _isSuperAdmin = false;
 
   // Kitchen Operations - Preparation Time
   static const int _minEstimatedTime = 10;
@@ -74,6 +73,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
 
   Future<void> _initializeScreen() async {
     final userScope = context.read<UserScopeService>();
+    final branchFilter = context.read<BranchFilterService>();
 
     // Wait for userScope to load if needed
     if (!userScope.isLoaded) {
@@ -83,82 +83,27 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
       return;
     }
 
-    // Only use multi-branch mode if SuperAdmin has more than 1 branch assigned
-    _isSuperAdmin = userScope.isSuperAdmin && userScope.branchIds.length > 1;
+    // Use global branch filter if available, otherwise fallback to first assigned branch
+    String? targetBranchId;
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    
+    if (filterBranchIds.isNotEmpty) {
+      targetBranchId = filterBranchIds.first;
+    } else if (userScope.branchIds.isNotEmpty) {
+      targetBranchId = userScope.branchIds.first;
+    }
 
-    if (_isSuperAdmin) {
-      await _loadAssignedBranches(userScope.branchIds);
-    } else if (userScope.branchId.isNotEmpty) {
-      _selectedBranchId = userScope.branchId;
+    if (targetBranchId != null) {
+      setState(() {
+        _selectedBranchId = targetBranchId;
+      });
       await _loadTimings();
     } else {
-      // Edge case: User with no branches
       setState(() {
         _isLoading = false;
         _hasError = true;
         _errorMessage = 'No branch assigned to your account.';
       });
-    }
-  }
-
-  Future<void> _loadAssignedBranches(List<String> branchIds) async {
-    if (branchIds.isEmpty) {
-      setState(() {
-        _isLoading = false;
-        _hasError = true;
-        _errorMessage = 'No branches assigned to your account.';
-      });
-      return;
-    }
-
-    try {
-      final List<Map<String, dynamic>> loadedBranches = [];
-
-      for (final branchId in branchIds) {
-        try {
-          final doc = await FirebaseFirestore.instance
-              .collection('Branch')
-              .doc(branchId)
-              .get();
-          if (doc.exists) {
-            final data = doc.data()!;
-            loadedBranches.add({
-              'id': doc.id,
-              'name': data['name'] ?? doc.id,
-            });
-          }
-        } catch (e) {
-          debugPrint('Error loading branch $branchId: $e');
-        }
-      }
-
-      if (!mounted) return;
-
-      if (loadedBranches.isEmpty) {
-        setState(() {
-          _isLoading = false;
-          _hasError = true;
-          _errorMessage =
-              'Could not load any branches. Please check your connection.';
-        });
-        return;
-      }
-
-      setState(() {
-        _allBranches = loadedBranches;
-        _selectedBranchId = _allBranches.first['id'];
-      });
-
-      await _loadTimings();
-    } catch (e) {
-      debugPrint("Error loading assigned branches: $e");
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _hasError = true;
-          _errorMessage = 'Failed to load branches: $e';
-        });
-      }
     }
   }
 
@@ -442,10 +387,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
               SetOptions(merge: true)).timeout(const Duration(seconds: 15));
 
       if (mounted) {
-        final branchName = _allBranches.firstWhere(
-          (b) => b['id'] == _selectedBranchId,
-          orElse: () => {'name': _selectedBranchId},
-        )['name'];
+        final branchName = _selectedBranchId;
 
         // Update original to match saved state
         _originalWorkingHours = Map<String, dynamic>.from(_workingHours.map(
@@ -1238,7 +1180,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
     return Column(
       children: [
         // Branch selector only for SuperAdmin with multiple branches
-        if (_isSuperAdmin && _allBranches.length > 1) _buildBranchSelector(),
+        const SizedBox.shrink(),
         if (_selectedBranchId != null) ...[
           // Unsaved changes indicator
           if (_hasUnsavedChanges)
@@ -1278,87 +1220,6 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
             ),
           ),
       ],
-    );
-  }
-
-  Widget _buildBranchSelector() {
-    return Container(
-      width: double.infinity,
-      color: Colors.indigo.shade50,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          const Icon(Icons.store, color: Colors.indigo, size: 20),
-          const SizedBox(width: 12),
-          const Text(
-            'Branch:',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.indigo.shade200),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _selectedBranchId,
-                  isExpanded: true,
-                  icon: const Icon(Icons.keyboard_arrow_down,
-                      color: Colors.indigo),
-                  items: _allBranches.map((branch) {
-                    return DropdownMenuItem<String>(
-                      value: branch['id'],
-                      child: Text(
-                        branch['name'],
-                        style: const TextStyle(fontWeight: FontWeight.w500),
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (String? newValue) async {
-                    if (newValue == null || newValue == _selectedBranchId)
-                      return;
-
-                    // Check for unsaved changes before switching
-                    if (_hasUnsavedChanges) {
-                      final shouldSwitch = await showDialog<bool>(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Unsaved Changes'),
-                          content: const Text(
-                              'You have unsaved changes. Switching branches will discard them.'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text('Cancel'),
-                            ),
-                            ElevatedButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.orange),
-                              child: const Text('Switch Anyway'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (shouldSwitch != true) return;
-                    }
-
-                    setState(() {
-                      _selectedBranchId = newValue;
-                      _workingHours = {};
-                    });
-                    _loadTimings();
-                  },
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

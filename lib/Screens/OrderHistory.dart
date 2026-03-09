@@ -53,16 +53,16 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       final userScope = Provider.of<UserScopeService>(context, listen: false);
       Query query = FirebaseFirestore.instance.collection('Orders');
 
-      if (!userScope.isSuperAdmin) {
-        if (userScope.branchId != null) {
-          query = query.where('branchIds', arrayContains: userScope.branchId);
-        } else {
-          setState(() {
-            _isLoading = false;
-            _hasMore = false;
-          });
-          return;
-        }
+      if (userScope.branchIds.isNotEmpty) {
+        query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+      } else if (!userScope.isSuperAdmin) {
+        // If not a super admin and no branchIds are associated,
+        // then the user should not see any orders.
+        setState(() {
+          _isLoading = false;
+          _hasMore = false;
+        });
+        return;
       }
 
       query = query.where('status', whereIn: [
@@ -183,24 +183,30 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             ),
         ],
       ),
-      body: Column(
-        children: [
-          if (_startDate != null)
-            Container(
-              width: double.infinity,
-              color: Colors.deepPurple.withOpacity(0.05),
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-              child: Text(
-                'Filtering: ${DateFormat('MMM d').format(_startDate!)} - ${DateFormat('MMM d').format(_endDate!)}',
-                style: const TextStyle(
-                    color: Colors.deepPurple, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 900),
+          child: Column(
+            children: [
+              if (_startDate != null)
+                Container(
+                  width: double.infinity,
+                  color: Colors.deepPurple.withOpacity(0.05),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  child: Text(
+                    'Filtering: ${DateFormat('MMM d').format(_startDate!)} - ${DateFormat('MMM d').format(_endDate!)}',
+                    style: const TextStyle(
+                        color: Colors.deepPurple, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              Expanded(
+                child: _buildOrdersList(),
               ),
-            ),
-          Expanded(
-            child: _buildOrdersList(),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -477,147 +483,151 @@ class OrderDetailsDialog extends StatelessWidget {
     final Timestamp? rejectedAt = data['rejectedAt'];
 
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Row(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Order #$orderNumber',
-                        style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.deepPurple),
-                      ),
-                      Text(
-                        DateFormat('MMM d, yyyy • h:mm a')
-                            .format((data['timestamp'] as Timestamp).toDate()),
-                        style:
-                            const TextStyle(color: Colors.grey, fontSize: 14),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close)),
-              ],
-            ),
-            const Divider(height: 30),
-
-            // 🛑 CANCELLATION INFO (Only if cancelled)
-            if (status.toLowerCase() == 'cancelled') ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.red.shade200),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                // Header
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        Icon(Icons.cancel,
-                            color: Colors.red.shade700, size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          'ORDER CANCELLED',
-                          style: TextStyle(
-                            color: Colors.red.shade900,
-                            fontWeight: FontWeight.bold,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Order #$orderNumber',
+                            style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.deepPurple),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    if (cancellationReason != null)
-                      Text('Reason: $cancellationReason',
-                          style: const TextStyle(fontWeight: FontWeight.w600)),
-                    if (rejectedBy != null)
-                      Text('Cancelled by: $rejectedBy',
-                          style: const TextStyle(fontSize: 12)),
-                    if (rejectedAt != null)
-                      Text(
-                        'Time: ${DateFormat('h:mm a').format(rejectedAt.toDate())}',
-                        style:
-                            const TextStyle(fontSize: 12, color: Colors.grey),
+                          Text(
+                            DateFormat('MMM d, yyyy • h:mm a').format(
+                                (data['timestamp'] as Timestamp).toDate()),
+                            style: const TextStyle(
+                                color: Colors.grey, fontSize: 14),
+                          ),
+                        ],
                       ),
+                    ),
+                    IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close)),
                   ],
                 ),
-              ),
-              const SizedBox(height: 20),
-            ],
+                const Divider(height: 30),
 
-            // Customer Details
-            _buildSectionTitle('Customer Details', Icons.person),
-            const SizedBox(height: 8),
-            _buildDetailRow('Name', data['customerName'] ?? 'N/A'),
-            _buildDetailRow('Phone', data['customerPhone'] ?? 'N/A'),
-            if (data['Order_type'] == 'delivery')
-              _buildDetailRow('Address',
-                  '${data['deliveryAddress']?['street'] ?? ''}, ${data['deliveryAddress']?['city'] ?? ''}'),
-
-            const SizedBox(height: 20),
-
-            // Items
-            _buildSectionTitle('Items', Icons.restaurant_menu),
-            const SizedBox(height: 8),
-            ...items.map((item) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                            color: Colors.grey[200],
-                            borderRadius: BorderRadius.circular(4)),
-                        child: Text('${item['quantity']}x',
-                            style:
-                                const TextStyle(fontWeight: FontWeight.bold)),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(child: Text(item['name'] ?? 'Item')),
-                      Text(
-                          'QAR ${((item['price'] ?? 0) * (item['quantity'] ?? 1)).toStringAsFixed(2)}'),
-                    ],
+                // 🛑 CANCELLATION INFO (Only if cancelled)
+                if (status.toLowerCase() == 'cancelled') ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.red.shade200),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.cancel,
+                                color: Colors.red.shade700, size: 20),
+                            const SizedBox(width: 8),
+                            Text(
+                              'ORDER CANCELLED',
+                              style: TextStyle(
+                                color: Colors.red.shade900,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (cancellationReason != null)
+                          Text('Reason: $cancellationReason',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600)),
+                        if (rejectedBy != null)
+                          Text('Cancelled by: $rejectedBy',
+                              style: const TextStyle(fontSize: 12)),
+                        if (rejectedAt != null)
+                          Text(
+                            'Time: ${DateFormat('h:mm a').format(rejectedAt.toDate())}',
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.grey),
+                          ),
+                      ],
+                    ),
                   ),
-                )),
+                  const SizedBox(height: 20),
+                ],
 
-            const SizedBox(height: 20),
-            const Divider(),
+                // Customer Details
+                _buildSectionTitle('Customer Details', Icons.person),
+                const SizedBox(height: 8),
+                _buildDetailRow('Name', data['customerName'] ?? 'N/A'),
+                _buildDetailRow('Phone', data['customerPhone'] ?? 'N/A'),
+                if (data['Order_type'] == 'delivery')
+                  _buildDetailRow('Address',
+                      '${data['deliveryAddress']?['street'] ?? ''}, ${data['deliveryAddress']?['city'] ?? ''}'),
 
-            // Payment Summary
-            _buildSummaryRow('Subtotal', subtotal),
-            if (deliveryFee > 0) _buildSummaryRow('Delivery Fee', deliveryFee),
-            const SizedBox(height: 8),
-            _buildSummaryRow('Total', totalAmount,
-                isBold: true, color: Colors.deepPurple),
+                const SizedBox(height: 20),
 
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close Details'),
-              ),
-            )
-          ],
-        ),
-      ),
-    );
+                // Items
+                _buildSectionTitle('Items', Icons.restaurant_menu),
+                const SizedBox(height: 8),
+                ...items.map((item) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: Colors.grey[200],
+                                borderRadius: BorderRadius.circular(4)),
+                            child: Text('${item['quantity']}x',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text(item['name'] ?? 'Item')),
+                          Text(
+                              'QAR ${((item['price'] ?? 0) * (item['quantity'] ?? 1)).toStringAsFixed(2)}'),
+                        ],
+                      ),
+                    )),
+
+                const SizedBox(height: 20),
+                const Divider(),
+
+                // Payment Summary
+                _buildSummaryRow('Subtotal', subtotal),
+                if (deliveryFee > 0)
+                  _buildSummaryRow('Delivery Fee', deliveryFee),
+                const SizedBox(height: 8),
+                _buildSummaryRow('Total', totalAmount,
+                    isBold: true, color: Colors.deepPurple),
+
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close Details'),
+                  ),
+                )
+              ],
+            ),
+          ),
+        ));
   }
 
   Widget _buildSectionTitle(String title, IconData icon) {

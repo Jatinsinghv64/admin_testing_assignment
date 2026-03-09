@@ -236,5 +236,54 @@ service cloud.firestore {
       // Staff can read customer data
       allow read: if isStaff();
     }
+
+    // =====================
+    // INGREDIENTS (System 1)
+    // =====================
+    match /ingredients/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isStaff(); // admin/branch admin only
+    }
+
+    // =====================
+    // RECIPES (System 1)
+    // =====================
+    match /recipes/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
+    }
+
+    // =====================
+    // SUPPLIERS (System 3)
+    // =====================
+    match /suppliers/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
+    }
+
+    // =====================
+    // PURCHASE ORDERS (System 3)
+    // =====================
+    match /purchase_orders/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated(); // all staff can create/receive POs
+    }
+
+    // =====================
+    // WASTE ENTRIES (System 4)
+    // =====================
+    match /waste_entries/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated(); // all staff can log waste
+    }
+
+    // =====================
+    // STOCK MOVEMENTS (Immutable audit log)
+    // =====================
+    match /stock_movements/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated(); // service-written only
+      allow update, delete: if false;    // immutable — never modified after creation
+    }
   }
 }

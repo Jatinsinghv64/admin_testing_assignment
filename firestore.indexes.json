@@ -113,8 +113,8 @@
                     "order": "ASCENDING"
                 },
                 {
-                    "fieldPath": "branchId",
-                    "order": "ASCENDING"
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
                 },
                 {
                     "fieldPath": "status",
@@ -131,8 +131,8 @@
             "queryScope": "COLLECTION",
             "fields": [
                 {
-                    "fieldPath": "branchId",
-                    "order": "ASCENDING"
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
                 },
                 {
                     "fieldPath": "timestamp",
@@ -155,6 +155,282 @@
                 {
                     "fieldPath": "branchIds",
                     "arrayConfig": "CONTAINS"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "ingredients",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "isActive",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "ingredients",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "currentStock",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "ingredients",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "expiryDate",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "recipes",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "isActive",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "suppliers",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "isActive",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "suppliers",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "isActive",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "companyName",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "suppliers",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "companyName",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "purchase_orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "purchase_orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "supplierId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "waste_entries",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "wasteDate",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "waste_entries",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "reason",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "wasteDate",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "stock_movements",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "ingredientId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "stock_movements",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "movementType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "source",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "Order_type",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "tableId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "Order_type",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "ASCENDING"
                 }
             ]
         }

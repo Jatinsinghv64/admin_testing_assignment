@@ -13,6 +13,8 @@ import '../Widgets/BranchFilterService.dart'; // ✅ Branch filter
 import '../Widgets/OrderUIComponents.dart'; // ✅ Shared UI components
 import '../Widgets/CancellationDialog.dart'; // ✅ Shared cancellation dialog
 import '../utils/responsive_helper.dart'; // ✅ Responsive utility
+import '../services/DashboardThemeService.dart'; // ✅ Added for Dark/Light Theme
+import 'DashboardScreenLarge.dart'; // ✅ Large Screen Implementation
 
 class DashboardScreen extends StatefulWidget {
   final Function(int) onTabChange;
@@ -53,29 +55,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Timestamp.fromDate(startOfBusinessDay);
   }
 
+
+
+
+
   @override
   Widget build(BuildContext context) {
+    if (ResponsiveHelper.isDesktop(context)) {
+      return DashboardScreenLarge(onTabChange: widget.onTabChange);
+    }
+
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
     final bool showBranchSelector = userScope.branchIds.length > 1;
 
+    final themeService = context.watch<DashboardThemeService>();
+    final isDark = themeService.isDarkMode;
+
+    final bgColor = isDark ? const Color(0xFF1A1A2E) : Colors.grey[50]!;
+    final surfaceColor = isDark ? const Color(0xFF16213E) : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.deepPurple;
+
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: bgColor,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: Colors.white,
-        centerTitle: !showBranchSelector, // Left-align when selector shown
-        title: const Text(
+        backgroundColor: surfaceColor,
+        centerTitle: !showBranchSelector,
+        iconTheme: IconThemeData(color: textColor),
+        title: Text(
           'Dashboard',
           style: TextStyle(
             fontWeight: FontWeight.bold,
-            color: Colors.deepPurple,
+            color: textColor,
             fontSize: 24,
           ),
         ),
         actions: [
-          // Branch selector - only shown for multi-branch users
-          if (showBranchSelector) _buildBranchSelector(userScope, branchFilter),
+          if (showBranchSelector) _buildBranchSelector(userScope, branchFilter, isDark),
         ],
       ),
       body: Center(
@@ -101,23 +118,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildBranchSelector(
-      UserScopeService userScope, BranchFilterService branchFilter) {
+      UserScopeService userScope, BranchFilterService branchFilter, bool isDark) {
+    final textColor = isDark ? Colors.white : Colors.deepPurple;
+    final dropdownColor = isDark ? const Color(0xFF16213E) : Colors.white;
+    
     return Container(
       margin: const EdgeInsets.only(right: 12),
       child: PopupMenuButton<String>(
         offset: const Offset(0, 45),
+        color: dropdownColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: Colors.deepPurple.withOpacity(0.1),
+            color: isDark ? Colors.white.withOpacity(0.05) : Colors.deepPurple.withOpacity(0.1),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.deepPurple.withOpacity(0.3)),
+            border: Border.all(
+              color: isDark ? Colors.white.withOpacity(0.1) : Colors.deepPurple.withOpacity(0.3),
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.store, size: 18, color: Colors.deepPurple),
+              Icon(Icons.store, size: 18, color: textColor),
               const SizedBox(width: 6),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 100),
@@ -126,8 +149,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ? 'All Branches'
                       : branchFilter
                           .getBranchName(branchFilter.selectedBranchId!),
-                  style: const TextStyle(
-                    color: Colors.deepPurple,
+                  style: TextStyle(
+                    color: textColor,
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                   ),
@@ -135,7 +158,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
               const SizedBox(width: 4),
-              Icon(Icons.arrow_drop_down, color: Colors.deepPurple, size: 20),
+              Icon(Icons.arrow_drop_down, color: textColor, size: 20),
             ],
           ),
         ),
@@ -155,7 +178,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       : Colors.grey,
                 ),
                 const SizedBox(width: 10),
-                const Text('All Branches'),
+                Text('All Branches', style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
               ],
             ),
           ),
@@ -178,6 +201,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Flexible(
                       child: Text(
                         branchFilter.getBranchName(branchId),
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -193,36 +217,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildSectionHeader(String title, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.deepPurple.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              icon,
-              color: Colors.deepPurple,
-              size: 20,
-            ),
+    final isDark = context.watch<DashboardThemeService>().isDarkMode;
+    final textColor = isDark ? Colors.white : Colors.deepPurple;
+    final iconColor = isDark ? Colors.white : Colors.deepPurple;
+    final bgColor = isDark ? Colors.white.withOpacity(0.05) : Colors.deepPurple.withOpacity(0.1);
+
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(10),
           ),
-          const SizedBox(width: 12),
-          Flexible(
-            child: Text(
-              title,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.deepPurple,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
+          child: Icon(icon, color: iconColor, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: textColor,
           ),
-        ],
-      ),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
     );
   }
 
@@ -362,11 +382,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildEnhancedRecentOrdersSection(BuildContext context) {
-    final Timestamp startOfShift = _getBusinessStartTimestamp();
+    final isDark = context.watch<DashboardThemeService>().isDarkMode;
+    final surfaceColor = isDark ? const Color(0xFF16213E) : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final accentColor = isDark ? Colors.white : Colors.deepPurple.shade600;
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: surfaceColor,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
@@ -384,17 +407,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Icon(
                   Icons.access_time_rounded,
-                  color: Colors.deepPurple.shade400,
+                  color: accentColor,
                   size: 20,
                 ),
                 const SizedBox(width: 8),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Latest Activity',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                      color: textColor,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -405,12 +428,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   icon: Icon(
                     Icons.arrow_forward_rounded,
                     size: 16,
-                    color: Colors.deepPurple.shade600,
+                    color: accentColor,
                   ),
                   label: Text(
                     'View All',
                     style: TextStyle(
-                      color: Colors.deepPurple.shade600,
+                      color: accentColor,
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
                     ),
@@ -419,7 +442,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
-          Divider(height: 1, color: Colors.grey[200]),
+          Divider(height: 1, color: isDark ? Colors.white.withOpacity(0.1) : Colors.grey[200]),
           SizedBox(
             height: 320,
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -491,6 +514,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildEmptyState() {
+    final isDark = context.watch<DashboardThemeService>().isDarkMode;
+    
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),
@@ -498,12 +523,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.receipt_long_outlined,
-                size: 48, color: Colors.grey[400]),
+                size: 48, color: isDark ? Colors.white.withOpacity(0.4) : Colors.grey[400]),
             const SizedBox(height: 12),
             Text(
               'No orders yet today',
               style: TextStyle(
-                color: Colors.grey[600],
+                color: isDark ? Colors.white70 : Colors.grey[600],
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
               ),
@@ -512,7 +537,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Text(
               'New orders will appear here',
               style: TextStyle(
-                color: Colors.grey[500],
+                color: isDark ? Colors.white60 : Colors.grey[500],
                 fontSize: 14,
               ),
             ),
@@ -589,6 +614,8 @@ class _EnhancedStatCard extends StatelessWidget {
     required this.color,
     required this.onTap,
   });
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -687,6 +714,8 @@ class _EnhancedStatCard extends StatelessWidget {
 class _EnhancedLoadingStatCard extends StatelessWidget {
   const _EnhancedLoadingStatCard();
 
+
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -708,6 +737,8 @@ class _EnhancedLoadingStatCard extends StatelessWidget {
 class _EnhancedErrorStatCard extends StatelessWidget {
   final String errorMessage;
   const _EnhancedErrorStatCard({required this.errorMessage});
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -771,6 +802,8 @@ class _EnhancedOrderListItem extends StatelessWidget {
       builder: (context) => _OrderPopupDialog(order: order),
     );
   }
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -976,7 +1009,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     final navigator = Navigator.of(context);
 
     final userScope = context.read<UserScopeService>();
-    final currentBranchId = userScope.branchId;
+    final currentBranchId = userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null;
 
     final rider = await showDialog<String>(
       context: context,
@@ -1338,6 +1371,8 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     );
   }
 
+
+
   @override
   Widget build(BuildContext context) {
     final data = widget.order.data() as Map<String, dynamic>? ?? {};
@@ -1521,6 +1556,8 @@ class _RiderSelectionDialog extends StatelessWidget {
   final String? currentBranchId;
 
   const _RiderSelectionDialog({required this.currentBranchId});
+
+
 
   @override
   Widget build(BuildContext context) {

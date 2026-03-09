@@ -6,13 +6,16 @@ import '../Widgets/Permissions.dart';
 import '../Widgets/RestaurantStatusService.dart';
 import '../main.dart';
 import 'DashboardScreen.dart';
-import 'MenuManagement.dart';
-import 'ManualAssignmentScreen.dart';
+import 'inventory/InventoryDashboardScreen.dart';
 import 'OrdersScreen.dart';
+import 'purchases/PurchaseOrdersScreen.dart';
 import 'RidersScreen.dart';
+import 'purchases/SuppliersScreen.dart';
 import 'SettingsScreen.dart';
 import 'RestaurantTimingScreen.dart';
 import '../utils/responsive_helper.dart';
+import 'pos/PosScreen.dart';
+import 'pos/KitchenDisplayScreen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -29,7 +32,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool _isRestaurantStatusInitialized = false;
   bool _isBuildingNavItems = false;
+  bool _allScreensRebuilt =
+      false; // ← tracks when _allScreens was freshly rebuilt
   String? _lastKnownBranchId;
+  bool _isSidebarCollapsed = false;
+  String _lastKnownPermissions = ''; // ✅ Tracks permission changes to avoid spurious nav rebuilds
 
   void _onTabChange(int index) {
     setState(() {
@@ -57,8 +64,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final userScope = context.watch<UserScopeService>();
     final badgeProvider = context.read<BadgeCountProvider>();
 
-    if (_allScreens.isEmpty || userScope.branchId != _lastKnownBranchId) {
-      _lastKnownBranchId = userScope.branchId;
+    if (_allScreens.isEmpty || (userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null) != _lastKnownBranchId) {
+      _lastKnownBranchId = userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null;
+      _allScreensRebuilt = true; // ← mark that nav items need rebuilding too
       badgeProvider.initializeStream(userScope);
 
       _allScreens = {
@@ -75,7 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
         AppTab.inventory: AppScreen(
           tab: AppTab.inventory,
           permissionKey: Permissions.canManageInventory,
-          screen: const InventoryScreen(),
+          screen: const InventoryDashboardScreen(),
           navItem: const BottomNavigationBarItem(
             icon: Icon(Icons.inventory_2_outlined),
             activeIcon: Icon(Icons.inventory_2),
@@ -92,14 +100,14 @@ class _HomeScreenState extends State<HomeScreen> {
             label: 'Orders',
           ),
         ),
-        AppTab.manualAssignment: AppScreen(
-          tab: AppTab.manualAssignment,
-          permissionKey: Permissions.canManageManualAssignment,
-          screen: const ManualAssignmentScreen(),
+        AppTab.purchases: AppScreen(
+          tab: AppTab.purchases,
+          permissionKey: Permissions.canManagePurchases,
+          screen: const PurchaseOrdersScreen(),
           navItem: BottomNavigationBarItem(
-            icon: ManualAssignmentBadge(isActive: false),
-            activeIcon: ManualAssignmentBadge(isActive: true),
-            label: 'Assign Rider',
+            icon: const Icon(Icons.shopping_cart_outlined),
+            activeIcon: const Icon(Icons.shopping_cart),
+            label: 'Purchases',
           ),
         ),
         AppTab.riders: AppScreen(
@@ -112,6 +120,36 @@ class _HomeScreenState extends State<HomeScreen> {
             label: 'Riders',
           ),
         ),
+        AppTab.suppliers: AppScreen(
+          tab: AppTab.suppliers,
+          permissionKey: Permissions.canManagePurchases,
+          screen: const SuppliersScreen(),
+          navItem: const BottomNavigationBarItem(
+            icon: Icon(Icons.people_outline),
+            activeIcon: Icon(Icons.people),
+            label: 'Suppliers',
+          ),
+        ),
+        AppTab.pos: AppScreen(
+          tab: AppTab.pos,
+          permissionKey: Permissions.canManagePOS,
+          screen: const PosScreen(),
+          navItem: const BottomNavigationBarItem(
+            icon: Icon(Icons.point_of_sale_outlined),
+            activeIcon: Icon(Icons.point_of_sale),
+            label: 'POS',
+          ),
+        ),
+        AppTab.kitchenDisplay: AppScreen(
+          tab: AppTab.kitchenDisplay,
+          permissionKey: Permissions.canViewKitchenDisplay,
+          screen: const KitchenDisplayScreen(),
+          navItem: const BottomNavigationBarItem(
+            icon: Icon(Icons.kitchen_outlined),
+            activeIcon: Icon(Icons.kitchen),
+            label: 'Kitchen',
+          ),
+        ),
       };
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -121,7 +159,24 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
 
-    if (_allScreens.isNotEmpty) {
+    // ✅ FIX: Only rebuild nav items when _screens is empty, permissions
+    // changed, OR _allScreens was rebuilt (branchId change).
+    // NOT on every provider/stream rebuild.
+    final newPermissionKey = '${userScope.can(Permissions.canViewDashboard)}'
+        '${userScope.can(Permissions.canManageInventory)}'
+        '${userScope.can(Permissions.canManageOrders)}'
+        '${userScope.can(Permissions.canManagePurchases)}'
+        '${userScope.can(Permissions.canManageRiders)}'
+        '${userScope.can(Permissions.canManagePOS)}'
+        '${userScope.can(Permissions.canViewKitchenDisplay)}';
+
+    final needsRebuild = _screens.isEmpty ||
+        newPermissionKey != _lastKnownPermissions ||
+        _allScreensRebuilt;
+
+    if (needsRebuild) {
+      _lastKnownPermissions = newPermissionKey;
+      _allScreensRebuilt = false;
       _buildNavItems();
     }
   }
@@ -130,8 +185,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final scopeService = context.read<UserScopeService>();
     final statusService = context.read<RestaurantStatusService>();
 
-    if (scopeService.branchId.isNotEmpty && !_isRestaurantStatusInitialized) {
-      String restaurantName = "Branch ${scopeService.branchId}";
+    if (scopeService.branchIds.isNotEmpty && !_isRestaurantStatusInitialized) {
+      String restaurantName = "Branch ${scopeService.branchIds.first}";
       // ✅ Support both email and phone users for display
       if (scopeService.userIdentifier.isNotEmpty) {
         final displayName = scopeService.userEmail.isNotEmpty
@@ -140,7 +195,7 @@ class _HomeScreenState extends State<HomeScreen> {
         restaurantName = "Restaurant ($displayName)";
       }
 
-      statusService.initialize(scopeService.branchId,
+      statusService.initialize(scopeService.branchIds.first,
           restaurantName: restaurantName);
       _isRestaurantStatusInitialized = true;
     }
@@ -277,7 +332,7 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) =>
-          _BranchStatusToggleSheet(branchIds: userScope.branchIds),
+          _BranchStatusToggleSheet(branchId: userScope.branchIds.isNotEmpty ? userScope.branchIds.first : ''),
     );
   }
 
@@ -458,11 +513,20 @@ class _HomeScreenState extends State<HomeScreen> {
     if (userScope.can(Permissions.canManageOrders)) {
       allowedScreens.add(_allScreens[AppTab.orders]!);
     }
-    if (userScope.can(Permissions.canManageManualAssignment)) {
-      allowedScreens.add(_allScreens[AppTab.manualAssignment]!);
+    if (userScope.can(Permissions.canManagePurchases)) {
+      allowedScreens.add(_allScreens[AppTab.purchases]!);
     }
     if (userScope.can(Permissions.canManageRiders)) {
       allowedScreens.add(_allScreens[AppTab.riders]!);
+    }
+    if (userScope.can(Permissions.canManagePurchases)) {
+      allowedScreens.add(_allScreens[AppTab.suppliers]!);
+    }
+    if (userScope.can(Permissions.canManagePOS)) {
+      allowedScreens.add(_allScreens[AppTab.pos]!);
+    }
+    if (userScope.can(Permissions.canViewKitchenDisplay)) {
+      allowedScreens.add(_allScreens[AppTab.kitchenDisplay]!);
     }
 
     if (mounted) {
@@ -496,8 +560,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final String appBarTitle = userScope.isSuperAdmin
         ? 'Super Admin'
-        : userScope.branchId.isNotEmpty
-            ? userScope.branchId.replaceAll('_', ' ')
+        : userScope.branchIds.isNotEmpty
+            ? userScope.branchIds.first.replaceAll('_', ' ')
             : 'Admin Panel';
 
     final bool isMobile = ResponsiveHelper.isMobile(context);
@@ -537,10 +601,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         Expanded(
           child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1200),
-              child: _screens[_currentIndex],
-            ),
+            child: _screens[_currentIndex],
           ),
         ),
       ],
@@ -650,8 +711,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSidebar(BuildContext context) {
-    return Container(
-      width: 280,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      width: _isSidebarCollapsed ? 80 : 280,
       color: Colors.white,
       child: Column(
         children: [
@@ -659,7 +722,10 @@ class _HomeScreenState extends State<HomeScreen> {
           const Divider(height: 1),
           Expanded(
             child: ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
+              padding: EdgeInsets.symmetric(
+                vertical: 20,
+                horizontal: _isSidebarCollapsed ? 0 : 12,
+              ),
               itemCount: _navItems.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
@@ -680,32 +746,58 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildSidebarHeader() {
     return Container(
-      padding: const EdgeInsets.all(24),
-      alignment: Alignment.centerLeft,
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.deepPurple.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.admin_panel_settings,
-                color: Colors.deepPurple, size: 32),
-          ),
-          const SizedBox(width: 16),
-          const Expanded(
-            child: Text(
-              'Zayka Admin',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.deepPurple,
+      height: 80,
+      padding: EdgeInsets.symmetric(
+        horizontal: _isSidebarCollapsed ? 0 : 16,
+        vertical: 12,
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const NeverScrollableScrollPhysics(),
+        child: SizedBox(
+          width: _isSidebarCollapsed ? 80 : 248,
+          child: Row(
+            mainAxisAlignment: _isSidebarCollapsed
+                ? MainAxisAlignment.center
+                : MainAxisAlignment.start,
+            children: [
+              if (!_isSidebarCollapsed) ...[
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.deepPurple.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.admin_panel_settings,
+                      color: Colors.deepPurple, size: 24),
+                ),
+                const SizedBox(width: 12),
+                const SizedBox(
+                  width: 140, // More space for app name
+                  child: Text(
+                    'Zayka Admin',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.deepPurple,
+                    ),
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+              IconButton(
+                onPressed: () =>
+                    setState(() => _isSidebarCollapsed = !_isSidebarCollapsed),
+                icon: Icon(
+                  _isSidebarCollapsed ? Icons.menu : Icons.menu_open,
+                  color: Colors.deepPurple,
+                  size: 26,
+                ),
+                tooltip: _isSidebarCollapsed ? 'Expand' : 'Collapse',
               ),
-              overflow: TextOverflow.ellipsis,
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -719,7 +811,10 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(12),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: EdgeInsets.symmetric(
+            horizontal: _isSidebarCollapsed ? 0 : 16,
+            vertical: 12,
+          ),
           decoration: BoxDecoration(
             color: isSelected
                 ? Colors.deepPurple.withOpacity(0.08)
@@ -731,30 +826,44 @@ class _HomeScreenState extends State<HomeScreen> {
                   : Colors.transparent,
             ),
           ),
-          child: Row(
-            children: [
-              IconTheme(
-                data: IconThemeData(
-                  color: isSelected ? Colors.deepPurple : Colors.grey[600],
-                  size: 24,
-                ),
-                child: isSelected ? item.activeIcon : item.icon,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  item.label ?? '',
-                  style: TextStyle(
-                    color: isSelected ? Colors.deepPurple : Colors.grey[800],
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                    fontSize: 15,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const NeverScrollableScrollPhysics(),
+            child: SizedBox(
+              width: _isSidebarCollapsed ? 80 : 220,
+              child: Row(
+                mainAxisAlignment: _isSidebarCollapsed
+                    ? MainAxisAlignment.center
+                    : MainAxisAlignment.start,
+                children: [
+                  IconTheme(
+                    data: IconThemeData(
+                      color: isSelected ? Colors.deepPurple : Colors.grey[600],
+                      size: 24,
+                    ),
+                    child: isSelected ? item.activeIcon : item.icon,
                   ),
-                ),
+                  if (!_isSidebarCollapsed) ...[
+                    const SizedBox(width: 16),
+                    SizedBox(
+                      width: 140, // Explicit width for text area
+                      child: Text(
+                        item.label ?? '',
+                        style: TextStyle(
+                          color: isSelected ? Colors.deepPurple : Colors.grey[800],
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                          fontSize: 15,
+                        ),
+                        maxLines: 1,
+                      ),
+                    ),
+                    if (isSelected)
+                      const Icon(Icons.chevron_right,
+                          size: 16, color: Colors.deepPurple),
+                  ],
+                ],
               ),
-              if (isSelected)
-                const Icon(Icons.chevron_right,
-                    size: 16, color: Colors.deepPurple),
-            ],
+            ),
           ),
         ),
       ),
@@ -767,7 +876,10 @@ class _HomeScreenState extends State<HomeScreen> {
       return const SizedBox.shrink();
     }
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: _isSidebarCollapsed ? 0 : 12,
+        vertical: 8,
+      ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -778,27 +890,44 @@ class _HomeScreenState extends State<HomeScreen> {
           },
           borderRadius: BorderRadius.circular(12),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: EdgeInsets.symmetric(
+              horizontal: _isSidebarCollapsed ? 0 : 16,
+              vertical: 12,
+            ),
             decoration: BoxDecoration(
               color: Colors.grey.withOpacity(0.05),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.grey.withOpacity(0.1)),
             ),
-            child: Row(
-              children: [
-                Icon(Icons.settings_rounded, size: 24, color: Colors.grey[600]),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    'Settings',
-                    style: TextStyle(
-                      color: Colors.grey[800],
-                      fontWeight: FontWeight.w500,
-                      fontSize: 15,
-                    ),
-                  ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const NeverScrollableScrollPhysics(),
+              child: SizedBox(
+                width: _isSidebarCollapsed ? 80 : 220,
+                child: Row(
+                  mainAxisAlignment: _isSidebarCollapsed
+                      ? MainAxisAlignment.center
+                      : MainAxisAlignment.start,
+                  children: [
+                    Icon(Icons.settings_rounded,
+                        size: 24, color: Colors.grey[600]),
+                    if (!_isSidebarCollapsed) ...[
+                      const SizedBox(width: 16),
+                      const SizedBox(
+                        width: 140,
+                        child: Text(
+                          'Settings',
+                          style: TextStyle(
+                            color: Color(0xFF424242), // Colors.grey[800]
+                            fontWeight: FontWeight.w500,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -809,60 +938,87 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildSidebarFooter() {
     final userScope = context.read<UserScopeService>();
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.symmetric(
+        horizontal: _isSidebarCollapsed ? 0 : 20,
+        vertical: 20,
+      ),
       child: Column(
         children: [
-          Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: Colors.deepPurple.withOpacity(0.1),
-                child: const Icon(Icons.person, color: Colors.deepPurple),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ✅ Support both email and phone users for display
-                    Text(
-                      userScope.userEmail.isNotEmpty
-                          ? userScope.userEmail.split('@').first
-                          : userScope.userIdentifier, // Phone number
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      userScope.isSuperAdmin ? 'Super Admin' : 'Branch Admin',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 12,
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const NeverScrollableScrollPhysics(),
+            child: SizedBox(
+              width: _isSidebarCollapsed ? 80 : 240,
+              child: Row(
+                mainAxisAlignment: _isSidebarCollapsed
+                    ? MainAxisAlignment.center
+                    : MainAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    backgroundColor: Colors.deepPurple.withOpacity(0.1),
+                    child: const Icon(Icons.person, color: Colors.deepPurple),
+                  ),
+                  if (!_isSidebarCollapsed) ...[
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 150,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // ✅ Support both email and phone users for display
+                          Text(
+                            userScope.userEmail.isNotEmpty
+                                ? userScope.userEmail.split('@').first
+                                : userScope.userIdentifier, // Phone number
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            userScope.isSuperAdmin
+                                ? 'Super Admin'
+                                : 'Branch Admin',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () {
-                // Implement logout or switch branch logic if needed
-              },
-              icon: const Icon(Icons.logout, size: 18),
-              label: const Text('Logout'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red,
-                side: BorderSide(color: Colors.red.withOpacity(0.3)),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
+                ],
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          if (!_isSidebarCollapsed)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  // Implement logout or switch branch logic if needed
+                },
+                icon: const Icon(Icons.logout, size: 18),
+                label: const Text('Logout'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: BorderSide(color: Colors.red.withOpacity(0.3)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              onPressed: () {
+                // Implement logout
+              },
+              icon: const Icon(Icons.logout, color: Colors.red),
+              tooltip: 'Logout',
+            ),
         ],
       ),
     );
@@ -924,7 +1080,7 @@ class BadgeCountProvider with ChangeNotifier {
   String? _currentBranchId;
 
   void initializeStream(UserScopeService userScope) {
-    final branchId = userScope.isSuperAdmin ? null : userScope.branchId;
+    final branchId = userScope.isSuperAdmin ? null : (userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null);
 
     if (_currentBranchId == branchId && _subscription != null) return;
 
@@ -980,9 +1136,9 @@ class BadgeCountProvider with ChangeNotifier {
 
 // ✅ NEW: Branch status toggle sheet for SuperAdmin
 class _BranchStatusToggleSheet extends StatefulWidget {
-  final List<String> branchIds;
+  final String branchId;
 
-  const _BranchStatusToggleSheet({required this.branchIds});
+  const _BranchStatusToggleSheet({required this.branchId});
 
   @override
   State<_BranchStatusToggleSheet> createState() =>
@@ -1002,7 +1158,7 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
 
   Future<void> _loadBranches() async {
     // Edge case: empty branchIds
-    if (widget.branchIds.isEmpty) {
+    if (widget.branchId.isEmpty) {
       setState(() {
         _branches = [];
         _isLoading = false;
@@ -1014,7 +1170,7 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
       // Load only assigned branches
       final List<Map<String, dynamic>> loadedBranches = [];
 
-      for (final branchId in widget.branchIds) {
+      for (final branchId in [widget.branchId]) {
         try {
           final doc = await FirebaseFirestore.instance
               .collection('Branch')
@@ -1051,14 +1207,15 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
 
     try {
       // Use centralized helper for accurate timezone-aware schedule check
-      final scheduleStatus = await RestaurantStatusService.checkBranchScheduleStatus(branchId);
+      final scheduleStatus =
+          await RestaurantStatusService.checkBranchScheduleStatus(branchId);
       final isScheduleOpen = scheduleStatus['isScheduleOpen'] as bool;
 
       // CHECK: If trying to OPEN but schedule says CLOSED - show dialog
       if (newStatus == true && !isScheduleOpen) {
         setState(() => _togglingIds.remove(branchId));
         if (!mounted) return;
-        
+
         showDialog(
           context: context,
           builder: (dialogContext) => AlertDialog(
@@ -1075,7 +1232,8 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                child:
+                    const Text('Cancel', style: TextStyle(color: Colors.grey)),
               ),
               ElevatedButton.icon(
                 onPressed: () {
@@ -1089,8 +1247,8 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
                 },
                 icon: const Icon(Icons.edit_calendar, size: 16),
                 label: const Text('Update Timings'),
-                style:
-                    ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.deepPurple),
               ),
             ],
           ),
@@ -1102,7 +1260,7 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
       if (newStatus == false && isScheduleOpen) {
         setState(() => _togglingIds.remove(branchId));
         if (!mounted) return;
-        
+
         showDialog(
           context: context,
           builder: (dialogContext) => AlertDialog(
@@ -1119,7 +1277,8 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                child:
+                    const Text('Cancel', style: TextStyle(color: Colors.grey)),
               ),
               ElevatedButton(
                 onPressed: () async {
@@ -1137,7 +1296,6 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
 
       // Standard case - execute toggle directly
       await _executeBranchToggle(branchId, newStatus, isScheduleOpen);
-
     } catch (e) {
       debugPrint('Error toggling branch: $e');
       if (mounted) {
@@ -1150,12 +1308,14 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
     }
   }
 
-  Future<void> _executeBranchToggle(String branchId, bool newStatus, bool isScheduleOpen) async {
+  Future<void> _executeBranchToggle(
+      String branchId, bool newStatus, bool isScheduleOpen) async {
     setState(() => _togglingIds.add(branchId));
-    
+
     try {
       // Use centralized helper to build correct update data
-      final updateData = RestaurantStatusService.buildStatusUpdateData(newStatus, isScheduleOpen);
+      final updateData = RestaurantStatusService.buildStatusUpdateData(
+          newStatus, isScheduleOpen);
 
       await FirebaseFirestore.instance
           .collection('Branch')

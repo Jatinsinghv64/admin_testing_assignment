@@ -510,10 +510,8 @@ class NewOrderDialogState extends State<NewOrderDialog>
     // not ALL orders. Removed the isSuperAdmin bypass.
 
     List<dynamic> orderBranchIds = [];
-    if (data['branchIds'] is List) {
+    if (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty) {
       orderBranchIds = data['branchIds'];
-    } else if (data['branchId'] != null) {
-      orderBranchIds = [data['branchId']];
     }
 
     if (orderBranchIds.isNotEmpty) {

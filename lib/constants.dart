@@ -11,16 +11,26 @@ class AppConstants {
   static const String collectionMenuCategories = 'menu_categories';
   static const String collectionCoupons = 'coupons';
 
+  // --- New Collections (System 1-4) ---
+  static const String collectionIngredients = 'ingredients';
+  static const String collectionRecipes = 'recipes';
+  static const String collectionSuppliers = 'suppliers';
+  static const String collectionPurchaseOrders = 'purchase_orders';
+  static const String collectionWasteEntries = 'waste_entries';
+  static const String collectionStockMovements = 'stock_movements';
+
   // Order Statuses (Standardized)
   static const String statusPending = 'pending';
   static const String statusPreparing = 'preparing';
-  static const String statusPrepared = 'prepared';         // NEW: Food ready (non-delivery)
-  static const String statusServed = 'served';             // NEW: Dine-in served to table
-  static const String statusPaid = 'paid';                 // NEW: Terminal for takeaway/dine-in
-  static const String statusCollected = 'collected';       // NEW: Terminal for pickup (prepaid)
+  static const String statusPrepared =
+      'prepared'; // NEW: Food ready (non-delivery)
+  static const String statusServed = 'served'; // NEW: Dine-in served to table
+  static const String statusPaid = 'paid'; // NEW: Terminal for takeaway/dine-in
+  static const String statusCollected =
+      'collected'; // NEW: Terminal for pickup (prepaid)
   static const String statusRiderAssigned = 'rider_assigned';
-  static const String statusPickedUp = 'pickedUp';         // Standardized camelCase
-  static const String statusPickedUpLegacy = 'pickedup';   // Legacy lowercase
+  static const String statusPickedUp = 'pickedUp'; // Standardized camelCase
+  static const String statusPickedUpLegacy = 'pickedup'; // Legacy lowercase
   static const String statusDelivered = 'delivered';
   static const String statusCancelled = 'cancelled';
   static const String statusNeedsAssignment = 'needs_rider_assignment';
@@ -30,8 +40,8 @@ class AppConstants {
   static const List<String> terminalStatuses = [
     statusDelivered,
     statusCancelled,
-    statusPaid,       // Terminal for takeaway/dine-in
-    statusCollected,  // Terminal for pickup
+    statusPaid, // Terminal for takeaway/dine-in
+    statusCollected, // Terminal for pickup
   ];
 
   // Firestore Operation Timeouts
@@ -58,6 +68,7 @@ class AppConstants {
   static const double maxPriceValue = 99999.99;
   static const double maxOrderTotal = 999999.99;
   static const int maxItemsPerOrder = 50;
+  static const String currencySymbol = 'QAR ';
 
   // Cache Expiration
   static const Duration branchCacheExpiration = Duration(minutes: 30);
@@ -96,12 +107,11 @@ class AppConstants {
   /// Handles variations like 'dine-in', 'dine_in', 'DineIn', 'Dine In', etc.
   static String normalizeOrderType(String? orderType) {
     if (orderType == null || orderType.isEmpty) return orderTypeDelivery;
-    
+
     // Convert to lowercase and normalize separators
-    final cleaned = orderType.toLowerCase()
-        .replaceAll('-', '_')
-        .replaceAll(' ', '_');
-    
+    final cleaned =
+        orderType.toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
+
     // Map common variations
     if (cleaned == 'dinein' || cleaned == 'dine_in' || cleaned == 'dine') {
       return orderTypeDineIn;
@@ -112,7 +122,7 @@ class AppConstants {
     if (cleaned == 'takeaway' || cleaned == 'take_away') {
       return orderTypeTakeaway;
     }
-    
+
     return cleaned;
   }
 
@@ -160,26 +170,27 @@ class AppConstants {
   }
 
   /// Get the completion button text based on order type and current status
-  static String getCompletionButtonText(String? orderType, {String? currentStatus}) {
+  static String getCompletionButtonText(String? orderType,
+      {String? currentStatus}) {
     final normalized = normalizeOrderType(orderType);
-    
+
     // For preparing -> prepared
     if (currentStatus == statusPreparing && !isDeliveryOrder(orderType)) {
       return 'Mark Prepared';
     }
-    
+
     // For prepared -> next status
     if (currentStatus == statusPrepared) {
       if (normalized == orderTypeDineIn) return 'Mark Served';
       if (normalized == orderTypePickup) return 'Collected';
       if (normalized == orderTypeTakeaway) return 'Mark Paid';
     }
-    
+
     // For served -> paid (dine-in only)
     if (currentStatus == statusServed) {
       return 'Mark Paid';
     }
-    
+
     // Legacy fallbacks
     if (isDineInOrder(orderType)) return 'Served to Table';
     if (isPickupOrder(orderType)) return 'Handed to Customer';
@@ -190,40 +201,59 @@ class AppConstants {
   static String getStatusDisplayText(String? status, {String? orderType}) {
     if (status == null) return '';
     switch (status.toLowerCase()) {
-      case 'pending': return 'PENDING';
-      case 'preparing': return 'PREPARING';
-      case 'prepared': return 'PREPARED';
-      case 'served': return 'SERVED';
-      case 'paid': return 'PAID';
-      case 'collected': return 'COLLECTED';
-      case 'needs_rider_assignment': return 'NEEDS RIDER';
-      case 'rider_assigned': return 'RIDER ASSIGNED';
-      case 'pickedup': return 'PICKED UP';
-      case 'pickedUp': return 'PICKED UP';
-      case 'delivered': return 'DELIVERED';
-      case 'cancelled': return 'CANCELLED';
-      case 'refunded': return 'REFUNDED';
-      default: return status.toUpperCase();
+      case 'pending':
+        return 'PENDING';
+      case 'preparing':
+        return 'PREPARING';
+      case 'prepared':
+        return 'PREPARED';
+      case 'served':
+        return 'SERVED';
+      case 'paid':
+        return 'PAID';
+      case 'collected':
+        return 'COLLECTED';
+      case 'needs_rider_assignment':
+        return 'NEEDS RIDER';
+      case 'rider_assigned':
+        return 'RIDER ASSIGNED';
+      case 'pickedup':
+        return 'PICKED UP';
+      case 'pickedUp':
+        return 'PICKED UP';
+      case 'delivered':
+        return 'DELIVERED';
+      case 'cancelled':
+        return 'CANCELLED';
+      case 'refunded':
+        return 'REFUNDED';
+      default:
+        return status.toUpperCase();
     }
   }
 
   // --- PAYMENT METHOD HELPERS ---
-  
+
   /// Check if payment method is cash-based (requires collection)
   static bool isCashPayment(String? paymentMethod) {
-    if (paymentMethod == null || paymentMethod.isEmpty) return true; // Default to cash
+    if (paymentMethod == null || paymentMethod.isEmpty)
+      return true; // Default to cash
     final p = paymentMethod.toLowerCase();
     return p == 'cash' || p == 'cod' || p == 'cash_on_delivery';
   }
-  
+
   /// Check if payment method is prepaid (already collected)
   static bool isPrepaidPayment(String? paymentMethod) {
     if (paymentMethod == null || paymentMethod.isEmpty) return false;
     final p = paymentMethod.toLowerCase();
-    return p == 'online' || p == 'card' || p == 'prepaid' || 
-           p == 'apple_pay' || p == 'google_pay' || p == 'wallet';
+    return p == 'online' ||
+        p == 'card' ||
+        p == 'prepaid' ||
+        p == 'apple_pay' ||
+        p == 'google_pay' ||
+        p == 'wallet';
   }
-  
+
   /// Get display text for payment method
   static String getPaymentDisplayText(String? paymentMethod) {
     if (paymentMethod == null || paymentMethod.isEmpty) return 'CASH';
@@ -264,23 +294,24 @@ extension StringExtension on String {
 class OrderNumberHelper {
   /// Loading indicator text shown while order number is being generated
   static const String loadingText = 'Generating...';
-  
+
   /// Get display order number from order data
   /// Returns the dailyOrderNumber if available, otherwise shows loading
-  /// 
+  ///
   /// The Cloud Function generates formatted order numbers like "ZKD-260107-001"
   /// If the number hasn't been assigned yet, we show "Generating..." instead
   /// of a misleading fallback like the document ID
-  static String getDisplayNumber(Map<String, dynamic>? data, {String? orderId}) {
+  static String getDisplayNumber(Map<String, dynamic>? data,
+      {String? orderId}) {
     if (data == null) return loadingText;
-    
+
     final dailyOrderNumber = data['dailyOrderNumber'];
-    
+
     // If we have a proper order number, display it
     if (dailyOrderNumber != null && dailyOrderNumber.toString().isNotEmpty) {
       return dailyOrderNumber.toString();
     }
-    
+
     // Check if the order was just created (within last 5 seconds)
     // If so, the Cloud Function is likely still processing
     final timestamp = data['timestamp'];
@@ -289,7 +320,7 @@ class OrderNumberHelper {
         final orderTime = (timestamp as dynamic).toDate() as DateTime;
         final now = DateTime.now();
         final difference = now.difference(orderTime);
-        
+
         // If order is less than 5 seconds old, show loading
         if (difference.inSeconds < 5) {
           return loadingText;
@@ -298,16 +329,16 @@ class OrderNumberHelper {
         // If we can't parse the timestamp, continue to fallback
       }
     }
-    
+
     // If order is older and still no number, show abbreviated order ID
     // (This is the fallback for legacy orders or Cloud Function failures)
     if (orderId != null && orderId.isNotEmpty) {
       return '#${orderId.substring(0, 6).toUpperCase()}';
     }
-    
+
     return loadingText;
   }
-  
+
   /// Check if the order number is still being generated
   static bool isLoading(Map<String, dynamic>? data) {
     if (data == null) return true;

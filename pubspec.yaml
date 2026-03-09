@@ -1,10 +1,10 @@
 name: mdd
 description: "A new Flutter project."
-publish_to: 'none'
+publish_to: "none"
 version: 1.2.1+1
 
 environment:
-  sdk: '>=3.3.0 <4.0.0' # Widened for better compatibility
+  sdk: ">=3.3.0 <4.0.0" # Widened for better compatibility
 
 dependencies:
   flutter:
@@ -23,7 +23,7 @@ dependencies:
   audioplayers: ^5.2.0
   syncfusion_flutter_charts: ^29.1.38
   syncfusion_flutter_datepicker: ^29.1.38
-  url_launcher: ^6.3.0
+  url_launcher: ^6.3.2
   firebase_storage: ^12.4.9
   image_picker: ^1.2.0
   flutter_image_compress: ^2.4.0
@@ -43,14 +43,18 @@ dependencies:
   permission_handler: ^12.0.1
   timezone: ^0.10.1
   firebase_crashlytics: ^4.3.10
-  firebase_app_check: ^0.3.2+7  # Security: Protect against API abuse
-  package_info_plus: ^9.0.0  # Added for dynamic app version
+  firebase_app_check: ^0.3.2+7 # Security: Protect against API abuse
+  package_info_plus: ^9.0.0 # Added for dynamic app version
   excel: ^4.0.6
   universal_html: ^2.3.0
   share_plus: ^12.0.1
   file_saver: ^0.3.1
   open_file: ^3.5.11
-
+  csv: ^6.0.0
+  path_provider: ^2.1.5
+  timeago: ^3.7.1
+  rxdart: ^0.28.0
+  file_picker: ^10.3.10
 
 dev_dependencies:
   flutter_test:
@@ -74,5 +78,9 @@ flutter:
     - assets/admin.jpg
     - assets/notification.mp3
     - assets/placeholder_avatar.png
-    - assets/fonts/NotoSansArabic-Regular.ttf
-    - assets/mitranlogo.jpg  # Added for receipt printing
+    - assets/mitranlogo.jpg # Added for receipt printing
+
+  fonts:
+    - family: NotoSansArabic
+      fonts:
+        - asset: assets/fonts/NotoSansArabic-Regular.ttf

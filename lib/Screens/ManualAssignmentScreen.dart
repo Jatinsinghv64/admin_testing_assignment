@@ -8,6 +8,7 @@ import '../Widgets/CancellationDialog.dart'; // ✅ Added for CancellationReason
 import '../utils/responsive_helper.dart'; // ✅ Responsive Helper
 import '../main.dart'; // Assuming UserScopeService is here
 import '../constants.dart'; // For OrderNumberHelper
+import 'ManualAssignmentScreenLarge.dart';
 
 class ManualAssignmentScreen extends StatefulWidget {
   const ManualAssignmentScreen({super.key});
@@ -134,9 +135,14 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
       // Show all
     } else if (filterBranchIds.isNotEmpty) {
       query = query.where('branchIds', arrayContainsAny: filterBranchIds);
-    } else if (!userScope.isSuperAdmin) {
+    } else if (!userScope.isSuperAdmin && userScope.branchIds.isNotEmpty) {
       // Should be covered above, but safe fallback
-      query = query.where('branchIds', arrayContains: userScope.branchId);
+      query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+    }
+
+    // ✅ RESPONSIVE SWITCH
+    if (ResponsiveHelper.isDesktop(context)) {
+      return const ManualAssignmentScreenLarge();
     }
 
     return Scaffold(
@@ -146,9 +152,8 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
         shadowColor: Colors.deepPurple.withOpacity(0.1),
         backgroundColor: Colors.white,
         centerTitle: !(userScope.branchIds.length > 1), // Center if no selector
-        actions: [
-          if (userScope.branchIds.length > 1)
-            _buildBranchSelector(userScope, branchFilter),
+        actions: const [
+          // Branch selector removed in favor of global BranchFilterService
         ],
         title: const Text(
           'Manual Rider Assignment',
@@ -432,11 +437,8 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
                     icon: const Icon(Icons.delivery_dining, size: 18),
                     label: const Text('Assign Rider'),
                     onPressed: () {
-                      // Fix: Use order's branch ID, not user's current branch
                       String? orderBranchId;
-                      if (data['branchId'] != null) {
-                        orderBranchId = data['branchId'].toString();
-                      } else if (data['branchIds'] is List &&
+                      if (data['branchIds'] is List &&
                           (data['branchIds'] as List).isNotEmpty) {
                         orderBranchId = data['branchIds'][0].toString();
                       }
@@ -444,7 +446,7 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
                       _promptAssignRider(
                         context,
                         orderDoc.id,
-                        orderBranchId ?? userScope.branchId ?? '',
+                        orderBranchId ?? (userScope.branchIds.isNotEmpty ? userScope.branchIds.first : ''),
                       );
                     },
                     style: ElevatedButton.styleFrom(
@@ -494,85 +496,7 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
     );
   }
 
-  // Same branch selector logic
-  Widget _buildBranchSelector(
-      UserScopeService userScope, BranchFilterService branchFilter) {
-    return Container(
-      margin: const EdgeInsets.only(right: 12),
-      child: PopupMenuButton<String>(
-        offset: const Offset(0, 45),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.deepPurple.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.deepPurple.withOpacity(0.3)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.store, size: 18, color: Colors.deepPurple),
-              const SizedBox(width: 6),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 100),
-                child: Text(
-                  branchFilter.selectedBranchId == null
-                      ? 'All Branches'
-                      : branchFilter
-                          .getBranchName(branchFilter.selectedBranchId!),
-                  style: const TextStyle(
-                    color: Colors.deepPurple,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(Icons.arrow_drop_down, color: Colors.deepPurple, size: 20),
-            ],
-          ),
-        ),
-        itemBuilder: (context) => [
-          PopupMenuItem<String>(
-            value: BranchFilterService.allBranchesValue,
-            child: Row(children: [
-              Icon(
-                  branchFilter.selectedBranchId == null
-                      ? Icons.check_circle
-                      : Icons.circle_outlined,
-                  size: 18,
-                  color: branchFilter.selectedBranchId == null
-                      ? Colors.deepPurple
-                      : Colors.grey),
-              const SizedBox(width: 10),
-              const Text('All Branches'),
-            ]),
-          ),
-          const PopupMenuDivider(),
-          ...userScope.branchIds.map((branchId) => PopupMenuItem<String>(
-                value: branchId,
-                child: Row(children: [
-                  Icon(
-                      branchFilter.selectedBranchId == branchId
-                          ? Icons.check_circle
-                          : Icons.circle_outlined,
-                      size: 18,
-                      color: branchFilter.selectedBranchId == branchId
-                          ? Colors.deepPurple
-                          : Colors.grey),
-                  const SizedBox(width: 10),
-                  Flexible(
-                      child: Text(branchFilter.getBranchName(branchId),
-                          overflow: TextOverflow.ellipsis)),
-                ]),
-              )),
-        ],
-        onSelected: (value) => branchFilter.selectBranch(value),
-      ),
-    );
-  }
+
 }
 
 class RiderSelectionDialog extends StatelessWidget {

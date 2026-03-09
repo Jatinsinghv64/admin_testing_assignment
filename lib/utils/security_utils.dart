@@ -519,7 +519,7 @@ class OrderDataValidator {
 
     // Check for unexpected fields (NoSQL injection prevention)
     final allowedFields = {
-      'status', 'timestamp', 'totalAmount', 'items', 'notes', 'branchId',
+      'status', 'timestamp', 'totalAmount', 'items', 'notes',
       'branchIds', 'customerId', 'customerName', 'customerPhone', 'customerEmail',
       'deliveryAddress', 'Order_type', 'orderType', 'paymentMethod', 'paymentStatus',
       'riderId', 'cancellationReason', 'cancelledBy', 'dailyOrderNumber',

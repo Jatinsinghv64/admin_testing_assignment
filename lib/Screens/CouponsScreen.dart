@@ -2,6 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../utils/responsive_helper.dart'; // ✅ Added
+import 'package:provider/provider.dart';
+import '../main.dart';
+import '../Widgets/BranchFilterService.dart';
+import '../Widgets/BranchSelectorDialog.dart';
 
 class CouponManagementScreen extends StatelessWidget {
   const CouponManagementScreen({Key? key}) : super(key: key);
@@ -9,6 +13,18 @@ class CouponManagementScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final couponCollection = FirebaseFirestore.instance.collection('coupons');
+    final userScope = context.watch<UserScopeService>();
+    final branchFilter = context.watch<BranchFilterService>();
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
+    Query query = couponCollection;
+    if (filterBranchIds.isNotEmpty) {
+      if (filterBranchIds.length == 1) {
+        query = query.where('branchIds', arrayContains: filterBranchIds.first);
+      } else {
+        query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+      }
+    }
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -48,9 +64,7 @@ class CouponManagementScreen extends StatelessWidget {
         ],
       ),
       body: StreamBuilder(
-        stream: couponCollection
-            .orderBy('created_at', descending: true)
-            .snapshots(),
+        stream: query.orderBy('created_at', descending: true).snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -94,7 +108,7 @@ class CouponManagementScreen extends StatelessWidget {
                 crossAxisSpacing: 16,
                 mainAxisSpacing:
                     16, // Use mainAxisSpacing for vertical gaps in GridView
-                childAspectRatio: 1.1,
+                childAspectRatio: 0.85,
               ),
               itemCount: docs.length,
               itemBuilder: (context, index) {
@@ -157,8 +171,17 @@ class _CouponCard extends StatelessWidget {
     final minSubtotal = data['min_subtotal'];
     final isActive = data['active'] ?? false;
 
-    final branchIds =
-        data['branchIds'] is List ? List.from(data['branchIds']) : [];
+    // Robust branch parsing
+    List<String> bIds = [];
+    if (data['branchIds'] is List) {
+      bIds = List<String>.from(data['branchIds']);
+    } else if (data['branchids'] is List) {
+      bIds = List<String>.from(data['branchids']);
+    } else if (data['branchId'] is String &&
+        (data['branchId'] as String).isNotEmpty) {
+      bIds = [data['branchId'] as String];
+    }
+    final branchIds = bIds;
     final branchesText =
         branchIds.isNotEmpty ? branchIds.join(', ') : 'All Branches';
 
@@ -607,9 +630,17 @@ class _CouponDialogState extends State<CouponDialog> {
         ? (data['valid_until'] as Timestamp).toDate()
         : DateTime.now().add(const Duration(days: 7));
 
+    // Robust branch parsing
+    List<String> bIds = [];
     if (data['branchIds'] is List) {
-      _selectedBranchIds = List<String>.from(data['branchIds']);
+      bIds = List<String>.from(data['branchIds']);
+    } else if (data['branchids'] is List) {
+      bIds = List<String>.from(data['branchids']);
+    } else if (data['branchId'] is String &&
+        (data['branchId'] as String).isNotEmpty) {
+      bIds = [data['branchId'] as String];
     }
+    _selectedBranchIds = bIds;
 
     _fetchBranches();
   }
@@ -1035,45 +1066,50 @@ class _CouponDialogState extends State<CouponDialog> {
 
   Future<void> _addCoupon() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    
+
     // ✅ VALIDATION: Check date range - valid_from must be before valid_until
     if (_validFrom != null && _validUntil != null) {
       if (_validFrom!.isAfter(_validUntil!)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('❌ "Valid From" date must be before "Valid Until" date'),
+            content:
+                Text('❌ "Valid From" date must be before "Valid Until" date'),
             backgroundColor: Colors.red,
           ),
         );
         return;
       }
     }
-    
+
     setState(() => _loading = true);
     final code = _codeCtrl.text.trim().toUpperCase();
-    
+
     // ✅ VALIDATION: Check if coupon code already exists
     try {
       final existingCoupon = await FirebaseFirestore.instance
           .collection('coupons')
           .doc(code)
           .get();
-      
+
       if (existingCoupon.exists) {
         if (mounted) {
           setState(() => _loading = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('❌ Coupon code "$code" already exists. Please use a different code.'),
+              content: Text(
+                  '❌ Coupon code "$code" already exists. Please use a different code.'),
               backgroundColor: Colors.red,
             ),
           );
         }
         return;
       }
-      
+
       final data = _formData(newCoupon: true);
-      await FirebaseFirestore.instance.collection('coupons').doc(code).set(data);
+      await FirebaseFirestore.instance
+          .collection('coupons')
+          .doc(code)
+          .set(data);
       setState(() => _loading = false);
       if (mounted) {
         Navigator.pop(context);
@@ -1096,20 +1132,21 @@ class _CouponDialogState extends State<CouponDialog> {
 
   Future<void> _editCoupon() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    
+
     // ✅ VALIDATION: Check date range - valid_from must be before valid_until
     if (_validFrom != null && _validUntil != null) {
       if (_validFrom!.isAfter(_validUntil!)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('❌ "Valid From" date must be before "Valid Until" date'),
+            content:
+                Text('❌ "Valid From" date must be before "Valid Until" date'),
             backgroundColor: Colors.red,
           ),
         );
         return;
       }
     }
-    
+
     setState(() => _loading = true);
     try {
       final data = _formData(newCoupon: false);

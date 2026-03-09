@@ -9,6 +9,7 @@ import 'BranchManagement.dart';
 import '../main.dart';
 import '../utils/responsive_helper.dart'; // âœ… Added
 import '../services/image_upload_service.dart';
+import 'MenuManagementScreenLarge.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -42,6 +43,11 @@ class _InventoryScreenState extends State<InventoryScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Responsive Switch
+    if (MediaQuery.of(context).size.width >= 900) {
+      return const MenuManagementScreenLarge();
+    }
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -182,10 +188,10 @@ class _CategoriesTabState extends State<_CategoriesTab> {
     Query query;
     if (userScope.isSuperAdmin) {
       query = db.collection('menu_categories').orderBy('sortOrder');
-    } else if (userScope.branchId != null) {
+    } else if (userScope.branchIds.isNotEmpty) {
       query = db
           .collection('menu_categories')
-          .where('branchIds', arrayContains: userScope.branchId)
+          .where('branchIds', arrayContainsAny: userScope.branchIds)
           .orderBy('sortOrder');
     } else {
       return const Center(child: Text("Error: User scope not loaded."));
@@ -1106,10 +1112,10 @@ class _MenuItemsTabState extends State<_MenuItemsTab> {
     Query query;
     if (userScope.isSuperAdmin) {
       query = db.collection('menu_items').orderBy('sortOrder');
-    } else if (userScope.branchId != null) {
+    } else if (userScope.branchIds.isNotEmpty) {
       query = db
           .collection('menu_items')
-          .where('branchIds', arrayContains: userScope.branchId)
+          .where('branchIds', arrayContainsAny: userScope.branchIds)
           .orderBy('sortOrder');
     } else {
       return const Center(child: Text("Error: User scope not loaded."));
@@ -1254,9 +1260,8 @@ class _MenuItemsTabState extends State<_MenuItemsTab> {
               crossAxisCount: ResponsiveHelper.isDesktop(context) ? 4 : 3,
               crossAxisSpacing: 16,
               mainAxisSpacing:
-                  16, // Use mainAxisSpacing for vertical gaps in GridView
-              childAspectRatio:
-                  0.75, // Adjusted specifically for menu item cards with images
+                  16, // Adjusted specifically for menu item cards with images
+              childAspectRatio: 0.75,
             ),
             itemCount: filteredDocs.length,
             itemBuilder: (context, index) {
@@ -1394,8 +1399,8 @@ class _MenuItemCard extends StatelessWidget {
     final outOfStockBranches =
         List<String>.from(data['outOfStockBranches'] ?? []);
     final userScope = context.read<UserScopeService>();
-    final isOutOfStock = userScope.branchId != null &&
-        outOfStockBranches.contains(userScope.branchId);
+    final isOutOfStock = userScope.branchIds.isNotEmpty &&
+        outOfStockBranches.any((b) => userScope.branchIds.contains(b));
 
     return Container(
       decoration: BoxDecoration(
@@ -1827,9 +1832,8 @@ class _MenuItemCard extends StatelessWidget {
     final outOfStockBranches =
         List<String>.from(data['outOfStockBranches'] ?? []);
     final userScope = context.read<UserScopeService>();
-    final isOutOfStock = userScope.branchId != null &&
-        outOfStockBranches.contains(userScope.branchId);
-
+    final isOutOfStock = userScope.branchIds.isNotEmpty &&
+        outOfStockBranches.any((b) => userScope.branchIds.contains(b));
     showDialog(
       context: context,
       builder: (dialogContext) => Dialog(
@@ -2472,7 +2476,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
       }
     } else {
       // ✅ CRITICAL FIX: Safe null handling for branchId
-      final branchId = userScope.branchId;
+      final branchId = userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null;
       if (branchId == null) {
         if (!mounted) return;
         _showError('No branch assigned. Please contact administrator.');
@@ -2805,7 +2809,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                                     ),
                                   ),
                                   Text(
-                                    userScope.branchId ?? 'Not assigned',
+                                    userScope.branchIds.isNotEmpty ? userScope.branchIds.first : 'Not assigned',
                                     style: TextStyle(
                                       color: Colors.blue[600],
                                       fontSize: 14,
@@ -2939,8 +2943,30 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
   late List<String> _selectedBranchIds;
   bool _isLoading = false;
 
+  // Recipe link state
+  String? _linkedRecipeId;
+  String? _linkedRecipeName;
+  int? _linkedPrepTimeMinutes;
+  List<String> _linkedAllergens = [];
+  double _foodCostPct = 0.0;
+  List<Map<String, dynamic>> _allRecipes = [];
+  bool _loadingRecipes = true;
+
   // Preparation time options in 5-minute intervals
-  static const List<int> _prepTimeOptions = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
+  static const List<int> _prepTimeOptions = [
+    5,
+    10,
+    15,
+    20,
+    25,
+    30,
+    35,
+    40,
+    45,
+    50,
+    55,
+    60
+  ];
 
   final List<Map<String, dynamic>> _variants = [];
   final Map<String, bool> _tags = {
@@ -3005,11 +3031,58 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
     });
 
     final userScope = context.read<UserScopeService>();
-    final currentBranch = userScope.branchId;
+    final currentBranch = userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null;
     final outOfStockBranches =
         List<String>.from(data['outOfStockBranches'] ?? []);
     _isOutOfStock =
         currentBranch != null && outOfStockBranches.contains(currentBranch);
+
+    // Load existing recipe link
+    _linkedRecipeId = data['recipeId'] as String?;
+
+    // Fetch all recipes async for the picker
+    FirebaseFirestore.instance
+        .collection('recipes')
+        .where('isActive', isEqualTo: true)
+        .orderBy('name')
+        .get()
+        .then((snap) {
+      if (!mounted) return;
+      final recipes = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+      setState(() {
+        _allRecipes = recipes;
+        _loadingRecipes = false;
+        // Auto-fill from existing linked recipe
+        if (_linkedRecipeId != null) {
+          _applyRecipeLink(
+              recipes.firstWhere((r) => r['id'] == _linkedRecipeId,
+                  orElse: () => {}),
+              currentPrice: double.tryParse(_priceController.text) ?? 0.0);
+        }
+      });
+    }).catchError((_) {
+      if (mounted) setState(() => _loadingRecipes = false);
+    });
+  }
+
+  void _applyRecipeLink(Map<String, dynamic> recipe,
+      {double currentPrice = 0.0}) {
+    if (recipe.isEmpty) return;
+    final cost = (recipe['totalCost'] as num?)?.toDouble() ?? 0.0;
+    // allergenWarnings is stored on the recipe's ingredients — we use tag hints
+    // from ingredient allergenTags that were baked into the recipe ingredients list
+    final allergens = List<String>.from(recipe['allergenTags'] ?? []);
+    final prepMins = (recipe['prepTimeMinutes'] as num?)?.toInt();
+    setState(() {
+      _linkedRecipeId = recipe['id'] as String?;
+      _linkedRecipeName = recipe['name'] as String?;
+      _linkedPrepTimeMinutes = prepMins;
+      _linkedAllergens = allergens;
+      _foodCostPct =
+          (currentPrice > 0 && cost > 0) ? (cost / currentPrice) * 100 : 0.0;
+      // Auto-fill prep time in the dropdown if available
+      if (prepMins != null) _preparationTime = prepMins.clamp(5, 60);
+    });
   }
 
   @override
@@ -3047,7 +3120,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       }
     } else {
       // ✅ CRITICAL FIX: Safe null handling for branchId
-      final branchId = userScope.branchId;
+      final branchId = userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null;
       if (branchId == null) {
         if (!mounted) return;
         _showError('No branch assigned. Please contact administrator.');
@@ -3094,6 +3167,11 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       'tags': _tags,
       'variants': variantsMap.isNotEmpty ? variantsMap : null,
       'lastUpdated': FieldValue.serverTimestamp(),
+      // Recipe link fields
+      'recipeId': _linkedRecipeId,
+      'prepTimeMinutes': _linkedPrepTimeMinutes,
+      'allergenWarnings': _linkedAllergens,
+      'foodCostPercentage': _foodCostPct > 0 ? _foodCostPct : null,
     };
 
     try {
@@ -3101,13 +3179,13 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
         // âœ… CRITICAL FIX: Atomic Stock Updates
         // If we are editing and have a valid branch context, we add atomic operations
         // to the update map instead of overwriting the whole array.
-        if (userScope.branchId != null) {
+        if (userScope.branchIds.isNotEmpty) {
           if (_isOutOfStock) {
             data['outOfStockBranches'] =
-                FieldValue.arrayUnion([userScope.branchId]);
+                FieldValue.arrayUnion([userScope.branchIds.first]);
           } else {
             data['outOfStockBranches'] =
-                FieldValue.arrayRemove([userScope.branchId]);
+                FieldValue.arrayRemove([userScope.branchIds.first]);
           }
         }
 
@@ -3116,7 +3194,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       } else {
         // For CREATE, we use the list logic because there is no document to race against.
         // If we are creating as a specific branch admin (and marking it OOS immediately):
-        final branchId = userScope.branchId;
+        final branchId = userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null;
         if (_isOutOfStock && branchId != null) {
           data['outOfStockBranches'] = [branchId];
         } else {
@@ -3445,6 +3523,128 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
         value: value,
         onChanged: onChanged,
         activeColor: Colors.deepPurple,
+      ),
+    );
+  }
+
+  Widget _buildRecipeInfoRow(IconData icon, String label, String value,
+      {Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: color ?? Colors.deepPurple.shade400),
+          const SizedBox(width: 6),
+          Text('$label: ',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[700],
+                  fontWeight: FontWeight.w500)),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: color ?? Colors.deepPurple.shade700,
+                  fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showRecipePickerDialog() async {
+    String localSearch = '';
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Text('Link Recipe',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 380,
+            child: Column(
+              children: [
+                TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Search recipes…',
+                    prefixIcon:
+                        Icon(Icons.search, color: Colors.deepPurple.shade300),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade300)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade300)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                            color: Colors.deepPurple, width: 1.5)),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    isDense: true,
+                  ),
+                  onChanged: (v) =>
+                      setLocal(() => localSearch = v.toLowerCase()),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: Builder(builder: (_) {
+                    final filtered = _allRecipes.where((r) {
+                      final name = r['name']?.toString().toLowerCase() ?? '';
+                      return localSearch.isEmpty || name.contains(localSearch);
+                    }).toList();
+                    if (filtered.isEmpty) {
+                      return const Center(
+                          child: Text('No recipes found',
+                              style: TextStyle(color: Colors.grey)));
+                    }
+                    return ListView.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (_, i) {
+                        final recipe = filtered[i];
+                        final isSelected = recipe['id'] == _linkedRecipeId;
+                        return ListTile(
+                          dense: true,
+                          title: Text(recipe['name'] ?? '',
+                              style: TextStyle(
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  color: isSelected
+                                      ? Colors.deepPurple
+                                      : Colors.black87)),
+                          subtitle: Text(
+                            'Cost: QAR ${((recipe['totalCost'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontSize: 11, color: Colors.grey),
+                          ),
+                          trailing: isSelected
+                              ? const Icon(Icons.check_circle,
+                                  color: Colors.deepPurple)
+                              : null,
+                          onTap: () {
+                            _applyRecipeLink(recipe,
+                                currentPrice:
+                                    double.tryParse(_priceController.text) ??
+                                        0.0);
+                            Navigator.pop(ctx);
+                          },
+                        );
+                      },
+                    );
+                  }),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3803,7 +4003,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                                     ),
                                   ),
                                   Text(
-                                    userScope.branchId ?? 'Not assigned',
+                                    userScope.branchIds.isNotEmpty ? userScope.branchIds.first : 'Not assigned',
                                     style: TextStyle(
                                       color: Colors.blue[600],
                                       fontSize: 14,
@@ -3862,9 +4062,12 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                           // Veg/Non-Veg Toggle with visual indicator
                           Container(
                             margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: _isVeg ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                              color: _isVeg
+                                  ? Colors.green.withOpacity(0.1)
+                                  : Colors.red.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
                                 color: _isVeg ? Colors.green : Colors.red,
@@ -3880,7 +4083,8 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                                     height: 20,
                                     decoration: BoxDecoration(
                                       border: Border.all(
-                                        color: _isVeg ? Colors.green : Colors.red,
+                                        color:
+                                            _isVeg ? Colors.green : Colors.red,
                                         width: 2,
                                       ),
                                       borderRadius: BorderRadius.circular(4),
@@ -3890,7 +4094,9 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                                         width: 10,
                                         height: 10,
                                         decoration: BoxDecoration(
-                                          color: _isVeg ? Colors.green : Colors.red,
+                                          color: _isVeg
+                                              ? Colors.green
+                                              : Colors.red,
                                           shape: BoxShape.circle,
                                         ),
                                       ),
@@ -3901,7 +4107,9 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                                     _isVeg ? 'Vegetarian' : 'Non-Vegetarian',
                                     style: TextStyle(
                                       fontWeight: FontWeight.w600,
-                                      color: _isVeg ? Colors.green[700] : Colors.red[700],
+                                      color: _isVeg
+                                          ? Colors.green[700]
+                                          : Colors.red[700],
                                     ),
                                   ),
                                 ],
@@ -3918,25 +4126,20 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                             ),
                           ),
                           _buildToggleRow(
-                              'Healthy Item',
-                              _isHealthy,
-                              Icons.fitness_center,
+                              'Healthy Item', _isHealthy, Icons.fitness_center,
                               (val) {
-                                setState(() {
-                                  _isHealthy = val;
-                                  _tags['Healthy'] = val;
-                                });
-                              }),
-                          _buildToggleRow(
-                              'Spicy Item',
-                              _isSpicy,
-                              Icons.local_fire_department,
-                              (val) {
-                                setState(() {
-                                  _isSpicy = val;
-                                  _tags['Spicy'] = val;
-                                });
-                              }),
+                            setState(() {
+                              _isHealthy = val;
+                              _tags['Healthy'] = val;
+                            });
+                          }),
+                          _buildToggleRow('Spicy Item', _isSpicy,
+                              Icons.local_fire_department, (val) {
+                            setState(() {
+                              _isSpicy = val;
+                              _tags['Spicy'] = val;
+                            });
+                          }),
                           _buildToggleRow(
                               'Popular Item',
                               _isPopular,
@@ -3990,7 +4193,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                                         ),
                                         Text(
                                           _isOutOfStock
-                                              ? 'This item will be hidden from ${userScope.branchId ?? "current branch"}'
+                                              ? 'This item will be hidden from ${userScope.branchIds.isNotEmpty ? userScope.branchIds.first : "current branch"}'
                                               : 'Item is available for order',
                                           style: TextStyle(
                                             fontSize: 12,
@@ -4016,6 +4219,123 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                   ],
                 ),
               ),
+              const SizedBox(height: 16),
+
+              // ── LINKED RECIPE SECTION ─────────────────────────────────
+              _buildSectionHeader(
+                  'Linked Recipe', Icons.restaurant_menu_outlined),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: _loadingRecipes ? null : () => _showRecipePickerDialog(),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _linkedRecipeId != null
+                          ? Colors.deepPurple.shade300
+                          : Colors.grey.shade300,
+                      width: _linkedRecipeId != null ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.book_outlined,
+                        color: _linkedRecipeId != null
+                            ? Colors.deepPurple
+                            : Colors.grey[500],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _loadingRecipes
+                            ? const Text('Loading recipes…',
+                                style:
+                                    TextStyle(color: Colors.grey, fontSize: 14))
+                            : Text(
+                                _linkedRecipeName ??
+                                    'Tap to link a recipe (optional)',
+                                style: TextStyle(
+                                  color: _linkedRecipeId != null
+                                      ? Colors.black87
+                                      : Colors.grey[500],
+                                  fontSize: 14,
+                                  fontWeight: _linkedRecipeId != null
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                      ),
+                      if (_linkedRecipeId != null)
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            _linkedRecipeId = null;
+                            _linkedRecipeName = null;
+                            _linkedPrepTimeMinutes = null;
+                            _linkedAllergens = [];
+                            _foodCostPct = 0.0;
+                          }),
+                          child: Icon(Icons.close,
+                              size: 18, color: Colors.grey[500]),
+                        )
+                      else
+                        Icon(Icons.chevron_right,
+                            size: 20, color: Colors.grey[400]),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Auto-filled info panel
+              if (_linkedRecipeId != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.deepPurple.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.deepPurple.shade100),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_linkedPrepTimeMinutes != null)
+                        _buildRecipeInfoRow(Icons.timer_outlined, 'Prep Time',
+                            '$_linkedPrepTimeMinutes min'),
+                      if (_foodCostPct > 0)
+                        _buildRecipeInfoRow(
+                            Icons.percent_outlined,
+                            'Food Cost %',
+                            '${_foodCostPct.toStringAsFixed(1)}%',
+                            color: _foodCostPct > 35
+                                ? Colors.red.shade700
+                                : Colors.green.shade700),
+                      if (_linkedAllergens.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.warning_amber_outlined,
+                                size: 14, color: Colors.orange.shade700),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Allergens: ${_linkedAllergens.join(', ')}',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.orange.shade800),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               Row(
                 children: [
@@ -4087,7 +4407,7 @@ class _CategoryDropdown extends StatelessWidget {
     } else {
       query = FirebaseFirestore.instance
           .collection('menu_categories')
-          .where('branchIds', arrayContains: userScope.branchId);
+          .where('branchIds', arrayContainsAny: userScope.branchIds);
     }
 
     return StreamBuilder<QuerySnapshot>(

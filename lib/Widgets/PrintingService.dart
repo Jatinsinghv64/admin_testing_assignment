@@ -606,7 +606,7 @@ class PrintingService {
                                           style:
                                               fontBold.copyWith(fontSize: 14)),
                                       pw.Text(
-                                          "QAR ${totalAmount.toStringAsFixed(2)}",
+                                          "${AppConstants.currencySymbol}${totalAmount.toStringAsFixed(2)}",
                                           style:
                                               fontBold.copyWith(fontSize: 14)),
                                     ]),
@@ -662,6 +662,164 @@ class PrintingService {
       if (context.mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text("Print Error: $e")));
+      }
+    }
+  }
+
+  /// Print Kitchen Order Ticket (KOT)
+  /// Simplified ticket: items + quantities only, no prices, larger fonts
+  static Future<void> printKOT(
+      BuildContext context, DocumentSnapshot orderDoc) async {
+    try {
+      await _loadAssets();
+      pw.Font? regularFont = _cachedRegularFont;
+
+      await Printing.layoutPdf(onLayout: (PdfPageFormat format) async {
+        final Map<String, dynamic> order =
+            Map<String, dynamic>.from(orderDoc.data() as Map);
+
+        final List<dynamic> rawItems = (order['items'] ?? []) as List<dynamic>;
+        final items = rawItems.map((e) {
+          final m = Map<String, dynamic>.from(e as Map);
+          return {
+            'name': (m['name'] ?? 'Item').toString(),
+            'qty': int.tryParse(
+                    (m['quantity'] ?? m['qty'] ?? '1').toString()) ??
+                1,
+          };
+        }).toList();
+
+        final DateTime? rawDate =
+            (order['timestamp'] as Timestamp?)?.toDate();
+        final DateTime? orderDate =
+            rawDate != null ? TimeUtils.getRestaurantTime(rawDate) : null;
+        final String formattedTime = orderDate != null
+            ? DateFormat('hh:mm a').format(orderDate)
+            : "N/A";
+
+        final String dailyOrderNumber =
+            order['dailyOrderNumber']?.toString() ??
+                orderDoc.id.substring(0, 6).toUpperCase();
+        final String orderType = (order['Order_type'] ?? 'Unknown')
+            .toString()
+            .toUpperCase()
+            .replaceAll('_', ' ');
+        final String tableNumber =
+            (order['tableNumber'] ?? '').toString();
+        final String specialInstructions =
+            (order['specialInstructions'] ?? '').toString();
+
+        final pdf = pw.Document();
+        final pw.TextStyle fontLarge = pw.TextStyle(
+            font: regularFont,
+            fontSize: 14,
+            fontWeight: pw.FontWeight.bold);
+        final pw.TextStyle fontMed =
+            pw.TextStyle(font: regularFont, fontSize: 12);
+        final pw.TextStyle fontMedBold = pw.TextStyle(
+            font: regularFont,
+            fontSize: 12,
+            fontWeight: pw.FontWeight.bold);
+        final pw.TextStyle fontSmall =
+            pw.TextStyle(font: regularFont, fontSize: 10);
+
+        pdf.addPage(pw.Page(
+            pageFormat: PdfPageFormat.roll80,
+            margin: const pw.EdgeInsets.all(10),
+            build: (pw.Context context) {
+              return pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    // Header
+                    pw.Center(
+                        child: pw.Text('KITCHEN ORDER TICKET',
+                            style:
+                                fontLarge.copyWith(fontSize: 16))),
+                    pw.Center(
+                        child: pw.Text('--- KOT ---',
+                            style: fontMed)),
+                    pw.SizedBox(height: 8),
+                    pw.Divider(thickness: 2),
+                    pw.SizedBox(height: 8),
+
+                    // Order info
+                    pw.Row(
+                        mainAxisAlignment:
+                            pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text('Order #$dailyOrderNumber',
+                              style: fontLarge),
+                          pw.Text(formattedTime, style: fontMed),
+                        ]),
+                    pw.SizedBox(height: 4),
+                    pw.Text('Type: $orderType', style: fontMedBold),
+                    if (tableNumber.isNotEmpty)
+                      pw.Text('Table: $tableNumber',
+                          style: fontMedBold),
+                    pw.SizedBox(height: 8),
+                    pw.Divider(thickness: 1),
+                    pw.SizedBox(height: 8),
+
+                    // Items - large font, no prices
+                    ...items.map((item) {
+                      return pw.Padding(
+                          padding: const pw.EdgeInsets.symmetric(
+                              vertical: 4),
+                          child: pw.Row(
+                              mainAxisAlignment: pw
+                                  .MainAxisAlignment.spaceBetween,
+                              children: [
+                                pw.Expanded(
+                                    child: pw.Text(
+                                        item['name'].toString(),
+                                        style: fontLarge)),
+                                pw.Text('x${item['qty']}',
+                                    style: fontLarge.copyWith(
+                                        fontSize: 16)),
+                              ]));
+                    }),
+
+                    pw.SizedBox(height: 8),
+                    pw.Divider(thickness: 1),
+
+                    // Special Instructions
+                    if (specialInstructions.isNotEmpty) ...[
+                      pw.SizedBox(height: 8),
+                      pw.Container(
+                          padding: const pw.EdgeInsets.all(8),
+                          decoration: pw.BoxDecoration(
+                              border: pw.Border.all(
+                                  color: PdfColors.grey600,
+                                  width: 1),
+                              borderRadius:
+                                  pw.BorderRadius.circular(4)),
+                          child: pw.Column(
+                              crossAxisAlignment:
+                                  pw.CrossAxisAlignment.start,
+                              children: [
+                                pw.Text('SPECIAL INSTRUCTIONS:',
+                                    style: fontMedBold),
+                                pw.SizedBox(height: 4),
+                                pw.Text(specialInstructions,
+                                    style: fontMed),
+                              ])),
+                    ],
+
+                    pw.SizedBox(height: 12),
+                    pw.Center(
+                        child: pw.Text(
+                            'Total Items: ${items.fold<int>(0, (sum, i) => sum + (i['qty'] as int))}',
+                            style: fontSmall)),
+                  ]);
+            }));
+
+        return pdf.save();
+      });
+    } catch (e, st) {
+      debugPrint("Error printing KOT: $e $st");
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("KOT Print Error: $e")));
       }
     }
   }

@@ -88,44 +88,18 @@ class _TableManagementScreenState extends State<TableManagementScreen> {
     // Determine which branches to show based on role
     Stream<QuerySnapshot> branchStream;
 
-    if (userScope.isSuperAdmin) {
-      // SuperAdmins see ALL branches
-      branchStream =
-          FirebaseFirestore.instance.collection('Branch').snapshots();
-    } else {
-      // Branch admins see only their assigned branches
-      final userBranchIds = userScope.branchIds;
-      if (userBranchIds.isEmpty) {
-        return Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-              const SizedBox(height: 16),
-              Text(
-                'No branches assigned',
-                style: TextStyle(
-                  color: Colors.grey[600],
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Contact your administrator for branch access.',
-                style: TextStyle(color: Colors.grey[500], fontSize: 14),
-              ),
-            ],
-          ),
-        );
-      }
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
-      // Query only the branches assigned to this user
+    if (filterBranchIds.isNotEmpty) {
+      // Use filtered branches
       branchStream = FirebaseFirestore.instance
           .collection('Branch')
-          .where(FieldPath.documentId,
-              whereIn: userBranchIds.take(10).toList()) // Firestore limit is 10
+          .where(FieldPath.documentId, whereIn: filterBranchIds.take(10).toList())
           .snapshots();
+    } else {
+      // SuperAdmins see ALL branches if no specific branch is selected
+      branchStream =
+          FirebaseFirestore.instance.collection('Branch').snapshots();
     }
 
     return StreamBuilder<QuerySnapshot>(
@@ -232,34 +206,7 @@ class _TableManagementScreenState extends State<TableManagementScreen> {
           );
         }
 
-        // ✅ RESPONSIVE BRANCH GRID
-        if (ResponsiveHelper.isTablet(context) ||
-            ResponsiveHelper.isDesktop(context)) {
-          return GridView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: ResponsiveHelper.isDesktop(context) ? 3 : 2,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: 1.5,
-            ),
-            itemCount: branches.length,
-            itemBuilder: (context, index) {
-              final branchDoc = branches[index];
-              final branchData = branchDoc.data() as Map<String, dynamic>;
-              final name = branchData['name'] ?? 'Unnamed Branch';
-              final Map<String, dynamic> tables = Map<String, dynamic>.from(
-                  branchData['Tables'] as Map<String, dynamic>? ?? {});
-
-              return _BranchTableCard(
-                branchId: branchDoc.id,
-                branchName: name,
-                tables: tables,
-              );
-            },
-          );
-        }
-
+        // Use ListView for all screen sizes to allow ExpansionTile to grow
         return ListView.builder(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           itemCount: branches.length,
@@ -416,11 +363,10 @@ class _BranchTableCard extends StatelessWidget {
                         shrinkWrap: true,
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount:
-                              ResponsiveHelper.isDesktop(context) ? 3 : 2,
+                              ResponsiveHelper.isDesktop(context) ? 2 : 2,
                           crossAxisSpacing: 16,
                           mainAxisSpacing: 16,
-                          // ✅ Adjusted aspect ratio to 1.5 to prevent content squishing
-                          childAspectRatio: 1.5,
+                          childAspectRatio: 2.2,
                         ),
                         itemCount: tables.length,
                         itemBuilder: (context, index) {
@@ -429,7 +375,7 @@ class _BranchTableCard extends StatelessWidget {
                           final Map<String, dynamic> tableData =
                               Map<String, dynamic>.from(
                                   entry.value as Map<String, dynamic>);
-                          return _TableListItem(
+                          return _TableCardLarge(
                             branchId: branchId,
                             tableId: tableId,
                             tableData: tableData,
@@ -514,7 +460,7 @@ class _BranchTableCard extends StatelessWidget {
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             child: Container(
-              width: MediaQuery.of(context).size.width * 0.9,
+              constraints: const BoxConstraints(maxWidth: 600),
               padding: const EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1063,7 +1009,7 @@ class _TableListItem extends StatelessWidget {
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             child: Container(
-              width: MediaQuery.of(context).size.width * 0.9,
+              constraints: const BoxConstraints(maxWidth: 600),
               padding: const EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1323,6 +1269,173 @@ class _TableListItem extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _TableCardLarge extends StatelessWidget {
+  final String branchId;
+  final String tableId;
+  final Map<String, dynamic> tableData;
+  final Map<String, dynamic> allTables;
+
+  const _TableCardLarge({
+    required this.branchId,
+    required this.tableId,
+    required this.tableData,
+    required this.allTables,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final seats = tableData['seats'] ?? 0;
+    final status = (tableData['status'] ?? 'available').toString();
+
+    Color statusColor;
+    Color statusBgColor;
+    IconData statusIcon;
+
+    switch (status) {
+      case 'available':
+        statusColor = Colors.green;
+        statusBgColor = Colors.green.withOpacity(0.1);
+        statusIcon = Icons.check_circle_rounded;
+        break;
+      case 'occupied':
+        statusColor = Colors.orange;
+        statusBgColor = Colors.orange.withOpacity(0.1);
+        statusIcon = Icons.people_rounded;
+        break;
+      case 'reserved':
+        statusColor = Colors.blue;
+        statusBgColor = Colors.blue.withOpacity(0.1);
+        statusIcon = Icons.bookmark_rounded;
+        break;
+      case 'ordered':
+        statusColor = Colors.purple;
+        statusBgColor = Colors.purple.withOpacity(0.1);
+        statusIcon = Icons.restaurant_menu_rounded;
+        break;
+      default:
+        statusColor = Colors.grey;
+        statusBgColor = Colors.grey.withOpacity(0.1);
+        statusIcon = Icons.help_rounded;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[200]!),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Status Indicator (Left Bar)
+          Container(
+            width: 4,
+            height: 40,
+            decoration: BoxDecoration(
+              color: statusColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // Main Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'Table $tableId',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(Icons.chair_rounded,
+                        size: 14, color: Colors.grey[600]),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$seats Seats',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: statusBgColor,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        status.toUpperCase(),
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Actions
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.edit_rounded,
+                    color: Colors.blue, size: 20),
+                onPressed: () => _TableListItem(
+                        branchId: branchId,
+                        tableId: tableId,
+                        tableData: tableData,
+                        allTables: allTables)
+                    ._showEditTableDialog(context),
+                tooltip: 'Edit',
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(8),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_rounded,
+                    color: Colors.red, size: 20),
+                onPressed: () => _TableListItem(
+                        branchId: branchId,
+                        tableId: tableId,
+                        tableData: tableData,
+                        allTables: allTables)
+                    ._confirmDelete(context),
+                tooltip: 'Delete',
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(8),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

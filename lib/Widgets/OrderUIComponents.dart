@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import '../constants.dart';
 
 /// Centralized status color and display logic
 class StatusUtils {
@@ -50,6 +51,14 @@ class StatusUtils {
   /// Get display text for a status
   static String getDisplayText(String status, {String? orderType}) {
     final statusLower = status.toLowerCase();
+    final normalizedType = AppConstants.normalizeOrderType(orderType);
+
+    // ✅ New Requirement: Show "ON-GOING" for active dine-in and takeaway orders
+    if ((normalizedType == AppConstants.orderTypeDineIn ||
+            normalizedType == AppConstants.orderTypeTakeaway) &&
+        !AppConstants.isTerminalStatus(statusLower)) {
+      return 'ON-GOING';
+    }
 
     switch (statusLower) {
       case 'pending':
@@ -468,10 +477,6 @@ class OrderDataHelper {
 
   /// Get branch ID with multiple fallback strategies
   String? getBranchId() {
-    // Try direct branchId
-    final branchId = data['branchId']?.toString();
-    if (branchId != null && branchId.isNotEmpty) return branchId;
-
     // Try branchIds array
     final branchIds = data['branchIds'];
     if (branchIds is List && branchIds.isNotEmpty) {

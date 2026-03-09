@@ -487,12 +487,12 @@ class _BranchManagementScreenState extends State<BranchManagementScreen> {
                           ResponsiveHelper.isDesktop(context) ? 3 : 2,
                       crossAxisSpacing: 16,
                       mainAxisSpacing: 16,
-                      childAspectRatio: 1.3,
+                      childAspectRatio: 0.9, // Premium large card ratio
                     ),
                     itemCount: filteredDocs.length,
                     itemBuilder: (context, index) {
                       final doc = filteredDocs[index];
-                      return _BranchCard(
+                      return _BranchCardLarge(
                         doc: doc,
                         onEdit: () {
                           final data = doc.data() as Map<String, dynamic>;
@@ -1017,8 +1017,9 @@ class _BranchCard extends StatelessWidget {
             ),
           ],
         ),
-        content: SizedBox(
-          width: double.maxFinite,
+        content: Container(
+          width: 600,
+          constraints: const BoxConstraints(maxWidth: 600),
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1607,584 +1608,575 @@ class _BranchDialogState extends State<BranchDialog> {
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.95,
-            maxWidth: MediaQuery.of(context).size.width * 0.95),
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(isEdit ? 'Edit Branch' : 'Add New Branch',
-                      style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.deepPurple)),
-                  IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(context)),
-                ],
-              ),
-              const Divider(),
-              const SizedBox(height: 10),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Basic Information Card
-                        Card(
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15)),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Basic Information',
-                                    style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.deepPurple)),
-                                const SizedBox(height: 12),
-                                TextFormField(
-                                  controller: _nameCtrl,
-                                  decoration: InputDecoration(
-                                    labelText: 'Branch Name *',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(
-                                        Icons.business_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
-                                  validator: (v) => v?.isEmpty ?? true
-                                      ? 'Branch name is required'
-                                      : null,
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        constraints: const BoxConstraints(maxWidth: 600),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(isEdit ? 'Edit Branch' : 'Add New Branch',
+                    style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.deepPurple)),
+                IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context)),
+              ],
+            ),
+            const Divider(),
+            const SizedBox(height: 10),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Basic Information Card
+                      Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Basic Information',
+                                  style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.deepPurple)),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                controller: _nameCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'Branch Name *',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(
+                                      Icons.business_outlined,
+                                      color: Colors.deepPurple),
                                 ),
-                                const SizedBox(height: 16),
-                                TextFormField(
-                                  controller: _emailCtrl,
-                                  decoration: InputDecoration(
-                                    labelText: 'Email',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(Icons.email_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
-                                  keyboardType: TextInputType.emailAddress,
+                                validator: (v) => v?.isEmpty ?? true
+                                    ? 'Branch name is required'
+                                    : null,
+                              ),
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller: _emailCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'Email',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(Icons.email_outlined,
+                                      color: Colors.deepPurple),
                                 ),
-                                const SizedBox(height: 16),
-                                TextFormField(
-                                  controller: _phoneCtrl,
-                                  decoration: InputDecoration(
-                                    labelText: 'Phone',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(Icons.phone_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
-                                  keyboardType: TextInputType.phone,
+                                keyboardType: TextInputType.emailAddress,
+                              ),
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller: _phoneCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'Phone',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(Icons.phone_outlined,
+                                      color: Colors.deepPurple),
                                 ),
-                              ],
-                            ),
+                                keyboardType: TextInputType.phone,
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        // Business Details Card
-                        Card(
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15)),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Business Details',
-                                    style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.deepPurple)),
-                                const SizedBox(height: 12),
-                                TextFormField(
-                                  controller: _estimatedTimeCtrl,
-                                  decoration: InputDecoration(
-                                    labelText: 'Estimated Time (minutes)',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(Icons.timer_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
+                      ),
+                      const SizedBox(height: 16),
+                      // Business Details Card
+                      Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Business Details',
+                                  style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.deepPurple)),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                controller: _estimatedTimeCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'Estimated Time (minutes)',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(Icons.timer_outlined,
+                                      color: Colors.deepPurple),
                                 ),
-                                const SizedBox(height: 16),
-                                TextFormField(
-                                  controller: _deliveryFeeCtrl,
-                                  decoration: InputDecoration(
-                                    labelText: 'Delivery Fee',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(Icons.attach_money,
-                                        color: Colors.deepPurple),
-                                  ),
-                                  keyboardType: TextInputType.number,
+                              ),
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller: _deliveryFeeCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'Delivery Fee',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(Icons.attach_money,
+                                      color: Colors.deepPurple),
                                 ),
-                                const SizedBox(height: 16),
-                                // NEW: Free Delivery Range Field
-                                TextFormField(
-                                  controller: _freeDeliveryRangeCtrl,
-                                  decoration: InputDecoration(
-                                    labelText: 'Free Delivery Range (km)',
-                                    hintText: 'e.g., 10',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(
-                                        Icons.local_shipping_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  validator: (value) {
-                                    if (value != null && value.isNotEmpty) {
-                                      final numValue = double.tryParse(value);
-                                      if (numValue == null || numValue < 0) {
-                                        return 'Please enter a valid positive number';
-                                      }
+                                keyboardType: TextInputType.number,
+                              ),
+                              const SizedBox(height: 16),
+                              // NEW: Free Delivery Range Field
+                              TextFormField(
+                                controller: _freeDeliveryRangeCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'Free Delivery Range (km)',
+                                  hintText: 'e.g., 10',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(
+                                      Icons.local_shipping_outlined,
+                                      color: Colors.deepPurple),
+                                ),
+                                keyboardType: TextInputType.number,
+                                validator: (value) {
+                                  if (value != null && value.isNotEmpty) {
+                                    final numValue = double.tryParse(value);
+                                    if (numValue == null || numValue < 0) {
+                                      return 'Please enter a valid positive number';
                                     }
-                                    return null;
-                                  },
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 16),
+                              // NEW: No Delivery Range Field
+                              TextFormField(
+                                controller: _noDeliveryRangeCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'No Delivery Range (km)',
+                                  hintText: 'e.g., 15',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(
+                                      Icons.do_not_disturb_outlined,
+                                      color: Colors.deepPurple),
                                 ),
-                                const SizedBox(height: 16),
-                                // NEW: No Delivery Range Field
-                                TextFormField(
-                                  controller: _noDeliveryRangeCtrl,
-                                  decoration: InputDecoration(
-                                    labelText: 'No Delivery Range (km)',
-                                    hintText: 'e.g., 15',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(
-                                        Icons.do_not_disturb_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  validator: (value) {
-                                    if (value != null && value.isNotEmpty) {
-                                      final numValue = double.tryParse(value);
-                                      if (numValue == null || numValue < 0) {
-                                        return 'Please enter a valid positive number';
-                                      }
-                                      // Validate that noDeliveryRange is greater than freeDeliveryRange
-                                      final freeRange = double.tryParse(
-                                              _freeDeliveryRangeCtrl.text) ??
-                                          0;
-                                      if (numValue <= freeRange) {
-                                        return 'No delivery range must be greater than free delivery range';
-                                      }
+                                keyboardType: TextInputType.number,
+                                validator: (value) {
+                                  if (value != null && value.isNotEmpty) {
+                                    final numValue = double.tryParse(value);
+                                    if (numValue == null || numValue < 0) {
+                                      return 'Please enter a valid positive number';
                                     }
-                                    return null;
-                                  },
+                                    // Validate that noDeliveryRange is greater than freeDeliveryRange
+                                    final freeRange = double.tryParse(
+                                            _freeDeliveryRangeCtrl.text) ??
+                                        0;
+                                    if (numValue <= freeRange) {
+                                      return 'No delivery range must be greater than free delivery range';
+                                    }
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller: _logoUrlCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'Logo URL',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(Icons.image_outlined,
+                                      color: Colors.deepPurple),
                                 ),
-                                const SizedBox(height: 16),
-                                TextFormField(
-                                  controller: _logoUrlCtrl,
-                                  decoration: InputDecoration(
-                                    labelText: 'Logo URL',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(Icons.image_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
-                                ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        // Address Card with Map
-                        Card(
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15)),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Address Information',
-                                    style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.deepPurple)),
-                                const SizedBox(height: 12),
-                                TextFormField(
-                                  controller: _cityCtrl,
-                                  decoration: InputDecoration(
-                                    labelText: 'City (English)',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(
-                                        Icons.location_city_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
+                      ),
+                      const SizedBox(height: 16),
+                      // Address Card with Map
+                      Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Address Information',
+                                  style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.deepPurple)),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                controller: _cityCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'City (English)',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(
+                                      Icons.location_city_outlined,
+                                      color: Colors.deepPurple),
                                 ),
-                                const SizedBox(height: 16),
-                                TextFormField(
-                                  controller:
-                                      _cityArCtrl, // <-- ADDED ARABIC CITY FIELD
-                                  textDirection: TextDirection.rtl,
-                                  textAlign: TextAlign.right,
-                                  decoration: InputDecoration(
-                                    labelText: 'City (Arabic)',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(
-                                        Icons.location_city_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
+                              ),
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller:
+                                    _cityArCtrl, // <-- ADDED ARABIC CITY FIELD
+                                textDirection: TextDirection.rtl,
+                                textAlign: TextAlign.right,
+                                decoration: InputDecoration(
+                                  labelText: 'City (Arabic)',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(
+                                      Icons.location_city_outlined,
+                                      color: Colors.deepPurple),
                                 ),
-                                const SizedBox(height: 16),
-                                TextFormField(
-                                  controller: _streetCtrl,
-                                  decoration: InputDecoration(
-                                    labelText: 'Street (English)',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(
-                                        Icons.location_on_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
+                              ),
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller: _streetCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'Street (English)',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(
+                                      Icons.location_on_outlined,
+                                      color: Colors.deepPurple),
                                 ),
-                                const SizedBox(height: 16),
-                                TextFormField(
-                                  controller:
-                                      _streetArCtrl, // <-- ADDED ARABIC STREET FIELD
-                                  textDirection: TextDirection.rtl,
-                                  textAlign: TextAlign.right,
-                                  decoration: InputDecoration(
-                                    labelText: 'Street (Arabic)',
-                                    border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12.0)),
-                                    prefixIcon: const Icon(
-                                        Icons.location_on_outlined,
-                                        color: Colors.deepPurple),
-                                  ),
+                              ),
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller:
+                                    _streetArCtrl, // <-- ADDED ARABIC STREET FIELD
+                                textDirection: TextDirection.rtl,
+                                textAlign: TextAlign.right,
+                                decoration: InputDecoration(
+                                  labelText: 'Street (Arabic)',
+                                  border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12.0)),
+                                  prefixIcon: const Icon(
+                                      Icons.location_on_outlined,
+                                      color: Colors.deepPurple),
                                 ),
-                                const SizedBox(height: 16),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('Location on Map',
-                                        style: TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.deepPurple)),
-                                    const SizedBox(height: 8),
-                                    TextFormField(
-                                      controller: searchController,
-                                      decoration: InputDecoration(
-                                        labelText: 'Search for a location',
-                                        prefixIcon: const Icon(Icons.search,
-                                            color: Colors.deepPurple),
-                                        border: OutlineInputBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12.0)),
-                                      ),
-                                      onFieldSubmitted: (value) {
-                                        forwardGeocode(value);
-                                      },
+                              ),
+                              const SizedBox(height: 16),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Location on Map',
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.deepPurple)),
+                                  const SizedBox(height: 8),
+                                  TextFormField(
+                                    controller: searchController,
+                                    decoration: InputDecoration(
+                                      labelText: 'Search for a location',
+                                      prefixIcon: const Icon(Icons.search,
+                                          color: Colors.deepPurple),
+                                      border: OutlineInputBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(12.0)),
                                     ),
-                                    const SizedBox(height: 12),
-                                    SizedBox(
-                                      height: 250,
-                                      child: isMapLoading
-                                          ? Center(
-                                              child: CircularProgressIndicator(
-                                                  color: Colors.deepPurple))
-                                          : ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(12.0),
-                                              child: FlutterMap(
-                                                mapController: mapController,
-                                                options: MapOptions(
-                                                  center: initialCenter ??
-                                                      LatLng(0, 0),
-                                                  zoom: 15.0,
-                                                  onTap: (tapPosition, point) {
-                                                    setState(() {
-                                                      selectedGeoPoint =
-                                                          GeoPoint(
-                                                              point.latitude,
-                                                              point.longitude);
-                                                      _latCtrl.text = point
-                                                          .latitude
-                                                          .toString();
-                                                      _lngCtrl.text = point
-                                                          .longitude
-                                                          .toString();
-
-                                                      // Clear Arabic fields on map interaction, as reverse geocoding only provides English.
-                                                      _cityArCtrl.clear();
-                                                      _streetArCtrl.clear();
-                                                    });
-                                                    reverseGeocode(point);
-                                                  },
-                                                ),
-                                                children: [
-                                                  TileLayer(
-                                                    urlTemplate:
-                                                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                                    userAgentPackageName:
-                                                        'com.example.mdd',
-                                                  ),
-                                                  if (selectedGeoPoint != null)
-                                                    MarkerLayer(
-                                                      markers: [
-                                                        Marker(
-                                                          point: LatLng(
-                                                              selectedGeoPoint!
-                                                                  .latitude,
-                                                              selectedGeoPoint!
-                                                                  .longitude),
-                                                          width: 80,
-                                                          height: 80,
-                                                          child: const Icon(
-                                                              Icons
-                                                                  .location_pin,
-                                                              color: Colors.red,
-                                                              size:
-                                                                  40), // Use 'child' instead of 'builder'
-                                                        ),
-                                                      ],
-                                                    ),
-                                                ],
-                                              ),
-                                            ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                        'Tap on the map to select the exact location.',
-                                        style: TextStyle(
-                                            color: Colors.grey.shade600,
-                                            fontSize: 12)),
-                                    const SizedBox(height: 16),
-                                    // Row(
-                                    //   children: [
-                                    //     Expanded(
-                                    //       child: TextFormField(
-                                    //         controller: _latCtrl,
-                                    //         readOnly: true,
-                                    //         decoration: InputDecoration(
-                                    //           labelText: 'Latitude',
-                                    //           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
-                                    //           prefixIcon: const Icon(Icons.my_location_outlined, color: Colors.deepPurple),
-                                    //         ),
-                                    //       ),
-                                    //     ),
-                                    //     const SizedBox(width: 8),
-                                    //     Expanded(
-                                    //       child: TextFormField(
-                                    //         controller: _lngCtrl,
-                                    //         readOnly: true,
-                                    //         decoration: InputDecoration(
-                                    //           labelText: 'Longitude',
-                                    //           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
-                                    //           prefixIcon: const Icon(Icons.place_outlined, color: Colors.deepPurple),
-                                    //         ),
-                                    //       ),
-                                    //     ),
-                                    //   ],
-                                    // ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        // Offers Card
-                        Card(
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15)),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Text('Offer Carousel',
-                                        style: TextStyle(
-                                            fontSize: 18,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.deepPurple)),
-                                    _isUploading
-                                        ? const SizedBox(
-                                            width: 24,
-                                            height: 24,
+                                    onFieldSubmitted: (value) {
+                                      forwardGeocode(value);
+                                    },
+                                  ),
+                                  const SizedBox(height: 12),
+                                  SizedBox(
+                                    height: 250,
+                                    child: isMapLoading
+                                        ? Center(
                                             child: CircularProgressIndicator(
-                                                strokeWidth: 3,
                                                 color: Colors.deepPurple))
-                                        : IconButton(
-                                            icon: const Icon(Icons
-                                                .add_photo_alternate_outlined),
-                                            color: Colors.deepPurple,
-                                            onPressed: pickAndUploadImage,
-                                            tooltip: 'Add Offer Image',
+                                        : ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(12.0),
+                                            child: FlutterMap(
+                                              mapController: mapController,
+                                              options: MapOptions(
+                                                center: initialCenter ??
+                                                    LatLng(0, 0),
+                                                zoom: 15.0,
+                                                onTap: (tapPosition, point) {
+                                                  setState(() {
+                                                    selectedGeoPoint = GeoPoint(
+                                                        point.latitude,
+                                                        point.longitude);
+                                                    _latCtrl.text = point
+                                                        .latitude
+                                                        .toString();
+                                                    _lngCtrl.text = point
+                                                        .longitude
+                                                        .toString();
+
+                                                    // Clear Arabic fields on map interaction, as reverse geocoding only provides English.
+                                                    _cityArCtrl.clear();
+                                                    _streetArCtrl.clear();
+                                                  });
+                                                  reverseGeocode(point);
+                                                },
+                                              ),
+                                              children: [
+                                                TileLayer(
+                                                  urlTemplate:
+                                                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                                  userAgentPackageName:
+                                                      'com.example.mdd',
+                                                ),
+                                                if (selectedGeoPoint != null)
+                                                  MarkerLayer(
+                                                    markers: [
+                                                      Marker(
+                                                        point: LatLng(
+                                                            selectedGeoPoint!
+                                                                .latitude,
+                                                            selectedGeoPoint!
+                                                                .longitude),
+                                                        width: 80,
+                                                        height: 80,
+                                                        child: const Icon(
+                                                            Icons.location_pin,
+                                                            color: Colors.red,
+                                                            size:
+                                                                40), // Use 'child' instead of 'builder'
+                                                      ),
+                                                    ],
+                                                  ),
+                                              ],
+                                            ),
                                           ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                if (_offerCarousel.isEmpty)
-                                  const Center(
-                                    child: Padding(
-                                      padding: EdgeInsets.all(16.0),
-                                      child: Text('No offers added yet.',
-                                          style: TextStyle(color: Colors.grey)),
-                                    ),
-                                  )
-                                else
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: _offerCarousel.map((url) {
-                                      return Chip(
-                                        avatar: CircleAvatar(
-                                            backgroundImage: NetworkImage(url),
-                                            backgroundColor:
-                                                Colors.grey.shade200),
-                                        label: const Text('Image',
-                                            overflow: TextOverflow.ellipsis),
-                                        deleteIcon:
-                                            const Icon(Icons.close, size: 18),
-                                        onDeleted: () async {
-                                          await deleteImageFromStorage(url);
-                                          setState(() {
-                                            _offerCarousel.remove(url);
-                                          });
-                                        },
-                                        backgroundColor:
-                                            Colors.deepPurple.withOpacity(0.1),
-                                        deleteIconColor: Colors.deepPurple,
-                                      );
-                                    }).toList(),
                                   ),
-                              ],
-                            ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                      'Tap on the map to select the exact location.',
+                                      style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                          fontSize: 12)),
+                                  const SizedBox(height: 16),
+                                  // Row(
+                                  //   children: [
+                                  //     Expanded(
+                                  //       child: TextFormField(
+                                  //         controller: _latCtrl,
+                                  //         readOnly: true,
+                                  //         decoration: InputDecoration(
+                                  //           labelText: 'Latitude',
+                                  //           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
+                                  //           prefixIcon: const Icon(Icons.my_location_outlined, color: Colors.deepPurple),
+                                  //         ),
+                                  //       ),
+                                  //     ),
+                                  //     const SizedBox(width: 8),
+                                  //     Expanded(
+                                  //       child: TextFormField(
+                                  //         controller: _lngCtrl,
+                                  //         readOnly: true,
+                                  //         decoration: InputDecoration(
+                                  //           labelText: 'Longitude',
+                                  //           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
+                                  //           prefixIcon: const Icon(Icons.place_outlined, color: Colors.deepPurple),
+                                  //         ),
+                                  //       ),
+                                  //     ),
+                                  //   ],
+                                  // ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        // Status Card
-                        Card(
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15)),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Branch Status',
-                                    style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.deepPurple)),
-                                const SizedBox(height: 12),
-                                SwitchListTile(
-                                  title: const Text('Is Open'),
-                                  subtitle: Text(_isOpen
-                                      ? 'Branch is currently open'
-                                      : 'Branch is currently closed'),
-                                  value: _isOpen,
-                                  onChanged: (value) =>
-                                      setState(() => _isOpen = value),
-                                  activeColor: Colors.green,
-                                  inactiveTrackColor:
-                                      Colors.red.withOpacity(0.5),
-                                  inactiveThumbColor: Colors.red,
-                                  secondary: Icon(
-                                      _isOpen
-                                          ? Icons.radio_button_checked
-                                          : Icons.radio_button_off,
-                                      color:
-                                          _isOpen ? Colors.green : Colors.red),
+                      ),
+                      const SizedBox(height: 16),
+                      // Offers Card
+                      Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('Offer Carousel',
+                                      style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.deepPurple)),
+                                  _isUploading
+                                      ? const SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 3,
+                                              color: Colors.deepPurple))
+                                      : IconButton(
+                                          icon: const Icon(Icons
+                                              .add_photo_alternate_outlined),
+                                          color: Colors.deepPurple,
+                                          onPressed: pickAndUploadImage,
+                                          tooltip: 'Add Offer Image',
+                                        ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              if (_offerCarousel.isEmpty)
+                                const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(16.0),
+                                    child: Text('No offers added yet.',
+                                        style: TextStyle(color: Colors.grey)),
+                                  ),
+                                )
+                              else
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: _offerCarousel.map((url) {
+                                    return Chip(
+                                      avatar: CircleAvatar(
+                                          backgroundImage: NetworkImage(url),
+                                          backgroundColor:
+                                              Colors.grey.shade200),
+                                      label: const Text('Image',
+                                          overflow: TextOverflow.ellipsis),
+                                      deleteIcon:
+                                          const Icon(Icons.close, size: 18),
+                                      onDeleted: () async {
+                                        await deleteImageFromStorage(url);
+                                        setState(() {
+                                          _offerCarousel.remove(url);
+                                        });
+                                      },
+                                      backgroundColor:
+                                          Colors.deepPurple.withOpacity(0.1),
+                                      deleteIconColor: Colors.deepPurple,
+                                    );
+                                  }).toList(),
                                 ),
-                              ],
-                            ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 16),
+                      // Status Card
+                      Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Branch Status',
+                                  style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.deepPurple)),
+                              const SizedBox(height: 12),
+                              SwitchListTile(
+                                title: const Text('Is Open'),
+                                subtitle: Text(_isOpen
+                                    ? 'Branch is currently open'
+                                    : 'Branch is currently closed'),
+                                value: _isOpen,
+                                onChanged: (value) =>
+                                    setState(() => _isOpen = value),
+                                activeColor: Colors.green,
+                                inactiveTrackColor: Colors.red.withOpacity(0.5),
+                                inactiveThumbColor: Colors.red,
+                                secondary: Icon(
+                                    _isOpen
+                                        ? Icons.radio_button_checked
+                                        : Icons.radio_button_off,
+                                    color: _isOpen ? Colors.green : Colors.red),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-              // Action Buttons
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed:
-                          _isLoading ? null : () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                          side: const BorderSide(color: Colors.deepPurple)),
-                      child: const Text('Cancel',
-                          style: TextStyle(
-                              color: Colors.deepPurple,
-                              fontWeight: FontWeight.bold)),
-                    ),
+            ),
+            const SizedBox(height: 20),
+            // Action Buttons
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _isLoading ? null : () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        side: const BorderSide(color: Colors.deepPurple)),
+                    child: const Text('Cancel',
+                        style: TextStyle(
+                            color: Colors.deepPurple,
+                            fontWeight: FontWeight.bold)),
                   ),
-                  const SizedBox(width: 15),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _saveBranch,
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.deepPurple,
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12))),
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white))
-                          : Text(isEdit ? 'Update Branch' : 'Add Branch',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold)),
-                    ),
+                ),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _saveBranch,
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepPurple,
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12))),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : Text(isEdit ? 'Update Branch' : 'Add Branch',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold)),
                   ),
-                ],
-              ),
-            ],
-          ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -2225,7 +2217,9 @@ class _BranchStatusSwitchState extends State<_BranchStatusSwitch> {
 
   Future<void> _onToggle(bool newValue) async {
     // Get schedule status using the centralized helper
-    final scheduleStatus = await RestaurantStatusService.checkBranchScheduleStatus(widget.branchId);
+    final scheduleStatus =
+        await RestaurantStatusService.checkBranchScheduleStatus(
+            widget.branchId);
     final isScheduleOpen = scheduleStatus['isScheduleOpen'] as bool;
 
     // CHECK: If trying to OPEN but schedule says CLOSED
@@ -2368,7 +2362,8 @@ class _BranchStatusSwitchState extends State<_BranchStatusSwitch> {
 
     try {
       // Use the centralized helper to build correct update data
-      final updateData = RestaurantStatusService.buildStatusUpdateData(newValue, isScheduleOpen);
+      final updateData = RestaurantStatusService.buildStatusUpdateData(
+          newValue, isScheduleOpen);
 
       await FirebaseFirestore.instance
           .collection('Branch')
@@ -2380,7 +2375,8 @@ class _BranchStatusSwitchState extends State<_BranchStatusSwitch> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Branch ${newValue ? "opened" : "closed"} successfully!'),
+            content:
+                Text('Branch ${newValue ? "opened" : "closed"} successfully!'),
             backgroundColor: newValue ? Colors.green : Colors.orange,
           ),
         );
@@ -2424,6 +2420,274 @@ class _BranchStatusSwitchState extends State<_BranchStatusSwitch> {
         inactiveThumbColor: Colors.red,
         inactiveTrackColor: Colors.red.withOpacity(0.5),
       ),
+    );
+  }
+}
+
+class _BranchCardLarge extends StatelessWidget {
+  final QueryDocumentSnapshot doc;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _BranchCardLarge({
+    required this.doc,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final data = doc.data() as Map<String, dynamic>;
+    final name = data['name'] ?? 'Unnamed Branch';
+    final address = data['address'] as Map? ?? {};
+    final city = address['city'] ?? '';
+    final street = address['street'] ?? '';
+    final isOpen = data['isOpen'] ?? false;
+    final logoUrl = data['logoUrl'] as String? ?? '';
+    final estimatedTime = (data['estimatedTime'] ?? '').toString();
+    final deliveryFee = (data['deliveryFee'] as num?)?.toDouble() ?? 0.0;
+    final tables = data['Tables'] as Map? ?? {};
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header with Logo and Status overlay
+          Stack(
+            children: [
+              Container(
+                height: 140,
+                decoration: BoxDecoration(
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(20)),
+                  color: Colors.deepPurple.withOpacity(0.05),
+                  image: logoUrl.isNotEmpty
+                      ? DecorationImage(
+                          image: NetworkImage(logoUrl),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                ),
+                child: logoUrl.isEmpty
+                    ? Center(
+                        child: Icon(
+                          Icons.business_rounded,
+                          color: Colors.deepPurple.withOpacity(0.3),
+                          size: 64,
+                        ),
+                      )
+                    : null,
+              ),
+              // Gradient Overlay
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(20)),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withOpacity(0.0),
+                        Colors.black.withOpacity(0.4),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Status Badge
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: isOpen ? Colors.green : Colors.red,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isOpen
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isOpen ? 'OPEN' : 'CLOSED',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          // Content
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            height: 1.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      _BranchStatusSwitch(
+                        branchId: doc.id,
+                        initialIsOpen: isOpen,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  if (city.isNotEmpty)
+                    Row(
+                      children: [
+                        Icon(Icons.location_on,
+                            size: 14, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            city,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey[600],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                  const Spacer(),
+
+                  // Stats Row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildMiniStat(Icons.timer_outlined, '$estimatedTime m',
+                          Colors.blue),
+                      _buildMiniStat(Icons.delivery_dining,
+                          'QAR ${deliveryFee.toInt()}', Colors.orange),
+                      _buildMiniStat(Icons.table_restaurant, '${tables.length}',
+                          Colors.purple),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Actions Footer
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: Colors.grey[100]!)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => _BranchCard(
+                            doc: doc, onEdit: onEdit, onDelete: onDelete)
+                        ._showBranchDetails(context),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.deepPurple,
+                      visualDensity: VisualDensity.compact,
+                      side:
+                          BorderSide(color: Colors.deepPurple.withOpacity(0.3)),
+                    ),
+                    child: const Text('View'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: onEdit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepPurple,
+                      foregroundColor: Colors.white,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Edit'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: onDelete,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.delete_outline,
+                        size: 20, color: Colors.red),
+                  ),
+                )
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMiniStat(IconData icon, String text, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey[800],
+          ),
+        ),
+      ],
     );
   }
 }

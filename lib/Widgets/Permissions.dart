@@ -11,6 +11,13 @@ class Permissions {
   static const String canManageSettings = 'canManageSettings';
   static const String canManageStaff = 'canManageStaff';
   static const String canManageCoupons = 'canManageCoupons';
+  // --- NEW PERMISSIONS (Systems 1-4) ---
+  static const String canManageIngredients = 'canManageIngredients';
+  static const String canManagePurchases = 'canManagePurchases';
+  static const String canManageWaste = 'canManageWaste';
+  // --- POS & Kitchen Display Permissions ---
+  static const String canManagePOS = 'canManagePOS';
+  static const String canViewKitchenDisplay = 'canViewKitchenDisplay';
 }
 
 class AppScreen {
@@ -31,8 +38,11 @@ enum AppTab {
   dashboard,
   inventory,
   orders,
+  purchases,
   riders,
-  manualAssignment, // Added
+  suppliers,
   analytics,
-  settings
+  settings,
+  pos,
+  kitchenDisplay,
 }

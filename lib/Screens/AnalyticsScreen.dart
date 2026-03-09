@@ -10,10 +10,18 @@ import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
 import '../utils/responsive_helper.dart';
 import '../services/AnalyticsPdfService.dart';
+import '../services/inventory/InventoryService.dart';
+import '../services/ingredients/IngredientService.dart';
+import '../services/ingredients/RecipeService.dart';
+import '../services/inventory/PurchaseOrderService.dart';
+import '../services/inventory/WasteService.dart';
 import '../Widgets/BranchFilterService.dart';
 import '../main.dart';
+import '../constants.dart';
 
 class AnalyticsScreen extends StatefulWidget {
+  static bool autoShowExportDialog = false;
+
   const AnalyticsScreen({super.key});
 
   @override
@@ -28,13 +36,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     end: DateTime.now(),
   );
   String _selectedOrderType = 'all';
+  Future<_InventoryAnalyticsData>? _inventoryAnalyticsFuture;
+  Future<_FoodCostAnalyticsData>? _foodCostAnalyticsFuture;
+  Future<_WasteAnalyticsData>? _wasteAnalyticsFuture;
+  Future<_PurchasesAnalyticsData>? _purchasesAnalyticsFuture;
+  String _inventoryAnalyticsKey = '';
+  String _foodCostAnalyticsKey = '';
+  String _wasteAnalyticsKey = '';
+  String _purchasesAnalyticsKey = '';
+  String? _selectedFoodIngredientId;
+  String? _selectedPurchaseIngredientId;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
-    _tabController.addListener(_handleTabSelection);
-    
+
     // Load branch names if needed (for multi-branch users)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final userScope = context.read<UserScopeService>();
@@ -42,50 +59,33 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       if (userScope.branchIds.length > 1 && !branchFilter.isLoaded) {
         branchFilter.loadBranchNames(userScope.branchIds);
       }
+      
+      if (AnalyticsScreen.autoShowExportDialog) {
+        AnalyticsScreen.autoShowExportDialog = false;
+        _showExportDialog(context);
+      }
     });
   }
 
   @override
   void dispose() {
-    _tabController.removeListener(_handleTabSelection);
     _tabController.dispose();
     super.dispose();
   }
 
-  void _handleTabSelection() {
-    if (!_tabController.indexIsChanging) {
-      setState(() {
-        // Switched to a case statement for better readability
-        switch (_tabController.index) {
-          case 0:
-            _selectedOrderType = 'all';
-            break;
-          case 1:
-            _selectedOrderType = 'delivery';
-            break;
-          case 2:
-            _selectedOrderType = 'takeaway';
-            break;
-          case 3: // New case for Pickup
-            _selectedOrderType = 'pickup';
-            break;
-          case 4:
-            _selectedOrderType = 'dine_in';
-            break;
-        }
-      });
-    }
-  }
+  // Removed _handleTabSelection as tabs now control main sections
+  // (Sales, Inventory, Food Cost, Waste, Purchases)
 
   @override
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
     final bool showBranchSelector = userScope.branchIds.length > 1;
-    
+
     // Get effective branch IDs for filtering
-    final effectiveBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
-    
+    final effectiveBranchIds =
+        branchFilter.getFilterBranchIds(userScope.branchIds);
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -102,119 +102,1825 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(kToolbarHeight),
-          child: _buildOrderTypeTabs(),
+          child: _buildMainAnalyticsTabs(),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Branch Selector - Full width at top
-            if (showBranchSelector) ...[
-              _buildBranchSelectorCard(userScope, branchFilter),
-              const SizedBox(height: 16),
-            ],
-            _buildDateRangeSelector(),
-            const SizedBox(height: 16),
-
-            // Export Report Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.file_download_outlined, size: 24),
-                label: const Text(
-                  'Export Report',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  elevation: 4,
-                  shadowColor: Colors.deepPurple.withOpacity(0.4),
-                ),
-                onPressed: () => _showExportDialog(context),
-              ),
-            ),
-            const SizedBox(height: 32),
-
-            // Analytics Overview Cards
-            _buildAnalyticsOverviewCards(effectiveBranchIds),
-            const SizedBox(height: 32),
-
-            // ✅ RESPONSIVE LAYOUT
-            if (ResponsiveHelper.isDesktop(context))
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        buildSectionHeader('Sales Trend', Icons.trending_up),
-                        const SizedBox(height: 16),
-                        _buildSalesChart(effectiveBranchIds),
-                        const SizedBox(height: 32),
-                        buildSectionHeader('Performance', Icons.star_border),
-                        const SizedBox(height: 16),
-                        _buildTopItemsList(effectiveBranchIds),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    flex: 1,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        buildSectionHeader(
-                            'Distribution', Icons.pie_chart_outline),
-                        const SizedBox(height: 16),
-                        _buildOrderTypeDistributionChart(effectiveBranchIds),
-                      ],
-                    ),
-                  ),
-                ],
-              )
-            else
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  buildSectionHeader('Sales Trend', Icons.trending_up),
-                  const SizedBox(height: 16),
-                  _buildSalesChart(effectiveBranchIds),
-                  const SizedBox(height: 32),
-                  buildSectionHeader('Performance', Icons.star_border),
-                  const SizedBox(height: 16),
-                  _buildTopItemsList(effectiveBranchIds),
-                  const SizedBox(height: 32),
-                  buildSectionHeader('Distribution', Icons.pie_chart_outline),
-                  const SizedBox(height: 16),
-                  _buildOrderTypeDistributionChart(effectiveBranchIds),
-                ],
-              ),
-            const SizedBox(height: 20),
-            // NEW: Top Delivery Riders Section
-            buildSectionHeader('Top Delivery Riders', Icons.delivery_dining),
-            const SizedBox(height: 16),
-            _buildTopRidersList(effectiveBranchIds),
-            const SizedBox(height: 32),
-            // NEW: Top Customers Section
-            buildSectionHeader('Top Customers', Icons.people_outline),
-            const SizedBox(height: 16),
-            _buildTopCustomersList(effectiveBranchIds),
-          ],
-        ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // 1. Sales Tab
+          _buildSalesTab(
+              effectiveBranchIds, userScope, branchFilter),
+          // 2. Inventory Tab
+          _buildInventoryTab(
+              effectiveBranchIds, userScope, branchFilter),
+          // 3. Food Cost Tab
+          _buildFoodCostTab(
+              effectiveBranchIds, userScope, branchFilter),
+          // 4. Waste Tab
+          _buildWasteTab(
+              effectiveBranchIds, userScope, branchFilter),
+          // 5. Purchases Tab
+          _buildPurchasesTab(
+              effectiveBranchIds, userScope, branchFilter),
+        ],
       ),
     );
   }
 
-  Widget _buildOrderTypeTabs() {
+  Widget _buildSalesTab(
+      List<String> effectiveBranchIds,
+      UserScopeService userScope,
+      BranchFilterService branchFilter) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildDateRangeSelector(),
+          const SizedBox(height: 16),
+          _buildSalesOrderTypeFilter(),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.file_download_outlined, size: 24),
+              label: const Text(
+                'Export Report',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                elevation: 4,
+                shadowColor: Colors.deepPurple.withOpacity(0.4),
+              ),
+              onPressed: () => _showExportDialog(context),
+            ),
+          ),
+          const SizedBox(height: 32),
+          _buildAnalyticsOverviewCards(effectiveBranchIds),
+          const SizedBox(height: 32),
+          if (ResponsiveHelper.isDesktop(context))
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      buildSectionHeader('Sales Trend', Icons.trending_up),
+                      const SizedBox(height: 16),
+                      _buildSalesChart(effectiveBranchIds),
+                      const SizedBox(height: 32),
+                      buildSectionHeader('Performance', Icons.star_border),
+                      const SizedBox(height: 16),
+                      _buildTopItemsList(effectiveBranchIds),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  flex: 1,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      buildSectionHeader(
+                          'Distribution', Icons.pie_chart_outline),
+                      const SizedBox(height: 16),
+                      _buildOrderTypeDistributionChart(effectiveBranchIds),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                buildSectionHeader('Sales Trend', Icons.trending_up),
+                const SizedBox(height: 16),
+                _buildSalesChart(effectiveBranchIds),
+                const SizedBox(height: 32),
+                buildSectionHeader('Performance', Icons.star_border),
+                const SizedBox(height: 16),
+                _buildTopItemsList(effectiveBranchIds),
+                const SizedBox(height: 32),
+                buildSectionHeader('Distribution', Icons.pie_chart_outline),
+                const SizedBox(height: 16),
+                _buildOrderTypeDistributionChart(effectiveBranchIds),
+              ],
+            ),
+          const SizedBox(height: 20),
+          buildSectionHeader('Top Delivery Riders', Icons.delivery_dining),
+          const SizedBox(height: 16),
+          _buildTopRidersList(effectiveBranchIds),
+          const SizedBox(height: 32),
+          buildSectionHeader('Top Customers', Icons.people_outline),
+          const SizedBox(height: 16),
+          _buildTopCustomersList(effectiveBranchIds),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInventoryTab(
+      List<String> effectiveBranchIds,
+      UserScopeService userScope,
+      BranchFilterService branchFilter) {
+    final future = _getInventoryAnalyticsFuture(effectiveBranchIds);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildDateRangeSelector(),
+          const SizedBox(height: 24),
+          buildSectionHeader('Inventory Analytics', Icons.inventory_2),
+          const SizedBox(height: 16),
+          FutureBuilder<_InventoryAnalyticsData>(
+            future: future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: Colors.deepPurple),
+                );
+              }
+              if (!snapshot.hasData || snapshot.data!.ingredientCount == 0) {
+                return _buildEmptyState(
+                  icon: Icons.inventory_2_outlined,
+                  message:
+                      'No inventory data found for selected period/branch.',
+                );
+              }
+              final data = snapshot.data!;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Total Value',
+                          'QAR ${data.totalValue.toStringAsFixed(2)}',
+                          Icons.account_balance_wallet,
+                          Colors.blue,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Inventory Turnover',
+                          data.turnoverRate != null
+                              ? data.turnoverRate!.toStringAsFixed(2)
+                              : 'N/A',
+                          Icons.sync_alt,
+                          Colors.deepPurple,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (data.turnoverNote.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      data.turnoverNote,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Dead Stock Items',
+                          '${data.deadStockRows.length}',
+                          Icons.remove_circle_outline,
+                          Colors.red,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Stock Accuracy',
+                          data.stockAccuracyPct != null
+                              ? '${data.stockAccuracyPct!.toStringAsFixed(1)}%'
+                              : 'N/A',
+                          Icons.fact_check_outlined,
+                          Colors.teal,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (data.stockAccuracyNote.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      data.stockAccuracyNote,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  buildSectionHeader(
+                    'Carrying Cost Over Time',
+                    Icons.show_chart_rounded,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    height: 300,
+                    child: SfCartesianChart(
+                      primaryXAxis: CategoryAxis(
+                        majorGridLines: const MajorGridLines(width: 0),
+                        axisLine: const AxisLine(width: 0),
+                      ),
+                      primaryYAxis: NumericAxis(
+                        axisLine: const AxisLine(width: 0),
+                        numberFormat:
+                            NumberFormat.compactCurrency(symbol: 'QAR '),
+                        majorGridLines: const MajorGridLines(
+                          width: 0.5,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      tooltipBehavior: TooltipBehavior(enable: true),
+                      series: <CartesianSeries<_TimeValuePoint, String>>[
+                        LineSeries<_TimeValuePoint, String>(
+                          dataSource: data.carryingCostSeries,
+                          xValueMapper: (p, _) => p.label,
+                          yValueMapper: (p, _) => p.value,
+                          color: Colors.deepPurple,
+                          markerSettings: const MarkerSettings(isVisible: true),
+                          width: 3,
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (data.carryingCostNote.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      data.carryingCostNote,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  buildSectionHeader(
+                      'Dead Stock Identification', Icons.inventory),
+                  const SizedBox(height: 12),
+                  if (data.deadStockRows.isEmpty)
+                    _buildEmptyState(
+                      icon: Icons.check_circle_outline,
+                      message: 'No dead stock found in selected period.',
+                    )
+                  else
+                    _buildChartCard(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: data.deadStockRows.length,
+                        separatorBuilder: (_, __) =>
+                            const Divider(height: 1, color: Color(0xFFEFEFEF)),
+                        itemBuilder: (context, index) {
+                          final row = data.deadStockRows[index];
+                          return ListTile(
+                            dense: true,
+                            title: Text(
+                              row.name,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            subtitle: Text(
+                              'Stock: ${row.currentStock.toStringAsFixed(2)} | Value: QAR ${row.currentValue.toStringAsFixed(2)}',
+                            ),
+                            trailing: Text(
+                              row.daysSinceLastUsed != null
+                                  ? '${row.daysSinceLastUsed}d'
+                                  : 'Never used',
+                              style: TextStyle(color: Colors.grey[700]),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFoodCostTab(
+      List<String> effectiveBranchIds,
+      UserScopeService userScope,
+      BranchFilterService branchFilter) {
+    final future = _getFoodCostAnalyticsFuture(effectiveBranchIds);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildDateRangeSelector(),
+          const SizedBox(height: 24),
+          buildSectionHeader('Food Cost Analytics', Icons.attach_money),
+          const SizedBox(height: 16),
+          FutureBuilder<_FoodCostAnalyticsData>(
+            future: future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: Colors.deepPurple),
+                );
+              }
+              if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                return _buildEmptyState(
+                  icon: Icons.attach_money,
+                  message:
+                      'No food cost data found for selected period/branch.',
+                );
+              }
+              final data = snapshot.data!;
+              if (_selectedFoodIngredientId == null &&
+                  data.ingredients.isNotEmpty) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted && _selectedFoodIngredientId == null) {
+                    setState(() =>
+                        _selectedFoodIngredientId = data.ingredients.first.id);
+                  }
+                });
+              }
+
+              final selectedIngredientId = _selectedFoodIngredientId;
+              final ingredientPricePoints = selectedIngredientId == null
+                  ? <_TimeValuePoint>[]
+                  : (data.ingredientPriceHistory[selectedIngredientId] ?? []);
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Avg Food Cost %',
+                          '${data.averageFoodCostPercent.toStringAsFixed(1)}%',
+                          Icons.percent_rounded,
+                          Colors.blue,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Avg Cost Per Serving',
+                          'QAR ${data.averageCostPerServing.toStringAsFixed(2)}',
+                          Icons.trending_down,
+                          Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader('Food Cost % Trend', Icons.show_chart),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    height: 300,
+                    child: SfCartesianChart(
+                      primaryXAxis: CategoryAxis(
+                        majorGridLines: const MajorGridLines(width: 0),
+                        axisLine: const AxisLine(width: 0),
+                      ),
+                      primaryYAxis: NumericAxis(
+                        axisLine: const AxisLine(width: 0),
+                        labelFormat: '{value}%',
+                        majorGridLines: const MajorGridLines(
+                            width: 0.5, color: Colors.grey),
+                        plotBands: <PlotBand>[
+                          PlotBand(
+                            start: 30,
+                            end: 30,
+                            borderColor: Colors.orange,
+                            borderWidth: 2,
+                            dashArray: const <double>[6, 6],
+                            text: '30% Benchmark',
+                            textStyle: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                      tooltipBehavior: TooltipBehavior(enable: true),
+                      series: <CartesianSeries<_TimeValuePoint, String>>[
+                        LineSeries<_TimeValuePoint, String>(
+                          dataSource: data.foodCostTrend,
+                          xValueMapper: (p, _) => p.label,
+                          yValueMapper: (p, _) => p.value,
+                          color: Colors.deepPurple,
+                          width: 3,
+                          markerSettings: const MarkerSettings(isVisible: true),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader(
+                    'Top 10 Most Expensive Ingredients',
+                    Icons.bar_chart_rounded,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    height: 320,
+                    child: SfCartesianChart(
+                      primaryXAxis: CategoryAxis(
+                        majorGridLines: const MajorGridLines(width: 0),
+                        axisLine: const AxisLine(width: 0),
+                        labelRotation: -45,
+                      ),
+                      primaryYAxis: NumericAxis(
+                        axisLine: const AxisLine(width: 0),
+                        majorGridLines: const MajorGridLines(
+                            width: 0.5, color: Colors.grey),
+                        numberFormat:
+                            NumberFormat.compactCurrency(symbol: 'QAR '),
+                      ),
+                      tooltipBehavior: TooltipBehavior(enable: true),
+                      series: <CartesianSeries<_NamedValue, String>>[
+                        BarSeries<_NamedValue, String>(
+                          dataSource: data.topIngredientSpend,
+                          xValueMapper: (p, _) => p.name,
+                          yValueMapper: (p, _) => p.value,
+                          color: Colors.deepPurple.shade400,
+                          dataLabelSettings: const DataLabelSettings(
+                            isVisible: true,
+                            textStyle: TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: data.topIngredientSpend.length,
+                      separatorBuilder: (_, __) =>
+                          const Divider(height: 1, color: Color(0xFFEFEFEF)),
+                      itemBuilder: (context, index) {
+                        final item = data.topIngredientSpend[index];
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.deepPurple.withOpacity(0.1),
+                            child: Text('${index + 1}'),
+                          ),
+                          title: Text(
+                            item.name,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          trailing: Text(
+                            'QAR ${item.value.toStringAsFixed(2)}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader('Cost Per Serving Trend', Icons.timeline),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    height: 300,
+                    child: data.costPerServingTrend.isEmpty
+                        ? _buildEmptyState(
+                            icon: Icons.timeline,
+                            message: 'No cost-per-serving data for this range.',
+                          )
+                        : SfCartesianChart(
+                            primaryXAxis: CategoryAxis(
+                              majorGridLines: const MajorGridLines(width: 0),
+                              axisLine: const AxisLine(width: 0),
+                            ),
+                            primaryYAxis: NumericAxis(
+                              axisLine: const AxisLine(width: 0),
+                              numberFormat:
+                                  NumberFormat.compactCurrency(symbol: 'QAR '),
+                              majorGridLines: const MajorGridLines(
+                                width: 0.5,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            tooltipBehavior: TooltipBehavior(enable: true),
+                            series: <CartesianSeries<_TimeValuePoint, String>>[
+                              LineSeries<_TimeValuePoint, String>(
+                                dataSource: data.costPerServingTrend,
+                                xValueMapper: (p, _) => p.label,
+                                yValueMapper: (p, _) => p.value,
+                                color: Colors.green.shade600,
+                                width: 3,
+                                markerSettings:
+                                    const MarkerSettings(isVisible: true),
+                              ),
+                            ],
+                          ),
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader(
+                    'Ingredient Price Tracking',
+                    Icons.price_change_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    child: Column(
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: selectedIngredientId,
+                          decoration: const InputDecoration(
+                            labelText: 'Select Ingredient',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: data.ingredients
+                              .map(
+                                (i) => DropdownMenuItem<String>(
+                                  value: i.id,
+                                  child: Text(i.name),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) =>
+                              setState(() => _selectedFoodIngredientId = v),
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          height: 280,
+                          child: ingredientPricePoints.isEmpty
+                              ? _buildEmptyState(
+                                  icon: Icons.price_change_outlined,
+                                  message:
+                                      'No receiving price data for selected ingredient.',
+                                )
+                              : SfCartesianChart(
+                                  primaryXAxis: CategoryAxis(
+                                    majorGridLines:
+                                        const MajorGridLines(width: 0),
+                                    axisLine: const AxisLine(width: 0),
+                                  ),
+                                  primaryYAxis: NumericAxis(
+                                    axisLine: const AxisLine(width: 0),
+                                    numberFormat: NumberFormat.currency(
+                                      symbol: 'QAR ',
+                                      decimalDigits: 2,
+                                    ),
+                                  ),
+                                  tooltipBehavior:
+                                      TooltipBehavior(enable: true),
+                                  series: <CartesianSeries<_TimeValuePoint,
+                                      String>>[
+                                    LineSeries<_TimeValuePoint, String>(
+                                      dataSource: ingredientPricePoints,
+                                      xValueMapper: (p, _) => p.label,
+                                      yValueMapper: (p, _) => p.value,
+                                      color: Colors.deepPurple,
+                                      markerSettings:
+                                          const MarkerSettings(isVisible: true),
+                                      width: 3,
+                                    ),
+                                  ],
+                                ),
+                        ),
+                        if (ingredientPricePoints.length == 1)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              'More data points will appear with future purchases.',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWasteTab(
+      List<String> effectiveBranchIds,
+      UserScopeService userScope,
+      BranchFilterService branchFilter) {
+    final future = _getWasteAnalyticsFuture(effectiveBranchIds);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildDateRangeSelector(),
+          const SizedBox(height: 24),
+          buildSectionHeader('Waste Analytics', Icons.delete_outline),
+          const SizedBox(height: 16),
+          FutureBuilder<_WasteAnalyticsData>(
+            future: future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: Colors.deepPurple),
+                );
+              }
+              if (!snapshot.hasData || snapshot.data!.wasteCount == 0) {
+                return _buildEmptyState(
+                  icon: Icons.delete_outline,
+                  message: 'No waste recorded for selected period/branch.',
+                );
+              }
+              final data = snapshot.data!;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Total Waste Cost',
+                          'QAR ${data.totalWasteCost.toStringAsFixed(2)}',
+                          Icons.trending_down,
+                          Colors.red,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Waste as % Food Cost',
+                          '${data.wastePct.toStringAsFixed(1)}%',
+                          data.wastePctDelta > 0
+                              ? Icons.trending_up
+                              : Icons.trending_down,
+                          data.wastePctColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'vs previous period: ${data.wastePctDelta >= 0 ? '+' : ''}${data.wastePctDelta.toStringAsFixed(1)}%',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader('Total Waste Cost Trend', Icons.bar_chart),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    height: 300,
+                    child: SfCartesianChart(
+                      primaryXAxis: CategoryAxis(
+                        majorGridLines: const MajorGridLines(width: 0),
+                        axisLine: const AxisLine(width: 0),
+                      ),
+                      primaryYAxis: NumericAxis(
+                        axisLine: const AxisLine(width: 0),
+                        numberFormat:
+                            NumberFormat.compactCurrency(symbol: 'QAR '),
+                        majorGridLines: const MajorGridLines(
+                            width: 0.5, color: Colors.grey),
+                      ),
+                      tooltipBehavior: TooltipBehavior(enable: true),
+                      series: <CartesianSeries<_TimeValuePoint, String>>[
+                        ColumnSeries<_TimeValuePoint, String>(
+                          dataSource: data.groupedWasteSeries,
+                          xValueMapper: (p, _) => p.label,
+                          yValueMapper: (p, _) => p.value,
+                          color: Colors.red.shade400,
+                          borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(8)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader(
+                    'Waste by Reason Breakdown',
+                    Icons.donut_large_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    child: Column(
+                      children: [
+                        SizedBox(
+                          height: 320,
+                          child: SfCircularChart(
+                            legend: const Legend(
+                              isVisible: false,
+                            ),
+                            tooltipBehavior: TooltipBehavior(enable: true),
+                            series: <CircularSeries<_NamedValue, String>>[
+                              DoughnutSeries<_NamedValue, String>(
+                                dataSource: data.reasonBreakdown,
+                                xValueMapper: (p, _) => p.name,
+                                yValueMapper: (p, _) => p.value,
+                                pointColorMapper: (p, idx) =>
+                                    _reasonColor(p.name),
+                                dataLabelSettings:
+                                    const DataLabelSettings(isVisible: true),
+                                innerRadius: '60%',
+                              ),
+                            ],
+                          ),
+                        ),
+                        ...data.reasonBreakdown.map((reason) {
+                          final pct = data.totalWasteCost > 0
+                              ? (reason.value / data.totalWasteCost) * 100
+                              : 0.0;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: _reasonColor(reason.name),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(reason.name)),
+                                Text(
+                                  'QAR ${reason.value.toStringAsFixed(2)} (${pct.toStringAsFixed(1)}%)',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader('Waste Trend Analysis', Icons.timeline),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    height: 320,
+                    child: SfCartesianChart(
+                      primaryXAxis: CategoryAxis(
+                        majorGridLines: const MajorGridLines(width: 0),
+                        axisLine: const AxisLine(width: 0),
+                      ),
+                      primaryYAxis: NumericAxis(
+                        axisLine: const AxisLine(width: 0),
+                        numberFormat:
+                            NumberFormat.compactCurrency(symbol: 'QAR '),
+                      ),
+                      legend: const Legend(
+                        isVisible: true,
+                        position: LegendPosition.bottom,
+                      ),
+                      tooltipBehavior: TooltipBehavior(enable: true),
+                      series: <CartesianSeries<_TimeValuePoint, String>>[
+                        LineSeries<_TimeValuePoint, String>(
+                          name: 'Daily Waste',
+                          dataSource: data.dailyWasteSeries,
+                          xValueMapper: (p, _) => p.label,
+                          yValueMapper: (p, _) => p.value,
+                          color: Colors.deepOrange.shade200,
+                          width: 2,
+                          markerSettings: const MarkerSettings(isVisible: true),
+                        ),
+                        LineSeries<_TimeValuePoint, String>(
+                          name: '7-day Moving Avg',
+                          dataSource: data.movingAverageSeries,
+                          xValueMapper: (p, _) => p.label,
+                          yValueMapper: (p, _) => p.value,
+                          color: Colors.deepOrange.shade700,
+                          width: 3,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPurchasesTab(
+      List<String> effectiveBranchIds,
+      UserScopeService userScope,
+      BranchFilterService branchFilter) {
+    final future = _getPurchasesAnalyticsFuture(effectiveBranchIds);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildDateRangeSelector(),
+          const SizedBox(height: 24),
+          buildSectionHeader(
+              'Purchase Analytics', Icons.shopping_cart_outlined),
+          const SizedBox(height: 16),
+          FutureBuilder<_PurchasesAnalyticsData>(
+            future: future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: Colors.deepPurple),
+                );
+              }
+              if (!snapshot.hasData || snapshot.data!.poCount == 0) {
+                return _buildEmptyState(
+                  icon: Icons.shopping_cart_outlined,
+                  message:
+                      'No purchase orders found for selected period/branch.',
+                );
+              }
+              final data = snapshot.data!;
+              if (_selectedPurchaseIngredientId == null &&
+                  data.ingredients.isNotEmpty) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted && _selectedPurchaseIngredientId == null) {
+                    setState(
+                      () => _selectedPurchaseIngredientId =
+                          data.ingredients.first.id,
+                    );
+                  }
+                });
+              }
+
+              final selectedIngredientId = _selectedPurchaseIngredientId;
+              final ingredientSupplierCosts = selectedIngredientId == null
+                  ? <_SupplierCostPoint>[]
+                  : (data.ingredientPriceBySupplier[selectedIngredientId] ??
+                      []);
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Total Purchases',
+                          'QAR ${data.totalPurchases.toStringAsFixed(2)}',
+                          Icons.account_balance_wallet,
+                          Colors.blue,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildMetricCard(
+                          'PO Count',
+                          '${data.poCount}',
+                          Icons.receipt,
+                          Colors.purple,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Pending POs',
+                          '${data.pendingCount}',
+                          Icons.pending_actions,
+                          Colors.orange,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Received/Partial',
+                          '${data.receivedOrPartialCount}',
+                          Icons.check_circle_outline,
+                          Colors.teal,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader(
+                    'Total Spend by Supplier',
+                    Icons.bar_chart_rounded,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    height: 320,
+                    child: SfCartesianChart(
+                      primaryXAxis: CategoryAxis(
+                        majorGridLines: const MajorGridLines(width: 0),
+                        axisLine: const AxisLine(width: 0),
+                        labelRotation: -35,
+                      ),
+                      primaryYAxis: NumericAxis(
+                        axisLine: const AxisLine(width: 0),
+                        numberFormat:
+                            NumberFormat.compactCurrency(symbol: 'QAR '),
+                      ),
+                      tooltipBehavior: TooltipBehavior(enable: true),
+                      series: <CartesianSeries<_NamedValue, String>>[
+                        BarSeries<_NamedValue, String>(
+                          dataSource: data.supplierSpend,
+                          xValueMapper: (p, _) => p.name,
+                          yValueMapper: (p, _) => p.value,
+                          color: Colors.deepPurple.shade400,
+                          dataLabelSettings:
+                              const DataLabelSettings(isVisible: true),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader(
+                    'Average Delivery Time by Supplier',
+                    Icons.local_shipping_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    height: 300,
+                    child: data.supplierLeadTimes.isEmpty
+                        ? _buildEmptyState(
+                            icon: Icons.local_shipping_outlined,
+                            message:
+                                'No received purchase orders with delivery dates.',
+                          )
+                        : SfCartesianChart(
+                            primaryXAxis: CategoryAxis(
+                              majorGridLines: const MajorGridLines(width: 0),
+                              axisLine: const AxisLine(width: 0),
+                              labelRotation: -35,
+                            ),
+                            primaryYAxis: NumericAxis(
+                              axisLine: const AxisLine(width: 0),
+                              labelFormat: '{value}d',
+                            ),
+                            tooltipBehavior: TooltipBehavior(enable: true),
+                            series: <CartesianSeries<_SupplierLeadTime,
+                                String>>[
+                              BarSeries<_SupplierLeadTime, String>(
+                                dataSource: data.supplierLeadTimes,
+                                xValueMapper: (p, _) => p.supplierName,
+                                yValueMapper: (p, _) => p.avgDays,
+                                color: Colors.teal.shade400,
+                                dataLabelSettings:
+                                    const DataLabelSettings(isVisible: true),
+                              ),
+                            ],
+                          ),
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader('Order Frequency', Icons.timeline),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    height: 300,
+                    child: SfCartesianChart(
+                      primaryXAxis: CategoryAxis(
+                        majorGridLines: const MajorGridLines(width: 0),
+                        axisLine: const AxisLine(width: 0),
+                      ),
+                      primaryYAxis: NumericAxis(
+                        axisLine: const AxisLine(width: 0),
+                      ),
+                      tooltipBehavior: TooltipBehavior(enable: true),
+                      series: <CartesianSeries<_TimeValuePoint, String>>[
+                        ColumnSeries<_TimeValuePoint, String>(
+                          dataSource: data.orderFrequencySeries,
+                          xValueMapper: (p, _) => p.label,
+                          yValueMapper: (p, _) => p.value,
+                          color: Colors.deepPurple.shade300,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  buildSectionHeader(
+                    'Price Comparison Per Ingredient',
+                    Icons.compare_arrows_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildChartCard(
+                    child: Column(
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: selectedIngredientId,
+                          decoration: const InputDecoration(
+                            labelText: 'Select Ingredient',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: data.ingredients
+                              .map((i) => DropdownMenuItem<String>(
+                                    value: i.id,
+                                    child: Text(i.name),
+                                  ))
+                              .toList(),
+                          onChanged: (v) =>
+                              setState(() => _selectedPurchaseIngredientId = v),
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          height: 280,
+                          child: ingredientSupplierCosts.isEmpty
+                              ? _buildEmptyState(
+                                  icon: Icons.compare_arrows_outlined,
+                                  message:
+                                      'No supplier price data for selected ingredient.',
+                                )
+                              : SfCartesianChart(
+                                  primaryXAxis: CategoryAxis(
+                                    majorGridLines:
+                                        const MajorGridLines(width: 0),
+                                    axisLine: const AxisLine(width: 0),
+                                  ),
+                                  primaryYAxis: NumericAxis(
+                                    axisLine: const AxisLine(width: 0),
+                                    numberFormat: NumberFormat.currency(
+                                      symbol: 'QAR ',
+                                      decimalDigits: 2,
+                                    ),
+                                  ),
+                                  tooltipBehavior:
+                                      TooltipBehavior(enable: true),
+                                  series: <CartesianSeries<_SupplierCostPoint,
+                                      String>>[
+                                    BarSeries<_SupplierCostPoint, String>(
+                                      dataSource: ingredientSupplierCosts,
+                                      xValueMapper: (p, _) => p.supplierName,
+                                      yValueMapper: (p, _) => p.unitCost,
+                                      pointColorMapper: (p, _) => p.isCheapest
+                                          ? Colors.green
+                                          : Colors.deepPurple,
+                                      dataLabelSettings:
+                                          const DataLabelSettings(
+                                        isVisible: true,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                        ),
+                        if (ingredientSupplierCosts.length == 1)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Only one supplier on record',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<_InventoryAnalyticsData> _getInventoryAnalyticsFuture(
+    List<String> branchIds,
+  ) {
+    final key = _analyticsKey(branchIds);
+    if (_inventoryAnalyticsFuture == null || _inventoryAnalyticsKey != key) {
+      _inventoryAnalyticsKey = key;
+      _inventoryAnalyticsFuture = _loadInventoryAnalytics(branchIds);
+    }
+    return _inventoryAnalyticsFuture!;
+  }
+
+  Future<_FoodCostAnalyticsData> _getFoodCostAnalyticsFuture(
+    List<String> branchIds,
+  ) {
+    final key = _analyticsKey(branchIds);
+    if (_foodCostAnalyticsFuture == null || _foodCostAnalyticsKey != key) {
+      _foodCostAnalyticsKey = key;
+      _foodCostAnalyticsFuture = _loadFoodCostAnalytics(branchIds);
+    }
+    return _foodCostAnalyticsFuture!;
+  }
+
+  Future<_WasteAnalyticsData> _getWasteAnalyticsFuture(
+    List<String> branchIds,
+  ) {
+    final key = _analyticsKey(branchIds);
+    if (_wasteAnalyticsFuture == null || _wasteAnalyticsKey != key) {
+      _wasteAnalyticsKey = key;
+      _wasteAnalyticsFuture = _loadWasteAnalytics(branchIds);
+    }
+    return _wasteAnalyticsFuture!;
+  }
+
+  Future<_PurchasesAnalyticsData> _getPurchasesAnalyticsFuture(
+    List<String> branchIds,
+  ) {
+    final key = _analyticsKey(branchIds);
+    if (_purchasesAnalyticsFuture == null || _purchasesAnalyticsKey != key) {
+      _purchasesAnalyticsKey = key;
+      _purchasesAnalyticsFuture = _loadPurchasesAnalytics(branchIds);
+    }
+    return _purchasesAnalyticsFuture!;
+  }
+
+  String _analyticsKey(List<String> branchIds) {
+    final sorted = [...branchIds]..sort();
+    return '${sorted.join(",")}|${_dateRange.start.millisecondsSinceEpoch}|${_dateRange.end.millisecondsSinceEpoch}';
+  }
+
+  Widget _buildChartCard({required Widget child, double? height}) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: height != null ? SizedBox(height: height, child: child) : child,
+      ),
+    );
+  }
+
+  Color _reasonColor(String reason) {
+    switch (reason.toLowerCase()) {
+      case 'expired':
+        return Colors.red.shade400;
+      case 'spilled':
+        return Colors.orange.shade400;
+      case 'damaged':
+        return Colors.deepOrange.shade400;
+      case 'overproduction':
+        return Colors.amber.shade600;
+      case 'returned':
+        return Colors.blue.shade400;
+      case 'quality':
+        return Colors.purple.shade400;
+      case 'contamination':
+        return Colors.brown.shade400;
+      default:
+        return Colors.grey.shade500;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _getOrdersForRange(
+    List<String> branchIds, {
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    if (branchIds.isEmpty) return [];
+    Query<Map<String, dynamic>> q = FirebaseFirestore.instance
+        .collection('Orders')
+        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+        .where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(end));
+
+    if (branchIds.isNotEmpty) {
+      if (branchIds.length == 1) {
+        q = q.where('branchIds', arrayContains: branchIds.first);
+      } else {
+        q = q.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+      }
+    }
+    final snap = await q.orderBy('timestamp', descending: true).get();
+    return snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+  }
+
+  Future<_InventoryAnalyticsData> _loadInventoryAnalytics(
+    List<String> branchIds,
+  ) async {
+    if (branchIds.isEmpty) return _InventoryAnalyticsData.empty();
+    final inventoryService =
+        Provider.of<InventoryService>(context, listen: false);
+
+    final ingredients = await inventoryService.getIngredients(branchIds);
+    final movements = await inventoryService.getStockMovements(
+      branchIds,
+      start: _dateRange.start,
+      end: _dateRange.end,
+    );
+    final allDeductions = await inventoryService.getStockMovements(
+      branchIds,
+      movementType: 'order_deduction',
+    );
+
+    final ingredientById = {for (final i in ingredients) i.id: i};
+    final totalValue = ingredients.fold<double>(
+      0.0,
+      (sum, i) => sum + (i.currentStock * i.costPerUnit),
+    );
+
+    final usedCost = movements.where((m) {
+      return (m['movementType'] ?? '').toString() == 'order_deduction';
+    }).fold<double>(0.0, (sum, m) {
+      final id = (m['ingredientId'] ?? '').toString();
+      final qty = (m['quantity'] as num?)?.toDouble() ?? 0.0;
+      final unitCost = ingredientById[id]?.costPerUnit ?? 0.0;
+      return sum + qty.abs() * unitCost;
+    });
+
+    final turnoverRate =
+        usedCost > 0 && totalValue > 0 ? usedCost / totalValue : null;
+    final turnoverNote = turnoverRate == null
+        ? 'N/A: no order-deduction movements in selected period.'
+        : '';
+
+    final stocktakes = movements.where((m) {
+      return (m['movementType'] ?? '').toString() == 'stocktake';
+    }).toList();
+    double? stockAccuracyPct;
+    String stockAccuracyNote = '';
+    if (stocktakes.isEmpty) {
+      stockAccuracyNote = 'No stocktakes recorded in selected period.';
+    } else {
+      final accurate = stocktakes.where((m) {
+        final before = (m['balanceBefore'] as num?)?.toDouble() ?? 0.0;
+        final after = (m['balanceAfter'] as num?)?.toDouble() ?? 0.0;
+        return (before - after).abs() < 0.0001;
+      }).length;
+      stockAccuracyPct = (accurate / stocktakes.length) * 100;
+    }
+
+    final latestDeduction = <String, DateTime>{};
+    for (final m in allDeductions) {
+      final id = (m['ingredientId'] ?? '').toString();
+      if (id.isEmpty) continue;
+      final dt = (m['createdAt'] as Timestamp?)?.toDate();
+      if (dt == null) continue;
+      final existing = latestDeduction[id];
+      if (existing == null || dt.isAfter(existing)) {
+        latestDeduction[id] = dt;
+      }
+    }
+
+    final usedInRange = movements
+        .where((m) => (m['movementType'] ?? '').toString() == 'order_deduction')
+        .map((m) => (m['ingredientId'] ?? '').toString())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+
+    final deadStockRows = ingredients
+        .where((i) => i.currentStock > 0 && !usedInRange.contains(i.id))
+        .map((i) {
+      final lastUsed = latestDeduction[i.id];
+      final days =
+          lastUsed == null ? null : DateTime.now().difference(lastUsed).inDays;
+      return _DeadStockRow(
+        name: i.name,
+        currentStock: i.currentStock,
+        currentValue: i.currentStock * i.costPerUnit,
+        daysSinceLastUsed: days,
+      );
+    }).toList()
+      ..sort((a, b) => b.currentValue.compareTo(a.currentValue));
+
+    final rangeDays = _dateRange.end.difference(_dateRange.start).inDays + 1;
+    final carryingCostSeries = <_TimeValuePoint>[];
+    final step = rangeDays <= 30 ? 1 : 7;
+    DateTime cursor = DateTime(
+        _dateRange.start.year, _dateRange.start.month, _dateRange.start.day);
+    final endDate =
+        DateTime(_dateRange.end.year, _dateRange.end.month, _dateRange.end.day);
+    while (!cursor.isAfter(endDate)) {
+      carryingCostSeries.add(
+        _TimeValuePoint(
+          date: cursor,
+          label:
+              DateFormat(rangeDays <= 30 ? 'dd MMM' : 'dd MMM').format(cursor),
+          value: totalValue,
+        ),
+      );
+      cursor = cursor.add(Duration(days: step));
+    }
+
+    return _InventoryAnalyticsData(
+      ingredientCount: ingredients.length,
+      totalValue: totalValue,
+      turnoverRate: turnoverRate,
+      turnoverNote: turnoverNote,
+      stockAccuracyPct: stockAccuracyPct,
+      stockAccuracyNote: stockAccuracyNote,
+      deadStockRows: deadStockRows.take(20).toList(),
+      carryingCostSeries: carryingCostSeries,
+      carryingCostNote: 'Historical tracking starts from today.',
+    );
+  }
+
+  Future<_FoodCostAnalyticsData> _loadFoodCostAnalytics(
+    List<String> branchIds,
+  ) async {
+    if (branchIds.isEmpty) return _FoodCostAnalyticsData.empty();
+    final ingredientService =
+        Provider.of<IngredientService>(context, listen: false);
+    final recipeService = Provider.of<RecipeService>(context, listen: false);
+    final purchaseService =
+        Provider.of<PurchaseOrderService>(context, listen: false);
+
+    final ingredients =
+        await ingredientService.streamIngredients(branchIds).first;
+    final orders = await _getOrdersForRange(
+      branchIds,
+      start: _dateRange.start,
+      end: _dateRange.end,
+    );
+    Query<Map<String, dynamic>> menuQuery =
+        FirebaseFirestore.instance.collection('menu_items');
+    if (branchIds.length == 1) {
+      menuQuery = menuQuery.where('branchIds', arrayContains: branchIds.first);
+    } else {
+      menuQuery = menuQuery.where('branchIds',
+          arrayContainsAny: branchIds.take(10).toList());
+    }
+    final menuItemsSnap = await menuQuery.get();
+    final menuById = <String, Map<String, dynamic>>{
+      for (final d in menuItemsSnap.docs) d.id: d.data(),
+    };
+
+    final recipeIds = menuById.values
+        .map((m) => (m['recipeId'] ?? '').toString())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    final recipes = await recipeService.getRecipesByIds(recipeIds);
+    final recipeById = {for (final r in recipes) r.id: r};
+
+    const completedStatuses = {'delivered', 'paid', 'collected', 'served'};
+    final foodCostByDay = <DateTime, double>{};
+    final revenueByDay = <DateTime, double>{};
+    final qtyByDay = <DateTime, int>{};
+
+    for (final order in orders) {
+      final status = (order['status'] ?? '').toString().toLowerCase();
+      if (!completedStatuses.contains(status)) continue;
+      final ts = order['timestamp'] as Timestamp?;
+      if (ts == null) continue;
+      final d = ts.toDate();
+      final day = DateTime(d.year, d.month, d.day);
+      final items = List<Map<String, dynamic>>.from(order['items'] ?? const []);
+      for (final item in items) {
+        final menuItemId =
+            (item['menuItemId'] ?? item['itemId'] ?? '').toString();
+        final qty = (item['quantity'] as num?)?.toInt() ?? 1;
+        final unitPrice = (item['discountedPrice'] as num?)?.toDouble() ??
+            (item['price'] as num?)?.toDouble() ??
+            0.0;
+        final menu = menuById[menuItemId];
+        final recipeId = (menu?['recipeId'] ?? '').toString();
+        if (recipeId.isEmpty || !recipeById.containsKey(recipeId)) continue;
+        final recipeCost = (recipeById[recipeId]!.totalCost) * qty;
+        final revenue = unitPrice * qty;
+        foodCostByDay[day] = (foodCostByDay[day] ?? 0.0) + recipeCost;
+        revenueByDay[day] = (revenueByDay[day] ?? 0.0) + revenue;
+        qtyByDay[day] = (qtyByDay[day] ?? 0) + qty;
+      }
+    }
+
+    final allDays = _allDaysInRange(_dateRange.start, _dateRange.end);
+    final foodCostTrend = <_TimeValuePoint>[];
+    final costPerServingTrend = <_TimeValuePoint>[];
+    double totalCost = 0.0;
+    double totalRevenue = 0.0;
+    int totalItems = 0;
+    for (final day in allDays) {
+      final c = foodCostByDay[day] ?? 0.0;
+      final r = revenueByDay[day] ?? 0.0;
+      final q = qtyByDay[day] ?? 0;
+      totalCost += c;
+      totalRevenue += r;
+      totalItems += q;
+      foodCostTrend.add(
+        _TimeValuePoint(
+          date: day,
+          label: DateFormat('dd MMM').format(day),
+          value: r > 0 ? (c / r) * 100 : 0.0,
+        ),
+      );
+      costPerServingTrend.add(
+        _TimeValuePoint(
+          date: day,
+          label: DateFormat('dd MMM').format(day),
+          value: q > 0 ? c / q : 0.0,
+        ),
+      );
+    }
+
+    final pos = await purchaseService.getPurchaseOrdersByRange(
+      branchIds,
+      start: _dateRange.start,
+      end: _dateRange.end,
+      statuses: const ['received', 'partial'],
+    );
+    final spendByIngredient = <String, double>{};
+    final ingredientPriceHistory = <String, List<_TimeValuePoint>>{};
+    for (final po in pos) {
+      final orderDate = (po['orderDate'] as Timestamp?)?.toDate();
+      if (orderDate == null) continue;
+      final lineItems =
+          List<Map<String, dynamic>>.from(po['lineItems'] as List? ?? const []);
+      for (final line in lineItems) {
+        final ingredientName = (line['ingredientName'] ?? '').toString();
+        final ingredientId = (line['ingredientId'] ?? '').toString();
+        if (ingredientName.isEmpty) continue;
+        final lineTotal = (line['lineTotal'] as num?)?.toDouble() ?? 0.0;
+        spendByIngredient[ingredientName] =
+            (spendByIngredient[ingredientName] ?? 0.0) + lineTotal;
+
+        final unitCost = (line['unitCost'] as num?)?.toDouble() ?? 0.0;
+        if (ingredientId.isNotEmpty && unitCost > 0) {
+          ingredientPriceHistory.putIfAbsent(ingredientId, () => []);
+          ingredientPriceHistory[ingredientId]!.add(
+            _TimeValuePoint(
+              date: orderDate,
+              label: DateFormat('dd MMM').format(orderDate),
+              value: unitCost,
+            ),
+          );
+        }
+      }
+    }
+
+    final topIngredientSpend = spendByIngredient.entries
+        .map((e) => _NamedValue(name: e.key, value: e.value))
+        .toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    for (final list in ingredientPriceHistory.values) {
+      list.sort((a, b) => a.date.compareTo(b.date));
+    }
+
+    return _FoodCostAnalyticsData(
+      isEmpty: orders.isEmpty && pos.isEmpty,
+      averageFoodCostPercent:
+          totalRevenue > 0 ? (totalCost / totalRevenue) * 100 : 0.0,
+      averageCostPerServing: totalItems > 0 ? totalCost / totalItems : 0.0,
+      foodCostTrend: foodCostTrend,
+      costPerServingTrend:
+          costPerServingTrend.where((e) => e.value > 0).toList(),
+      topIngredientSpend: topIngredientSpend.take(10).toList(),
+      ingredients: ingredients
+          .map((i) => _IngredientOption(id: i.id, name: i.name))
+          .toList(),
+      ingredientPriceHistory: ingredientPriceHistory,
+    );
+  }
+
+  Future<_WasteAnalyticsData> _loadWasteAnalytics(
+    List<String> branchIds,
+  ) async {
+    if (branchIds.isEmpty) return _WasteAnalyticsData.empty();
+    final wasteService = Provider.of<WasteService>(context, listen: false);
+    final wasteEntries = await wasteService.getWasteEntriesByRange(
+      branchIds,
+      start: _dateRange.start,
+      end: _dateRange.end,
+    );
+
+    final totalWasteCost = wasteEntries.fold<double>(
+      0.0,
+      (sum, w) => sum + ((w['estimatedLoss'] as num?)?.toDouble() ?? 0.0),
+    );
+    final wasteCount = wasteEntries.length;
+
+    final rangeDays = _dateRange.end.difference(_dateRange.start).inDays + 1;
+    final grouping = rangeDays <= 30
+        ? _Grouping.daily
+        : rangeDays <= 90
+            ? _Grouping.weekly
+            : _Grouping.monthly;
+
+    final groupedWaste = <DateTime, double>{};
+    final dailyWaste = <DateTime, double>{};
+    final reasons = <String, double>{};
+    for (final w in wasteEntries) {
+      final date = (w['wasteDate'] as Timestamp?)?.toDate();
+      if (date == null) continue;
+      final value = (w['estimatedLoss'] as num?)?.toDouble() ?? 0.0;
+      final reason = (w['reason'] ?? 'other').toString();
+      final groupDate = _bucketDate(date, grouping);
+      groupedWaste[groupDate] = (groupedWaste[groupDate] ?? 0.0) + value;
+      final day = DateTime(date.year, date.month, date.day);
+      dailyWaste[day] = (dailyWaste[day] ?? 0.0) + value;
+      reasons[reason] = (reasons[reason] ?? 0.0) + value;
+    }
+
+    final groupedWasteSeries = groupedWaste.entries
+        .map(
+          (e) => _TimeValuePoint(
+            date: e.key,
+            label: _bucketLabel(e.key, grouping),
+            value: e.value,
+          ),
+        )
+        .toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+
+    final allDays = _allDaysInRange(_dateRange.start, _dateRange.end);
+    final dailyWasteSeries = allDays
+        .map(
+          (d) => _TimeValuePoint(
+            date: d,
+            label: DateFormat('dd MMM').format(d),
+            value: dailyWaste[d] ?? 0.0,
+          ),
+        )
+        .toList();
+    final movingAverageSeries = <_TimeValuePoint>[];
+    for (int i = 0; i < dailyWasteSeries.length; i++) {
+      final start = i - 6 < 0 ? 0 : i - 6;
+      final window = dailyWasteSeries.sublist(start, i + 1);
+      final avg =
+          window.fold<double>(0.0, (s, p) => s + p.value) / window.length;
+      movingAverageSeries.add(
+        _TimeValuePoint(
+          date: dailyWasteSeries[i].date,
+          label: dailyWasteSeries[i].label,
+          value: avg,
+        ),
+      );
+    }
+
+    final reasonBreakdown = reasons.entries
+        .map((e) => _NamedValue(name: e.key, value: e.value))
+        .toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final currentFoodCostSummary = await _computeFoodCostSummary(
+      branchIds,
+      _dateRange.start,
+      _dateRange.end,
+    );
+    final wastePct = currentFoodCostSummary.foodCostTotal > 0
+        ? (totalWasteCost / currentFoodCostSummary.foodCostTotal) * 100
+        : 0.0;
+
+    final period = _dateRange.end.difference(_dateRange.start);
+    final prevStart = _dateRange.start.subtract(period);
+    final prevEnd = _dateRange.end.subtract(period);
+    final prevWaste = await wasteService.getWasteEntriesByRange(
+      branchIds,
+      start: prevStart,
+      end: prevEnd,
+    );
+    final prevWasteCost = prevWaste.fold<double>(
+      0.0,
+      (sum, w) => sum + ((w['estimatedLoss'] as num?)?.toDouble() ?? 0.0),
+    );
+    final prevFoodCostSummary = await _computeFoodCostSummary(
+      branchIds,
+      prevStart,
+      prevEnd,
+    );
+    final prevWastePct = prevFoodCostSummary.foodCostTotal > 0
+        ? (prevWasteCost / prevFoodCostSummary.foodCostTotal) * 100
+        : 0.0;
+    final delta = wastePct - prevWastePct;
+
+    final wastePctColor = wastePct <= 5
+        ? Colors.green
+        : wastePct <= 10
+            ? Colors.orange
+            : Colors.red;
+
+    return _WasteAnalyticsData(
+      totalWasteCost: totalWasteCost,
+      wasteCount: wasteCount,
+      wastePct: wastePct,
+      wastePctDelta: delta,
+      wastePctColor: wastePctColor,
+      groupedWasteSeries: groupedWasteSeries,
+      reasonBreakdown: reasonBreakdown,
+      dailyWasteSeries: dailyWasteSeries,
+      movingAverageSeries: movingAverageSeries,
+    );
+  }
+
+  Future<_PurchasesAnalyticsData> _loadPurchasesAnalytics(
+    List<String> branchIds,
+  ) async {
+    if (branchIds.isEmpty) return _PurchasesAnalyticsData.empty();
+    final purchaseService =
+        Provider.of<PurchaseOrderService>(context, listen: false);
+    final ingredientService =
+        Provider.of<IngredientService>(context, listen: false);
+
+    final pos = await purchaseService.getPurchaseOrdersByRange(
+      branchIds,
+      start: _dateRange.start,
+      end: _dateRange.end,
+    );
+    final receivedOrPartial = pos.where((po) {
+      final s = (po['status'] ?? '').toString();
+      return s == 'received' || s == 'partial';
+    }).toList();
+    final pendingCount =
+        pos.where((po) => (po['status'] ?? '') == 'pending').length;
+
+    final supplierSpendMap = <String, double>{};
+    final leadTimeMap = <String, List<double>>{};
+    final frequencyMap = <DateTime, int>{};
+    final ingredientLatestSupplierPrice =
+        <String, Map<String, _SupplierCostPoint>>{};
+
+    for (final po in pos) {
+      final orderDate = (po['orderDate'] as Timestamp?)?.toDate();
+      final receivedDate = (po['receivedDate'] as Timestamp?)?.toDate();
+      final supplierName = (po['supplierName'] ?? 'Unknown').toString();
+      final status = (po['status'] ?? '').toString();
+      final total = (po['totalAmount'] as num?)?.toDouble() ?? 0.0;
+
+      if (status == 'received' || status == 'partial') {
+        supplierSpendMap[supplierName] =
+            (supplierSpendMap[supplierName] ?? 0.0) + total;
+      }
+      if (status == 'received' && orderDate != null && receivedDate != null) {
+        final days = receivedDate.difference(orderDate).inHours / 24.0;
+        leadTimeMap.putIfAbsent(supplierName, () => []).add(days);
+      }
+      if (orderDate != null) {
+        final bucket = _bucketDate(orderDate, _Grouping.weekly);
+        frequencyMap[bucket] = (frequencyMap[bucket] ?? 0) + 1;
+      }
+
+      final lineItems =
+          List<Map<String, dynamic>>.from(po['lineItems'] ?? const []);
+      for (final item in lineItems) {
+        final ingredientId = (item['ingredientId'] ?? '').toString();
+        if (ingredientId.isEmpty || orderDate == null) continue;
+        final unitCost = (item['unitCost'] as num?)?.toDouble() ?? 0.0;
+        if (unitCost <= 0) continue;
+        ingredientLatestSupplierPrice.putIfAbsent(ingredientId, () => {});
+        final current =
+            ingredientLatestSupplierPrice[ingredientId]![supplierName];
+        if (current == null || orderDate.isAfter(current.date)) {
+          ingredientLatestSupplierPrice[ingredientId]![supplierName] =
+              _SupplierCostPoint(
+            supplierName: supplierName,
+            unitCost: unitCost,
+            date: orderDate,
+          );
+        }
+      }
+    }
+
+    final supplierSpend = supplierSpendMap.entries
+        .map((e) => _NamedValue(name: e.key, value: e.value))
+        .toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final supplierLeadTimes = leadTimeMap.entries
+        .map(
+          (e) => _SupplierLeadTime(
+            supplierName: e.key,
+            avgDays: e.value.reduce((a, b) => a + b) / e.value.length,
+          ),
+        )
+        .toList()
+      ..sort((a, b) => a.avgDays.compareTo(b.avgDays));
+
+    final orderFrequencySeries = frequencyMap.entries
+        .map(
+          (e) => _TimeValuePoint(
+            date: e.key,
+            label: _bucketLabel(e.key, _Grouping.weekly),
+            value: e.value.toDouble(),
+          ),
+        )
+        .toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+
+    final ingredients =
+        await ingredientService.streamIngredients(branchIds).first;
+    final ingredientOptions = ingredients
+        .map((i) => _IngredientOption(id: i.id, name: i.name))
+        .toList();
+
+    final ingredientPriceBySupplier = <String, List<_SupplierCostPoint>>{};
+    ingredientLatestSupplierPrice.forEach((ingredientId, supplierMap) {
+      final list = supplierMap.values.toList()
+        ..sort((a, b) => a.unitCost.compareTo(b.unitCost));
+      if (list.isNotEmpty) {
+        final cheapest = list.first.unitCost;
+        for (final point in list) {
+          point.isCheapest = (point.unitCost - cheapest).abs() < 0.0001;
+        }
+      }
+      ingredientPriceBySupplier[ingredientId] = list;
+    });
+
+    return _PurchasesAnalyticsData(
+      totalPurchases: pos.fold<double>(
+        0.0,
+        (sum, po) => sum + ((po['totalAmount'] as num?)?.toDouble() ?? 0.0),
+      ),
+      poCount: pos.length,
+      pendingCount: pendingCount,
+      receivedOrPartialCount: receivedOrPartial.length,
+      supplierSpend: supplierSpend.take(10).toList(),
+      supplierLeadTimes: supplierLeadTimes,
+      orderFrequencySeries: orderFrequencySeries,
+      ingredients: ingredientOptions,
+      ingredientPriceBySupplier: ingredientPriceBySupplier,
+    );
+  }
+
+  Future<_FoodCostSummary> _computeFoodCostSummary(
+    List<String> branchIds,
+    DateTime start,
+    DateTime end,
+  ) async {
+    if (branchIds.isEmpty) return const _FoodCostSummary(foodCostTotal: 0.0);
+    final recipeService = Provider.of<RecipeService>(context, listen: false);
+    final orders = await _getOrdersForRange(branchIds, start: start, end: end);
+    Query<Map<String, dynamic>> menuQuery =
+        FirebaseFirestore.instance.collection('menu_items');
+    if (branchIds.length == 1) {
+      menuQuery = menuQuery.where('branchIds', arrayContains: branchIds.first);
+    } else {
+      menuQuery = menuQuery.where('branchIds',
+          arrayContainsAny: branchIds.take(10).toList());
+    }
+    final menuItemsSnap = await menuQuery.get();
+    final menuById = <String, Map<String, dynamic>>{
+      for (final d in menuItemsSnap.docs) d.id: d.data(),
+    };
+    final recipeIds = menuById.values
+        .map((m) => (m['recipeId'] ?? '').toString())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    final recipes = await recipeService.getRecipesByIds(recipeIds);
+    final recipeById = {for (final r in recipes) r.id: r};
+    const completedStatuses = {'delivered', 'paid', 'collected', 'served'};
+    double total = 0.0;
+    for (final order in orders) {
+      final status = (order['status'] ?? '').toString().toLowerCase();
+      if (!completedStatuses.contains(status)) continue;
+      final items = List<Map<String, dynamic>>.from(order['items'] ?? const []);
+      for (final item in items) {
+        final menuItemId =
+            (item['menuItemId'] ?? item['itemId'] ?? '').toString();
+        final qty = (item['quantity'] as num?)?.toInt() ?? 1;
+        final menu = menuById[menuItemId];
+        final recipeId = (menu?['recipeId'] ?? '').toString();
+        if (recipeId.isEmpty || !recipeById.containsKey(recipeId)) continue;
+        total += recipeById[recipeId]!.totalCost * qty;
+      }
+    }
+    return _FoodCostSummary(foodCostTotal: total);
+  }
+
+  List<DateTime> _allDaysInRange(DateTime start, DateTime end) {
+    final list = <DateTime>[];
+    var cursor = DateTime(start.year, start.month, start.day);
+    final last = DateTime(end.year, end.month, end.day);
+    while (!cursor.isAfter(last)) {
+      list.add(cursor);
+      cursor = cursor.add(const Duration(days: 1));
+    }
+    return list;
+  }
+
+  DateTime _bucketDate(DateTime date, _Grouping grouping) {
+    switch (grouping) {
+      case _Grouping.daily:
+        return DateTime(date.year, date.month, date.day);
+      case _Grouping.weekly:
+        final monday = date.subtract(Duration(days: date.weekday - 1));
+        return DateTime(monday.year, monday.month, monday.day);
+      case _Grouping.monthly:
+        return DateTime(date.year, date.month, 1);
+    }
+  }
+
+  String _bucketLabel(DateTime date, _Grouping grouping) {
+    switch (grouping) {
+      case _Grouping.daily:
+        return DateFormat('dd MMM').format(date);
+      case _Grouping.weekly:
+        return 'Wk ${DateFormat('dd MMM').format(date)}';
+      case _Grouping.monthly:
+        return DateFormat('MMM yyyy').format(date);
+    }
+  }
+
+  Widget _buildMainAnalyticsTabs() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       decoration: BoxDecoration(
@@ -223,6 +1929,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       ),
       child: TabBar(
         controller: _tabController,
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,
         indicator: BoxDecoration(
           borderRadius: BorderRadius.circular(25),
           color: Colors.deepPurple,
@@ -230,157 +1938,78 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         indicatorSize: TabBarIndicatorSize.tab,
         labelColor: Colors.white,
         unselectedLabelColor: Colors.deepPurple,
-        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
         dividerColor: Colors.transparent,
         tabs: const [
           Tab(
-            icon: Icon(Icons.dashboard_outlined, size: 18),
-            text: 'All',
+            icon: Icon(Icons.trending_up, size: 18),
+            text: 'Sales',
           ),
           Tab(
-            icon: Icon(Icons.delivery_dining_outlined, size: 18),
-            text: 'Delivery',
+            icon: Icon(Icons.inventory_2_outlined, size: 18),
+            text: 'Inventory',
           ),
           Tab(
-            icon: Icon(Icons.shopping_bag_outlined, size: 18),
-            text: 'Takeaway',
+            icon: Icon(Icons.attach_money, size: 18),
+            text: 'Food Cost',
           ),
-          // --- NEW TAB ADDED ---
           Tab(
-            icon: Icon(Icons.storefront_outlined, size: 18),
-            text: 'Pickup',
+            icon: Icon(Icons.delete_outline, size: 18),
+            text: 'Waste',
           ),
-          // --- END NEW TAB ---
           Tab(
-            icon: Icon(Icons.table_bar_outlined, size: 18),
-            text: 'Dine In',
+            icon: Icon(Icons.shopping_cart_outlined, size: 18),
+            text: 'Purchases',
           ),
         ],
       ),
     );
   }
 
-  // Branch selector as a full-width card (placed in body for better visibility)
-  Widget _buildBranchSelectorCard(
-      UserScopeService userScope, BranchFilterService branchFilter) {
+  Widget _buildSalesOrderTypeFilter() {
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.deepPurple.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+      margin: const EdgeInsets.only(bottom: 16),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _buildSalesOrderFilterChip(
+                'all', 'All Orders', Icons.dashboard_outlined),
+            _buildSalesOrderFilterChip(
+                'delivery', 'Delivery', Icons.delivery_dining_outlined),
+            _buildSalesOrderFilterChip(
+                'takeaway', 'Takeaway', Icons.shopping_bag_outlined),
+            _buildSalesOrderFilterChip(
+                'pickup', 'Pickup', Icons.storefront_outlined),
+            _buildSalesOrderFilterChip(
+                'dine_in', 'Dine In', Icons.table_bar_outlined),
+          ],
+        ),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.deepPurple.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.store_rounded,
-              color: Colors.deepPurple,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Select Branch',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  branchFilter.selectedBranchId == null
-                      ? 'All Branches'
-                      : branchFilter.getBranchName(branchFilter.selectedBranchId!),
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.deepPurple,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          PopupMenuButton<String>(
-            offset: const Offset(0, 45),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.deepPurple,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Text(
-                    'Change',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  SizedBox(width: 4),
-                  Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 20),
-                ],
-              ),
-            ),
-            itemBuilder: (context) => [
-              PopupMenuItem<String>(
-                value: BranchFilterService.allBranchesValue,
-                child: Row(children: [
-                  Icon(
-                      branchFilter.selectedBranchId == null
-                          ? Icons.check_circle
-                          : Icons.circle_outlined,
-                      size: 20,
-                      color: branchFilter.selectedBranchId == null
-                          ? Colors.deepPurple
-                          : Colors.grey),
-                  const SizedBox(width: 12),
-                  const Text('All Branches', style: TextStyle(fontSize: 15)),
-                ]),
-              ),
-              const PopupMenuDivider(),
-              ...userScope.branchIds.map((branchId) => PopupMenuItem<String>(
-                    value: branchId,
-                    child: Row(children: [
-                      Icon(
-                          branchFilter.selectedBranchId == branchId
-                              ? Icons.check_circle
-                              : Icons.circle_outlined,
-                          size: 20,
-                          color: branchFilter.selectedBranchId == branchId
-                              ? Colors.deepPurple
-                              : Colors.grey),
-                      const SizedBox(width: 12),
-                      Flexible(
-                          child: Text(branchFilter.getBranchName(branchId),
-                              style: const TextStyle(fontSize: 15),
-                              overflow: TextOverflow.ellipsis)),
-                    ]),
-                  )),
-            ],
-            onSelected: (value) => branchFilter.selectBranch(value),
-          ),
-        ],
+    );
+  }
+
+  Widget _buildSalesOrderFilterChip(String value, String label, IconData icon) {
+    final isSelected = _selectedOrderType == value;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: FilterChip(
+        selected: isSelected,
+        label: Text(label),
+        avatar: Icon(icon,
+            size: 18, color: isSelected ? Colors.white : Colors.deepPurple),
+        selectedColor: Colors.deepPurple,
+        labelStyle: TextStyle(
+          color: isSelected ? Colors.white : Colors.deepPurple,
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        ),
+        onSelected: (bool selected) {
+          if (selected) {
+            setState(() {
+              _selectedOrderType = value;
+            });
+          }
+        },
       ),
     );
   }
@@ -398,7 +2027,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           decoration: BoxDecoration(
             color: Colors.deepPurple.withOpacity(0.1),
             borderRadius: BorderRadius.circular(25),
-            border: Border.all(color: Colors.deepPurple.withOpacity(0.4), width: 1.5),
+            border: Border.all(
+                color: Colors.deepPurple.withOpacity(0.4), width: 1.5),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -421,7 +2051,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                 ),
               ),
               const SizedBox(width: 4),
-              Icon(Icons.keyboard_arrow_down_rounded, color: Colors.deepPurple, size: 24),
+              Icon(Icons.keyboard_arrow_down_rounded,
+                  color: Colors.deepPurple, size: 24),
             ],
           ),
         ),
@@ -465,7 +2096,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       ),
     );
   }
-
 
   Widget _buildDateRangeSelector() {
     return Column(
@@ -653,7 +2283,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         List<QueryDocumentSnapshot> cancelledOrders = [];
         List<QueryDocumentSnapshot> refundedOrders = [];
         List<QueryDocumentSnapshot> completedOrders = [];
-        
+
         for (var doc in orders) {
           final data = doc.data() as Map<String, dynamic>;
           final status = (data['status'] as String?)?.toLowerCase() ?? '';
@@ -681,7 +2311,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
             return sum;
           },
         );
-        final avgOrderValue = completedCount > 0 ? totalRevenue / completedCount : 0;
+        final avgOrderValue =
+            completedCount > 0 ? totalRevenue / completedCount : 0;
 
         return Column(
           children: [
@@ -795,9 +2426,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     );
   }
 
-
   Widget _buildMetricCard(
-      String title, String value, IconData icon, Color color, {VoidCallback? onTap}) {
+      String title, String value, IconData icon, Color color,
+      {VoidCallback? onTap}) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -874,8 +2505,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     // Sort orders by timestamp (most recent first)
     final sortedOrders = List<QueryDocumentSnapshot>.from(orders);
     sortedOrders.sort((a, b) {
-      final aTime = (a.data() as Map<String, dynamic>)['timestamp'] as Timestamp?;
-      final bTime = (b.data() as Map<String, dynamic>)['timestamp'] as Timestamp?;
+      final aTime =
+          (a.data() as Map<String, dynamic>)['timestamp'] as Timestamp?;
+      final bTime =
+          (b.data() as Map<String, dynamic>)['timestamp'] as Timestamp?;
       if (aTime == null || bTime == null) return 0;
       return bTime.compareTo(aTime);
     });
@@ -925,7 +2558,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                         color: themeColor.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: Icon(Icons.receipt_long_rounded, color: themeColor, size: 24),
+                      child: Icon(Icons.receipt_long_rounded,
+                          color: themeColor, size: 24),
                     ),
                     const SizedBox(width: 16),
                     Expanded(
@@ -953,7 +2587,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                     ),
                     if (showRevenue)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
                         decoration: BoxDecoration(
                           color: themeColor.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(20),
@@ -982,11 +2617,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.inbox_outlined, size: 64, color: Colors.grey[300]),
+                            Icon(Icons.inbox_outlined,
+                                size: 64, color: Colors.grey[300]),
                             const SizedBox(height: 16),
                             Text(
                               'No orders found',
-                              style: TextStyle(color: Colors.grey[500], fontSize: 16),
+                              style: TextStyle(
+                                  color: Colors.grey[500], fontSize: 16),
                             ),
                           ],
                         ),
@@ -998,7 +2635,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                         itemBuilder: (context, index) {
                           final doc = sortedOrders[index];
                           final data = doc.data() as Map<String, dynamic>;
-                          return _buildOrderDetailCard(data, themeColor, doc.id);
+                          return _buildOrderDetailCard(
+                              data, themeColor, doc.id);
                         },
                       ),
               ),
@@ -1010,7 +2648,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
   }
 
   /// Builds a professional order detail card
-  Widget _buildOrderDetailCard(Map<String, dynamic> data, Color themeColor, String orderId) {
+  Widget _buildOrderDetailCard(
+      Map<String, dynamic> data, Color themeColor, String orderId) {
     final status = (data['status'] as String?) ?? 'unknown';
     final orderType = (data['Order_type'] as String?) ?? 'unknown';
     final totalAmount = (data['totalAmount'] as num?)?.toDouble() ?? 0;
@@ -1099,7 +2738,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                     color: Colors.grey[100],
                     borderRadius: BorderRadius.circular(8),
@@ -1123,7 +2763,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.person_outline, size: 18, color: Colors.grey[600]),
+                    Icon(Icons.person_outline,
+                        size: 18, color: Colors.grey[600]),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1154,7 +2795,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                     padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
                     child: Row(
                       children: [
-                        Icon(Icons.shopping_bag_outlined, size: 16, color: Colors.grey[600]),
+                        Icon(Icons.shopping_bag_outlined,
+                            size: 16, color: Colors.grey[600]),
                         const SizedBox(width: 8),
                         Text(
                           'Items (${items.length})',
@@ -1169,7 +2811,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                   ),
                   const Divider(height: 1),
                   ...items.map((item) => Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                         child: Row(
                           children: [
                             Container(
@@ -1200,12 +2843,18 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                             Builder(
                               builder: (context) {
                                 // Use discountedPrice if available for accurate display
-                                final originalPrice = (item['price'] as num?)?.toDouble() ?? 0;
-                                final discountedPrice = (item['discountedPrice'] as num?)?.toDouble();
-                                final effectivePrice = (discountedPrice != null && discountedPrice > 0) 
-                                    ? discountedPrice 
-                                    : originalPrice;
-                                final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+                                final originalPrice =
+                                    (item['price'] as num?)?.toDouble() ?? 0;
+                                final discountedPrice =
+                                    (item['discountedPrice'] as num?)
+                                        ?.toDouble();
+                                final effectivePrice =
+                                    (discountedPrice != null &&
+                                            discountedPrice > 0)
+                                        ? discountedPrice
+                                        : originalPrice;
+                                final quantity =
+                                    (item['quantity'] as num?)?.toInt() ?? 1;
                                 return Text(
                                   'QAR ${(effectivePrice * quantity).toStringAsFixed(2)}',
                                   style: TextStyle(
@@ -1463,17 +3112,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
             }
 
             // Only count items from completed orders
-            const completedStatuses = {'delivered', 'paid', 'collected', 'served'};
+            const completedStatuses = {
+              'delivered',
+              'paid',
+              'collected',
+              'served'
+            };
             final itemCounts = <String, int>{};
             final itemRevenue = <String, double>{};
 
             for (var doc in snapshot.data!.docs) {
               final data = doc.data() as Map<String, dynamic>;
               final status = (data['status'] as String?)?.toLowerCase() ?? '';
-              
+
               // Skip non-completed orders
               if (!completedStatuses.contains(status)) continue;
-              
+
               final items =
                   List<Map<String, dynamic>>.from(data['items'] ?? []);
 
@@ -1483,10 +3137,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                 // Use discountedPrice if available, otherwise fall back to regular price
                 // This ensures revenue calculations match actual amounts charged
                 final originalPrice = (item['price'] as num?)?.toDouble() ?? 0;
-                final discountedPrice = (item['discountedPrice'] as num?)?.toDouble();
-                final effectivePrice = (discountedPrice != null && discountedPrice > 0) 
-                    ? discountedPrice 
-                    : originalPrice;
+                final discountedPrice =
+                    (item['discountedPrice'] as num?)?.toDouble();
+                final effectivePrice =
+                    (discountedPrice != null && discountedPrice > 0)
+                        ? discountedPrice
+                        : originalPrice;
 
                 itemCounts.update(itemName, (value) => value + quantity,
                     ifAbsent: () => quantity);
@@ -1778,7 +3434,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
             isGreaterThanOrEqualTo: Timestamp.fromDate(_dateRange.start))
         .where('timestamp',
             isLessThanOrEqualTo: Timestamp.fromDate(_dateRange.end));
-    
+
     // Filter by branch - arrayContainsAny supports up to 30 values
     if (branchIds.isNotEmpty) {
       if (branchIds.length == 1) {
@@ -1787,7 +3443,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         query = query.where('branchIds', arrayContainsAny: branchIds);
       }
     }
-    
+
     query = query.orderBy('timestamp', descending: true);
 
     if (_selectedOrderType != 'all') {
@@ -1868,12 +3524,24 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
             final riderCounts = <String, int>{};
             for (var doc in snapshot.data!.docs) {
               final data = doc.data() as Map<String, dynamic>;
-              final orderType =
-                  (data['Order_type'] as String?)?.toLowerCase() ?? '';
-              // Only count delivery orders
-              if (orderType != 'delivery') continue;
 
-              final riderId = data['riderId'] as String?;
+              // Use standardized normalization logic
+              final rawType =
+                  (data['Order_type'] ?? data['order_type'] ?? '').toString();
+              if (!AppConstants.isDeliveryOrder(rawType)) continue;
+
+              // Greedy extraction for rider ID
+              final riderIdRaw = (data['riderId'] ??
+                  data['rider_id'] ??
+                  data['driverId'] ??
+                  data['driver_id'] ??
+                  data['assignedRiderId'] ??
+                  (data['rider_info'] is Map
+                      ? data['rider_info']['id']
+                      : null));
+
+              final riderId = riderIdRaw?.toString().trim();
+
               if (riderId != null && riderId.isNotEmpty) {
                 riderCounts.update(riderId, (v) => v + 1, ifAbsent: () => 1);
               }
@@ -2469,13 +4137,30 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
 
     try {
       // Build query with passed parameters
+      final userScope = context.read<UserScopeService>();
+      final branchFilter = context.read<BranchFilterService>();
+      final effectiveBranchIds =
+          branchFilter.getFilterBranchIds(userScope.branchIds);
+
       Query<Map<String, dynamic>> query = FirebaseFirestore.instance
           .collection('Orders')
           .where('timestamp',
               isGreaterThanOrEqualTo: Timestamp.fromDate(reportDateRange.start))
           .where('timestamp',
-              isLessThanOrEqualTo: Timestamp.fromDate(reportDateRange.end))
-          .orderBy('timestamp', descending: true);
+              isLessThanOrEqualTo: Timestamp.fromDate(reportDateRange.end));
+
+      // Filter by branch
+      if (effectiveBranchIds.isNotEmpty) {
+        if (effectiveBranchIds.length == 1) {
+          query =
+              query.where('branchIds', arrayContains: effectiveBranchIds.first);
+        } else {
+          query =
+              query.where('branchIds', arrayContainsAny: effectiveBranchIds);
+        }
+      }
+
+      query = query.orderBy('timestamp', descending: true);
 
       if (reportOrderType != 'all') {
         query = query.where('Order_type', isEqualTo: reportOrderType);
@@ -2498,8 +4183,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       // Aggregate top items with detailed pricing info
       final itemCounts = <String, int>{};
       final itemRevenue = <String, double>{};
-      final itemOriginalRevenue = <String, double>{}; // Revenue at original prices
-      final itemHasDiscount = <String, bool>{}; // Track if item ever had discounts
+      final itemOriginalRevenue =
+          <String, double>{}; // Revenue at original prices
+      final itemHasDiscount =
+          <String, bool>{}; // Track if item ever had discounts
       for (var doc in orders) {
         final data = doc.data();
         final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
@@ -2509,14 +4196,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           // Use discountedPrice if available for accurate revenue calculation
           final originalPrice = (item['price'] as num?)?.toDouble() ?? 0;
           final discountedPrice = (item['discountedPrice'] as num?)?.toDouble();
-          final hasDiscount = discountedPrice != null && discountedPrice > 0 && discountedPrice < originalPrice;
+          final hasDiscount = discountedPrice != null &&
+              discountedPrice > 0 &&
+              discountedPrice < originalPrice;
           final effectivePrice = hasDiscount ? discountedPrice! : originalPrice;
-          
+
           itemCounts.update(itemName, (v) => v + quantity,
               ifAbsent: () => quantity);
           itemRevenue.update(itemName, (v) => v + (effectivePrice * quantity),
               ifAbsent: () => effectivePrice * quantity);
-          itemOriginalRevenue.update(itemName, (v) => v + (originalPrice * quantity),
+          itemOriginalRevenue.update(
+              itemName, (v) => v + (originalPrice * quantity),
               ifAbsent: () => originalPrice * quantity);
           if (hasDiscount) {
             itemHasDiscount[itemName] = true;
@@ -2533,7 +4223,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                 'revenue': itemRevenue[e.key] ?? 0,
                 'originalRevenue': itemOriginalRevenue[e.key] ?? 0,
                 'hasDiscount': itemHasDiscount[e.key] ?? false,
-                'savings': (itemOriginalRevenue[e.key] ?? 0) - (itemRevenue[e.key] ?? 0),
+                'savings': (itemOriginalRevenue[e.key] ?? 0) -
+                    (itemRevenue[e.key] ?? 0),
               })
           .toList();
 
@@ -2564,11 +4255,25 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         }
       }
 
-      // Aggregate top riders (for delivery orders) using riderId
+      // Aggregate top riders (for delivery orders) using greedy ID extraction
       final riderIdCounts = <String, int>{};
       for (var doc in orders) {
         final data = doc.data();
-        final riderId = data['riderId'] as String?;
+
+        // Ensure it's a delivery order using robust check
+        final rawType =
+            (data['Order_type'] ?? data['order_type'] ?? '').toString();
+        if (!AppConstants.isDeliveryOrder(rawType)) continue;
+
+        final riderIdRaw = (data['riderId'] ??
+            data['rider_id'] ??
+            data['driverId'] ??
+            data['driver_id'] ??
+            data['assignedRiderId'] ??
+            (data['rider_info'] is Map ? data['rider_info']['id'] : null));
+
+        final riderId = riderIdRaw?.toString().trim();
+
         if (riderId != null && riderId.isNotEmpty) {
           riderIdCounts.update(riderId, (v) => v + 1, ifAbsent: () => 1);
         }
@@ -2633,6 +4338,88 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         if (status == 'refunded') refundedCount++;
       }
 
+      // Fetch new analytics data
+      double totalInventoryValue = 0;
+      int lowStockCount = 0;
+      int deadStockCount = 0;
+
+      final ingredientsSnapshot = await FirebaseFirestore.instance
+          .collectionGroup('ingredients')
+          .where('branchIds',
+              arrayContainsAny: effectiveBranchIds.isEmpty
+                  ? ['dummy']
+                  : effectiveBranchIds.take(10).toList())
+          .get();
+      for (var doc in ingredientsSnapshot.docs) {
+        final data = doc.data();
+        final stock = (data['currentStock'] ?? 0).toDouble();
+        final cost = (data['costPerUnit'] ?? 0).toDouble();
+        final minThreshold = (data['minStockThreshold'] ?? 0).toDouble();
+        totalInventoryValue += (stock * cost);
+        if (stock <= minThreshold) lowStockCount++;
+        if (stock == 0) deadStockCount++;
+      }
+
+      double totalWasteCost = 0;
+      int wasteCount = 0;
+      final Map<String, dynamic> itemsWaste = {};
+
+      final wasteSnapshot = await FirebaseFirestore.instance
+          .collectionGroup('waste_entries')
+          .where('branchIds',
+              arrayContainsAny: effectiveBranchIds.isEmpty
+                  ? ['dummy']
+                  : effectiveBranchIds.take(10).toList())
+          .where('wasteDate',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(reportDateRange.start))
+          .where('wasteDate',
+              isLessThanOrEqualTo: Timestamp.fromDate(reportDateRange.end))
+          .get();
+      wasteCount = wasteSnapshot.docs.length;
+
+      for (var doc in wasteSnapshot.docs) {
+        final data = doc.data();
+        final loss = (data['estimatedLoss'] ?? 0).toDouble();
+        totalWasteCost += loss;
+
+        final name = data['itemName'] ?? 'Unknown';
+        final qty = (data['quantity'] ?? 0).toDouble();
+        final unit = data['unit'] ?? '';
+        if (itemsWaste.containsKey(name)) {
+          itemsWaste[name]['loss'] += loss;
+          itemsWaste[name]['qty'] += qty;
+        } else {
+          itemsWaste[name] = {
+            'name': name,
+            'loss': loss,
+            'qty': qty,
+            'unit': unit
+          };
+        }
+      }
+      final sortedWastedItems = itemsWaste.values.toList()
+        ..sort((a, b) => (b['loss'] as double).compareTo(a['loss'] as double));
+      final topWastedItems = sortedWastedItems.take(5).toList();
+
+      double totalPurchases = 0;
+      int poCount = 0;
+      final poSnapshot = await FirebaseFirestore.instance
+          .collection('purchase_orders')
+          .where('branchIds',
+              arrayContainsAny: effectiveBranchIds.isEmpty
+                  ? ['dummy']
+                  : effectiveBranchIds.take(10).toList())
+          .where('orderDate',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(reportDateRange.start))
+          .where('orderDate',
+              isLessThanOrEqualTo: Timestamp.fromDate(reportDateRange.end))
+          .get();
+      poCount = poSnapshot.docs.length;
+      for (var doc in poSnapshot.docs) {
+        final data = doc.data();
+        totalPurchases += (data['totalAmount'] ?? 0).toDouble();
+      }
+
       // Close loading dialog
       if (mounted) Navigator.pop(context);
 
@@ -2653,6 +4440,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         refundedCount: refundedCount,
         topRiders: topRidersList.isNotEmpty ? topRidersList : null,
         topCustomers: topCustomersList.isNotEmpty ? topCustomersList : null,
+        totalInventoryValue: totalInventoryValue,
+        lowStockCount: lowStockCount,
+        deadStockCount: deadStockCount,
+        totalWasteCost: totalWasteCost,
+        wasteCount: wasteCount,
+        totalPurchases: totalPurchases,
+        poCount: poCount,
+        topWastedItems: topWastedItems,
       );
     } catch (e) {
       if (mounted) Navigator.pop(context);
@@ -2680,13 +4475,30 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
 
     try {
       // Build query with passed parameters
+      final userScope = context.read<UserScopeService>();
+      final branchFilter = context.read<BranchFilterService>();
+      final effectiveBranchIds =
+          branchFilter.getFilterBranchIds(userScope.branchIds);
+
       Query<Map<String, dynamic>> query = FirebaseFirestore.instance
           .collection('Orders')
           .where('timestamp',
               isGreaterThanOrEqualTo: Timestamp.fromDate(reportDateRange.start))
           .where('timestamp',
-              isLessThanOrEqualTo: Timestamp.fromDate(reportDateRange.end))
-          .orderBy('timestamp', descending: true);
+              isLessThanOrEqualTo: Timestamp.fromDate(reportDateRange.end));
+
+      // Filter by branch
+      if (effectiveBranchIds.isNotEmpty) {
+        if (effectiveBranchIds.length == 1) {
+          query =
+              query.where('branchIds', arrayContains: effectiveBranchIds.first);
+        } else {
+          query =
+              query.where('branchIds', arrayContainsAny: effectiveBranchIds);
+        }
+      }
+
+      query = query.orderBy('timestamp', descending: true);
 
       if (reportOrderType != 'all') {
         query = query.where('Order_type', isEqualTo: reportOrderType);
@@ -2775,6 +4587,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       for (var doc in orders) {
         final data = doc.data();
         final timestamp = data['timestamp'] as Timestamp?;
+        final rawType = (data['Order_type'] as String?) ??
+            (data['order_type'] as String?) ??
+            'unknown';
+
         ordersSheet.appendRow([
           excel_lib.TextCellValue(doc.id),
           excel_lib.TextCellValue(timestamp != null
@@ -2783,8 +4599,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           excel_lib.TextCellValue(data['customerName'] as String? ??
               data['customer_name'] as String? ??
               'Unknown'),
-          excel_lib.TextCellValue(_formatOrderTypeForPieLabel(
-              (data['Order_type'] as String?) ?? 'unknown')),
+          excel_lib.TextCellValue(_formatOrderTypeForPieLabel(rawType)),
           excel_lib.TextCellValue((data['status'] as String?) ?? 'unknown'),
           excel_lib.DoubleCellValue(
               (data['totalAmount'] as num?)?.toDouble() ?? 0),
@@ -2817,14 +4632,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           // Use discountedPrice if available for accurate revenue calculation
           final originalPrice = (item['price'] as num?)?.toDouble() ?? 0;
           final discountedPrice = (item['discountedPrice'] as num?)?.toDouble();
-          final hasDiscount = discountedPrice != null && discountedPrice > 0 && discountedPrice < originalPrice;
+          final hasDiscount = discountedPrice != null &&
+              discountedPrice > 0 &&
+              discountedPrice < originalPrice;
           final effectivePrice = hasDiscount ? discountedPrice! : originalPrice;
-          
+
           itemCounts.update(itemName, (v) => v + quantity,
               ifAbsent: () => quantity);
           itemRevenue.update(itemName, (v) => v + (effectivePrice * quantity),
               ifAbsent: () => effectivePrice * quantity);
-          itemOriginalRevenue.update(itemName, (v) => v + (originalPrice * quantity),
+          itemOriginalRevenue.update(
+              itemName, (v) => v + (originalPrice * quantity),
               ifAbsent: () => originalPrice * quantity);
           if (hasDiscount) {
             itemHasDiscount[itemName] = true;
@@ -2847,9 +4665,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           excel_lib.TextCellValue(hasDiscount ? 'Yes' : 'No'),
         ]);
       }
-      
+
       // Add total discounts row
-      final totalOriginal = itemOriginalRevenue.values.fold<double>(0, (a, b) => a + b);
+      final totalOriginal =
+          itemOriginalRevenue.values.fold<double>(0, (a, b) => a + b);
       final totalActual = itemRevenue.values.fold<double>(0, (a, b) => a + b);
       final totalDiscount = totalOriginal - totalActual;
       itemsSheet.appendRow([]);
@@ -2861,6 +4680,128 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         excel_lib.DoubleCellValue(totalDiscount),
         excel_lib.TextCellValue(''),
       ]);
+
+      // ===== Inventory Sheet =====
+      final ingredientsSnapshot = await FirebaseFirestore.instance
+          .collectionGroup('ingredients')
+          .where('branchIds',
+              arrayContainsAny: effectiveBranchIds.isEmpty
+                  ? ['dummy']
+                  : effectiveBranchIds.take(10).toList())
+          .get();
+
+      final inventorySheet = excelFile['Inventory Health'];
+      inventorySheet.appendRow([
+        excel_lib.TextCellValue('Name'),
+        excel_lib.TextCellValue('Category'),
+        excel_lib.TextCellValue('Current Stock'),
+        excel_lib.TextCellValue('Min Threshold'),
+        excel_lib.TextCellValue('Cost Per Unit (QAR)'),
+        excel_lib.TextCellValue('Total Value (QAR)'),
+        excel_lib.TextCellValue('Status'),
+      ]);
+      for (var doc in ingredientsSnapshot.docs) {
+        final data = doc.data();
+        final name = data['name'] ?? 'Unknown';
+        final category = data['category'] ?? '-';
+        final stock = (data['currentStock'] ?? 0).toDouble();
+        final minThreshold = (data['minStockThreshold'] ?? 0).toDouble();
+        final cost = (data['costPerUnit'] ?? 0).toDouble();
+
+        String status = 'OK';
+        if (stock == 0)
+          status = 'Out of Stock';
+        else if (stock <= minThreshold) status = 'Low Stock';
+
+        inventorySheet.appendRow([
+          excel_lib.TextCellValue(name),
+          excel_lib.TextCellValue(category),
+          excel_lib.DoubleCellValue(stock),
+          excel_lib.DoubleCellValue(minThreshold),
+          excel_lib.DoubleCellValue(cost),
+          excel_lib.DoubleCellValue(stock * cost),
+          excel_lib.TextCellValue(status),
+        ]);
+      }
+
+      // ===== Waste Sheet =====
+      final wasteSnapshot = await FirebaseFirestore.instance
+          .collectionGroup('waste_entries')
+          .where('branchIds',
+              arrayContainsAny: effectiveBranchIds.isEmpty
+                  ? ['dummy']
+                  : effectiveBranchIds.take(10).toList())
+          .where('wasteDate',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(reportDateRange.start))
+          .where('wasteDate',
+              isLessThanOrEqualTo: Timestamp.fromDate(reportDateRange.end))
+          .get();
+
+      final wasteSheet = excelFile['Waste Logs'];
+      wasteSheet.appendRow([
+        excel_lib.TextCellValue('Date'),
+        excel_lib.TextCellValue('Item Name'),
+        excel_lib.TextCellValue('Quantity'),
+        excel_lib.TextCellValue('Reason'),
+        excel_lib.TextCellValue('Est. Loss (QAR)'),
+        excel_lib.TextCellValue('Recorded By'),
+      ]);
+      for (var doc in wasteSnapshot.docs) {
+        final data = doc.data();
+        final wasteDate = (data['wasteDate'] as Timestamp?)?.toDate();
+        wasteSheet.appendRow([
+          excel_lib.TextCellValue(wasteDate != null
+              ? DateFormat('yyyy-MM-dd HH:mm').format(wasteDate)
+              : '-'),
+          excel_lib.TextCellValue(data['itemName'] ?? 'Unknown'),
+          excel_lib.TextCellValue(
+              '${data['quantity'] ?? 0} ${data['unit'] ?? ''}'),
+          excel_lib.TextCellValue(data['reason'] ?? 'Unknown'),
+          excel_lib.DoubleCellValue((data['estimatedLoss'] ?? 0).toDouble()),
+          excel_lib.TextCellValue(data['recordedBy'] ?? 'System'),
+        ]);
+      }
+
+      // ===== Purchases Sheet =====
+      final poSnapshot = await FirebaseFirestore.instance
+          .collection('purchase_orders')
+          .where('branchIds',
+              arrayContainsAny: effectiveBranchIds.isEmpty
+                  ? ['dummy']
+                  : effectiveBranchIds.take(10).toList())
+          .where('orderDate',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(reportDateRange.start))
+          .where('orderDate',
+              isLessThanOrEqualTo: Timestamp.fromDate(reportDateRange.end))
+          .get();
+
+      final poSheet = excelFile['Purchase Orders'];
+      poSheet.appendRow([
+        excel_lib.TextCellValue('PO Number'),
+        excel_lib.TextCellValue('PO Date'),
+        excel_lib.TextCellValue('Supplier'),
+        excel_lib.TextCellValue('Amount (QAR)'),
+        excel_lib.TextCellValue('Status'),
+        excel_lib.TextCellValue('Expected Delivery'),
+      ]);
+      for (var doc in poSnapshot.docs) {
+        final data = doc.data();
+        final orderDate = (data['orderDate'] as Timestamp?)?.toDate();
+        final deliveryDate =
+            (data['expectedDeliveryDate'] as Timestamp?)?.toDate();
+        poSheet.appendRow([
+          excel_lib.TextCellValue(data['poNumber'] as String? ?? '-'),
+          excel_lib.TextCellValue(orderDate != null
+              ? DateFormat('yyyy-MM-dd').format(orderDate)
+              : '-'),
+          excel_lib.TextCellValue(data['supplierName'] as String? ?? 'Unknown'),
+          excel_lib.DoubleCellValue((data['totalAmount'] ?? 0).toDouble()),
+          excel_lib.TextCellValue(data['status'] as String? ?? 'pending'),
+          excel_lib.TextCellValue(deliveryDate != null
+              ? DateFormat('yyyy-MM-dd').format(deliveryDate)
+              : '-'),
+        ]);
+      }
 
       // Remove the default 'Sheet1'
       excelFile.delete('Sheet1');
@@ -2934,4 +4875,203 @@ class OrderTypeData {
   final int count;
   final Color color;
   OrderTypeData(this.orderType, this.count, this.color);
+}
+
+enum _Grouping { daily, weekly, monthly }
+
+class _NamedValue {
+  final String name;
+  final double value;
+  _NamedValue({required this.name, required this.value});
+}
+
+class _TimeValuePoint {
+  final DateTime date;
+  final String label;
+  final double value;
+  _TimeValuePoint({
+    required this.date,
+    required this.label,
+    required this.value,
+  });
+}
+
+class _IngredientOption {
+  final String id;
+  final String name;
+  _IngredientOption({required this.id, required this.name});
+}
+
+class _DeadStockRow {
+  final String name;
+  final double currentStock;
+  final double currentValue;
+  final int? daysSinceLastUsed;
+  _DeadStockRow({
+    required this.name,
+    required this.currentStock,
+    required this.currentValue,
+    required this.daysSinceLastUsed,
+  });
+}
+
+class _InventoryAnalyticsData {
+  final int ingredientCount;
+  final double totalValue;
+  final double? turnoverRate;
+  final String turnoverNote;
+  final double? stockAccuracyPct;
+  final String stockAccuracyNote;
+  final List<_DeadStockRow> deadStockRows;
+  final List<_TimeValuePoint> carryingCostSeries;
+  final String carryingCostNote;
+  _InventoryAnalyticsData({
+    required this.ingredientCount,
+    required this.totalValue,
+    required this.turnoverRate,
+    required this.turnoverNote,
+    required this.stockAccuracyPct,
+    required this.stockAccuracyNote,
+    required this.deadStockRows,
+    required this.carryingCostSeries,
+    required this.carryingCostNote,
+  });
+
+  factory _InventoryAnalyticsData.empty() => _InventoryAnalyticsData(
+        ingredientCount: 0,
+        totalValue: 0,
+        turnoverRate: null,
+        turnoverNote: '',
+        stockAccuracyPct: null,
+        stockAccuracyNote: '',
+        deadStockRows: const [],
+        carryingCostSeries: const [],
+        carryingCostNote: '',
+      );
+}
+
+class _FoodCostAnalyticsData {
+  final bool isEmpty;
+  final double averageFoodCostPercent;
+  final double averageCostPerServing;
+  final List<_TimeValuePoint> foodCostTrend;
+  final List<_TimeValuePoint> costPerServingTrend;
+  final List<_NamedValue> topIngredientSpend;
+  final List<_IngredientOption> ingredients;
+  final Map<String, List<_TimeValuePoint>> ingredientPriceHistory;
+  _FoodCostAnalyticsData({
+    required this.isEmpty,
+    required this.averageFoodCostPercent,
+    required this.averageCostPerServing,
+    required this.foodCostTrend,
+    required this.costPerServingTrend,
+    required this.topIngredientSpend,
+    required this.ingredients,
+    required this.ingredientPriceHistory,
+  });
+
+  factory _FoodCostAnalyticsData.empty() => _FoodCostAnalyticsData(
+        isEmpty: true,
+        averageFoodCostPercent: 0,
+        averageCostPerServing: 0,
+        foodCostTrend: const [],
+        costPerServingTrend: const [],
+        topIngredientSpend: const [],
+        ingredients: const [],
+        ingredientPriceHistory: const {},
+      );
+}
+
+class _WasteAnalyticsData {
+  final double totalWasteCost;
+  final int wasteCount;
+  final double wastePct;
+  final double wastePctDelta;
+  final Color wastePctColor;
+  final List<_TimeValuePoint> groupedWasteSeries;
+  final List<_NamedValue> reasonBreakdown;
+  final List<_TimeValuePoint> dailyWasteSeries;
+  final List<_TimeValuePoint> movingAverageSeries;
+  _WasteAnalyticsData({
+    required this.totalWasteCost,
+    required this.wasteCount,
+    required this.wastePct,
+    required this.wastePctDelta,
+    required this.wastePctColor,
+    required this.groupedWasteSeries,
+    required this.reasonBreakdown,
+    required this.dailyWasteSeries,
+    required this.movingAverageSeries,
+  });
+
+  factory _WasteAnalyticsData.empty() => _WasteAnalyticsData(
+        totalWasteCost: 0,
+        wasteCount: 0,
+        wastePct: 0,
+        wastePctDelta: 0,
+        wastePctColor: Colors.green,
+        groupedWasteSeries: const [],
+        reasonBreakdown: const [],
+        dailyWasteSeries: const [],
+        movingAverageSeries: const [],
+      );
+}
+
+class _SupplierLeadTime {
+  final String supplierName;
+  final double avgDays;
+  _SupplierLeadTime({required this.supplierName, required this.avgDays});
+}
+
+class _SupplierCostPoint {
+  final String supplierName;
+  final double unitCost;
+  final DateTime date;
+  bool isCheapest;
+  _SupplierCostPoint({
+    required this.supplierName,
+    required this.unitCost,
+    required this.date,
+    this.isCheapest = false,
+  });
+}
+
+class _PurchasesAnalyticsData {
+  final double totalPurchases;
+  final int poCount;
+  final int pendingCount;
+  final int receivedOrPartialCount;
+  final List<_NamedValue> supplierSpend;
+  final List<_SupplierLeadTime> supplierLeadTimes;
+  final List<_TimeValuePoint> orderFrequencySeries;
+  final List<_IngredientOption> ingredients;
+  final Map<String, List<_SupplierCostPoint>> ingredientPriceBySupplier;
+  _PurchasesAnalyticsData({
+    required this.totalPurchases,
+    required this.poCount,
+    required this.pendingCount,
+    required this.receivedOrPartialCount,
+    required this.supplierSpend,
+    required this.supplierLeadTimes,
+    required this.orderFrequencySeries,
+    required this.ingredients,
+    required this.ingredientPriceBySupplier,
+  });
+
+  factory _PurchasesAnalyticsData.empty() => _PurchasesAnalyticsData(
+        totalPurchases: 0,
+        poCount: 0,
+        pendingCount: 0,
+        receivedOrPartialCount: 0,
+        supplierSpend: const [],
+        supplierLeadTimes: const [],
+        orderFrequencySeries: const [],
+        ingredients: const [],
+        ingredientPriceBySupplier: const {},
+      );
+}
+
+class _FoodCostSummary {
+  final double foodCostTotal;
+  const _FoodCostSummary({required this.foodCostTotal});
 }

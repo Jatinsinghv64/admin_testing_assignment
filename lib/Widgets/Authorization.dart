@@ -12,7 +12,12 @@ import 'FCM_Service.dart'; // ✅ Import FCM Service for token cleanup
 // Auth Service
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  Stream<User?> get userStream => _auth.authStateChanges();
+  // ✅ FIX: Use late final so the SAME stream instance is always returned.
+  // Previously this was a getter (`=> _auth.authStateChanges()`) which created
+  // a NEW stream object on every call. StreamBuilder would detect the new object,
+  // reset to ConnectionState.waiting, briefly show the loading scaffold and
+  // DESTROY HomeScreen — resetting _currentIndex to 0 on every route pop.
+  late final Stream<User?> userStream = _auth.authStateChanges();
   User? get currentUser => _auth.currentUser;
 
   // Session management keys
@@ -26,10 +31,10 @@ class AuthService {
             Persistence.LOCAL); // ✅ Ensure persistence only on web
       }
       await _auth.signInWithEmailAndPassword(email: email, password: password);
-      
+
       // ✅ Record login activity for session timeout
       await _updateLastActivity();
-      
+
       return null;
     } on FirebaseException catch (e) {
       if (e.code == 'user-not-found' ||
@@ -48,7 +53,8 @@ class AuthService {
   Future<void> _updateLastActivity() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_lastActivityKey, DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt(
+          _lastActivityKey, DateTime.now().millisecondsSinceEpoch);
     } catch (e) {
       debugPrint('⚠️ Error updating last activity: $e');
     }
@@ -59,23 +65,23 @@ class AuthService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final lastActivityMs = prefs.getInt(_lastActivityKey);
-      
+
       if (lastActivityMs == null) {
         // No recorded activity - consider session valid (first login)
         await _updateLastActivity();
         return true;
       }
-      
+
       final lastActivity = DateTime.fromMillisecondsSinceEpoch(lastActivityMs);
       final now = DateTime.now();
       final sessionAge = now.difference(lastActivity);
-      
+
       // Check against session timeout from constants (default 24 hours)
       if (sessionAge > AppConstants.sessionTimeout) {
         debugPrint('🔒 Session expired: ${sessionAge.inHours} hours old');
         return false;
       }
-      
+
       return true;
     } catch (e) {
       debugPrint('⚠️ Error checking session validity: $e');

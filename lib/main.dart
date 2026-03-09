@@ -17,10 +17,16 @@ import 'Widgets/Authorization.dart';
 import 'Widgets/RestaurantStatusService.dart';
 import 'Widgets/notification.dart';
 import 'Widgets/FCM_Service.dart';
+import 'services/ingredients/IngredientService.dart';
+import 'services/ingredients/RecipeService.dart';
+import 'services/inventory/InventoryService.dart';
+import 'services/inventory/PurchaseOrderService.dart';
+import 'services/inventory/WasteService.dart';
 import 'firebase_options.dart';
 import 'constants.dart'; // ✅ Added
 import 'Widgets/AccessDeniedWidget.dart'; // ✅ Added
 import 'Widgets/BranchFilterService.dart'; // ✅ Branch filter for multi-branch users
+import 'services/DashboardThemeService.dart'; // ✅ Added for Dashboard Dark/Light Theme
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -54,16 +60,13 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
   await flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin
-      >()
+          AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
 
-  String title =
-      message.data['title'] ??
+  String title = message.data['title'] ??
       message.notification?.title ??
       "New Order Received";
-  String body =
-      message.data['body'] ??
+  String body = message.data['body'] ??
       message.notification?.body ??
       "Open app to view details";
 
@@ -97,48 +100,47 @@ void main() async {
   // Wrap entire app in error zone for global error handling
   runZonedGuarded<Future<void>>(
     () async {
+      debugPrint('🚀 [DIAGNOSTIC] main() started');
       WidgetsFlutterBinding.ensureInitialized();
+      debugPrint('🚀 [DIAGNOSTIC] WidgetsFlutterBinding initialized');
 
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
+      debugPrint('🚀 [DIAGNOSTIC] Firebase initialized');
 
       // ✅ Initialize Firebase App Check for security
-      // This protects Firebase resources from abuse by verifying requests
-      // come from your authentic app on genuine devices
-      // NOTE: Web uses reCAPTCHA v3 (FREE). For web, App Check is optional since
-      // Firestore Security Rules provide the primary protection.
       try {
+        debugPrint('🚀 [DIAGNOSTIC] Initializing Firebase App Check...');
         await FirebaseAppCheck.instance.activate(
-          // Use debug provider for development, real attestation for release
           androidProvider: kDebugMode
               ? AndroidProvider.debug
               : AndroidProvider.playIntegrity,
-          appleProvider: kDebugMode
-              ? AppleProvider.debug
-              : AppleProvider.appAttest,
-          // Web: Uses free reCAPTCHA v3 - just leave null/skip if not configured
-          // Your Firestore Rules already protect the data
+          appleProvider:
+              kDebugMode ? AppleProvider.debug : AppleProvider.appAttest,
         );
-        debugPrint('✅ Firebase App Check initialized');
+        debugPrint('✅ [DIAGNOSTIC] Firebase App Check initialized');
       } catch (e) {
-        // App Check is optional - app works without it (Firestore Rules protect data)
-        debugPrint('⚠️ App Check not configured: $e');
+        debugPrint('⚠️ [DIAGNOSTIC] App Check not configured: $e');
       }
 
       // Initialize Crashlytics for error reporting
-      // FlutterError handler for framework errors
       FlutterError.onError = (errorDetails) {
-        debugPrint('🔴 Flutter Error: ${errorDetails.exceptionAsString()}');
-        // In production, send to Crashlytics:
-        // FirebaseCrashlytics.instance.recordFlutterFatalError(errorDetails);
+        debugPrint(
+            '🔴 [DIAGNOSTIC] Flutter Error: ${errorDetails.exceptionAsString()}');
       };
 
       FirebaseMessaging.onBackgroundMessage(
         _firebaseMessagingBackgroundHandler,
       );
 
-      runApp(const MyApp());
+      // ✅ Initialize DashboardThemeService before runApp
+      final dashboardThemeService = DashboardThemeService();
+      await dashboardThemeService.initialize();
+
+      debugPrint('🚀 [DIAGNOSTIC] Calling runApp(MyApp())');
+      runApp(MyApp(dashboardThemeService: dashboardThemeService));
+      debugPrint('🚀 [DIAGNOSTIC] runApp() executed');
     },
     (error, stackTrace) {
       // Global error handler for async errors
@@ -151,13 +153,20 @@ void main() async {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final DashboardThemeService dashboardThemeService;
+
+  const MyApp({super.key, required this.dashboardThemeService});
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
         Provider<AuthService>(create: (_) => AuthService()),
+        Provider<IngredientService>(create: (_) => IngredientService()),
+        Provider<RecipeService>(create: (_) => RecipeService()),
+        Provider<InventoryService>(create: (_) => InventoryService()),
+        Provider<PurchaseOrderService>(create: (_) => PurchaseOrderService()),
+        Provider<WasteService>(create: (_) => WasteService()),
         ChangeNotifierProvider<UserScopeService>(
           create: (_) => UserScopeService(),
         ),
@@ -177,6 +186,9 @@ class MyApp extends StatelessWidget {
             }
             return branchFilter;
           },
+        ),
+        ChangeNotifierProvider<DashboardThemeService>.value(
+          value: dashboardThemeService,
         ),
       ],
       child: MaterialApp(
@@ -282,14 +294,14 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     );
 
     if (isSuccess && mounted) {
-      if (scopeService.branchId.isNotEmpty) {
-        String restaurantName = "Branch ${scopeService.branchId}";
+      if (scopeService.branchIds.isNotEmpty) {
+        String restaurantName = "Branch ${scopeService.branchIds.first}";
         if (scopeService.userEmail.isNotEmpty) {
           restaurantName =
               "Restaurant (${scopeService.userEmail.split('@').first})";
         }
         statusService.initialize(
-          scopeService.branchId,
+          scopeService.branchIds.first,
           restaurantName: restaurantName,
         );
       }
@@ -426,9 +438,9 @@ class UserScopeService with ChangeNotifier {
 
   String get role => _role;
   List<String> get branchIds => _branchIds;
-  String get branchId => _branchIds.isNotEmpty ? _branchIds.first : '';
   String get userEmail => _userEmail;
-  String get userIdentifier => _userIdentifier; // ✅ Primary identifier (email or phone)
+  String get userIdentifier =>
+      _userIdentifier; // ✅ Primary identifier (email or phone)
   bool get isLoaded => _isLoaded;
   bool get isAccountMissing => _isAccountMissing; // ✅ Getter
   bool get isSuperAdmin => _role == 'super_admin';
@@ -448,7 +460,8 @@ class UserScopeService with ChangeNotifier {
       // ✅ Support both email and phone authentication
       _userEmail = user.email ?? '';
       _userIdentifier = user.email ?? user.phoneNumber ?? '';
-      if (_userIdentifier.isEmpty) throw Exception('User identifier (email or phone) is null.');
+      if (_userIdentifier.isEmpty)
+        throw Exception('User identifier (email or phone) is null.');
 
       final staffSnap = await _db
           .collection(AppConstants.collectionStaff)
@@ -469,7 +482,7 @@ class UserScopeService with ChangeNotifier {
       }
 
       _role = data?['role'] as String? ?? 'unknown';
-      _branchIds = List<String>.from(data?['branchIds'] ?? []);
+      _branchIds = List<String>.from(data?['branchIds'] ?? []).toSet().toList();
       _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
       _isLoaded = true;
       _isAccountMissing = false;
@@ -507,7 +520,7 @@ class UserScopeService with ChangeNotifier {
     }
     _isAccountMissing = false;
     _role = data?['role'] as String? ?? 'unknown';
-    _branchIds = List<String>.from(data?['branchIds'] ?? []);
+    _branchIds = List<String>.from(data?['branchIds'] ?? []).toSet().toList();
     _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
     _isLoaded = true;
     notifyListeners();

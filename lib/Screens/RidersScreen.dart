@@ -1,15 +1,18 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import '../Widgets/AccessDeniedWidget.dart';
 import '../Widgets/Permissions.dart';
 import '../Widgets/ProfessionalErrorWidget.dart';
 import '../main.dart';
 import 'BranchManagement.dart';
+import 'ManualAssignmentScreen.dart';
 import 'OrdersScreen.dart';
 import '../Widgets/BranchFilterService.dart';
 import '../utils/responsive_helper.dart'; // ✅ Added
+import 'RidersScreenLarge.dart';
 
 class RidersScreen extends StatefulWidget {
   const RidersScreen({super.key});
@@ -21,10 +24,18 @@ class RidersScreen extends StatefulWidget {
 class _RidersScreenState extends State<RidersScreen> {
   String _filterStatus = 'all';
   String _searchQuery = '';
+  int _tabIndex = 0;
 
   @override
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
+
+    // ✅ RESPONSIVE SWITCH
+    if (ResponsiveHelper.isDesktop(context)) {
+      return const RidersScreenLarge();
+    }
+
+    // --- 1. UI Permission Check ---
 
     // --- 1. UI Permission Check ---
     if (!userScope.can(Permissions.canManageRiders)) {
@@ -77,15 +88,87 @@ class _RidersScreenState extends State<RidersScreen> {
     // Actually, let's just make sure the 'query' in build is valid for whatever (maybe debugging?).
     // But crucially, I must update _buildEnhancedDriversList.
 
+    final canManageManual =
+        userScope.can(Permissions.canManageManualAssignment);
+    if (!canManageManual) {
+      return _buildDriversScaffold(
+        context: context,
+        userScope: userScope,
+        title: 'Drivers Management',
+        withTabs: false,
+      );
+    }
+
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: AppBar(
+          elevation: 0,
+          backgroundColor: Colors.white,
+          centerTitle: true,
+          title: const Text(
+            'Riders',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.deepPurple,
+              fontSize: 24,
+            ),
+          ),
+          actions: [
+            if (_tabIndex == 0)
+              Container(
+                margin: const EdgeInsets.only(right: 16),
+                decoration: BoxDecoration(
+                  color: Colors.deepPurple,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.add, color: Colors.white),
+                  onPressed: () => _showDriverDialog(context, userScope),
+                  tooltip: 'Add New Driver',
+                ),
+              ),
+          ],
+          bottom: TabBar(
+            onTap: (index) => setState(() => _tabIndex = index),
+            tabs: [
+              const Tab(
+                icon: Icon(Icons.delivery_dining_outlined),
+                text: 'Drivers',
+              ),
+              Tab(
+                icon: _AssignRiderTabBadge(isActive: _tabIndex == 1),
+                text: 'Assign Rider',
+              ),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            _driversBody(userScope),
+            const ManualAssignmentScreen(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDriversScaffold({
+    required BuildContext context,
+    required UserScopeService userScope,
+    required String title,
+    required bool withTabs,
+  }) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.white,
         centerTitle: true,
-        title: const Text(
-          'Drivers Management',
-          style: TextStyle(
+        title: Text(
+          title,
+          style: const TextStyle(
             fontWeight: FontWeight.bold,
             color: Colors.deepPurple,
             fontSize: 24,
@@ -106,58 +189,61 @@ class _RidersScreenState extends State<RidersScreen> {
           ),
         ],
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1200),
-          child: Column(
-            children: [
-              // Enhanced Search Section
-              Container(
-                margin: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.deepPurple.withOpacity(0.1),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search drivers by name or email...',
-                    hintStyle: TextStyle(color: Colors.grey[400]),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    prefixIcon: Icon(
-                      Icons.search_rounded,
-                      color: Colors.deepPurple.shade300,
-                      size: 24,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 16,
-                    ),
+      body: _driversBody(userScope),
+    );
+  }
+
+  Widget _driversBody(UserScopeService userScope) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1200),
+        child: Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.deepPurple.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   ),
-                  onChanged: (query) {
-                    setState(() {
-                      _searchQuery = query.toLowerCase();
-                    });
-                  },
+                ],
+              ),
+              child: TextField(
+                decoration: InputDecoration(
+                  hintText: 'Search drivers by name or email...',
+                  hintStyle: TextStyle(color: Colors.grey[400]),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  prefixIcon: Icon(
+                    Icons.search_rounded,
+                    color: Colors.deepPurple.shade300,
+                    size: 24,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
                 ),
+                onChanged: (query) {
+                  setState(() {
+                    _searchQuery = query.toLowerCase();
+                  });
+                },
               ),
-              _buildEnhancedStatusFilter(),
-              Expanded(
-                child: _buildEnhancedDriversList(userScope),
-              ),
-            ],
-          ),
+            ),
+            _buildEnhancedStatusFilter(),
+            Expanded(
+              child: _buildEnhancedDriversList(userScope),
+            ),
+          ],
         ),
       ),
     );
@@ -264,7 +350,8 @@ class _RidersScreenState extends State<RidersScreen> {
       } else {
         // Limit to first 10 branch IDs to comply with Firestore limit
         final limitedUserBranchIds = userScope.branchIds.take(10).toList();
-        query = query.where('branchIds', arrayContainsAny: limitedUserBranchIds);
+        query =
+            query.where('branchIds', arrayContainsAny: limitedUserBranchIds);
       }
     } else {
       // User with no branches - force empty result
@@ -446,6 +533,62 @@ class _RidersScreenState extends State<RidersScreen> {
   }
 }
 
+class _AssignRiderTabBadge extends StatelessWidget {
+  final bool isActive;
+  const _AssignRiderTabBadge({required this.isActive});
+
+  @override
+  Widget build(BuildContext context) {
+    final userScope = context.watch<UserScopeService>();
+    Query query = FirebaseFirestore.instance
+        .collection('Orders')
+        .where('status', isEqualTo: 'needs_rider_assignment')
+        .where('Order_type', isEqualTo: 'delivery');
+    if (!userScope.isSuperAdmin && userScope.branchIds.isNotEmpty) {
+      query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: query.snapshots(),
+      builder: (context, snapshot) {
+        final count = snapshot.data?.docs.length ?? 0;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Icon(
+              isActive ? Icons.person_pin_circle : Icons.person_pin_circle_outlined,
+              color: isActive ? Colors.deepPurple : Colors.grey[600],
+            ),
+            if (count > 0)
+              Positioned(
+                top: -4,
+                right: -8,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 1.5),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                  child: Text(
+                    count > 9 ? '9+' : '$count',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 /// Enhanced Driver Card with all features
 class EnhancedDriverCard extends StatefulWidget {
   final DocumentSnapshot driver;
@@ -505,7 +648,7 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
       double totalRating = 0.0;
       int ratedOrdersCount = 0;
 
-        for (final doc in ordersSnapshot.docs) {
+      for (final doc in ordersSnapshot.docs) {
         final data = doc.data();
         // Strictly use 'riderRating' for driver validation.
         // We do NOT fallback to 'rating' as that is often the restaurant rating.
@@ -527,7 +670,8 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
       if (mounted) {
         setState(() {
           _realDeliveryCount = ordersSnapshot.docs.length;
-          _realAverageRating = ratedOrdersCount > 0 ? totalRating / ratedOrdersCount : 0.0;
+          _realAverageRating =
+              ratedOrdersCount > 0 ? totalRating / ratedOrdersCount : 0.0;
           _isLoadingStats = false;
         });
       }
@@ -813,13 +957,17 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
       children: [
         _buildStatChip(
           icon: Icons.star_rounded,
-          value: _isLoadingStats ? '...' : (_realAverageRating?.toStringAsFixed(1) ?? '0.0'),
+          value: _isLoadingStats
+              ? '...'
+              : (_realAverageRating?.toStringAsFixed(1) ?? '0.0'),
           color: Colors.amber,
           backgroundColor: Colors.amber.withOpacity(0.1),
         ),
         _buildStatChip(
           icon: Icons.local_shipping_outlined,
-          value: _isLoadingStats ? '...' : '${_realDeliveryCount ?? driverInfo.totalDeliveries}',
+          value: _isLoadingStats
+              ? '...'
+              : '${_realDeliveryCount ?? driverInfo.totalDeliveries}',
           color: Colors.blue,
           backgroundColor: Colors.blue.withOpacity(0.1),
         ),
@@ -1272,6 +1420,144 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
     }
   }
 
+  void _showTrackingDialog(BuildContext context, DocumentSnapshot driverDoc) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 800, maxHeight: 600),
+            child: Column(
+              children: [
+                AppBar(
+                  title: Text(
+                      'Live Tracking: ${(driverDoc.data() as Map)['name'] ?? 'Driver'}'),
+                  backgroundColor: Colors.deepPurple,
+                  foregroundColor: Colors.white,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  leading: const Icon(Icons.location_on),
+                  actions: [
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                Expanded(
+                  child: StreamBuilder<DocumentSnapshot>(
+                    stream: driverDoc.reference.snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+
+                      final data =
+                          snapshot.data!.data() as Map<String, dynamic>? ?? {};
+                      final geoPoint = data['currentLocation'] as GeoPoint?;
+                      final status = data['status'] ?? 'offline';
+
+                      if (geoPoint == null ||
+                          (geoPoint.latitude == 0 && geoPoint.longitude == 0)) {
+                        return const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.location_off,
+                                  size: 64, color: Colors.grey),
+                              SizedBox(height: 16),
+                              Text('No GPS data available for this driver'),
+                            ],
+                          ),
+                        );
+                      }
+
+                      final position =
+                          LatLng(geoPoint.latitude, geoPoint.longitude);
+
+                      return FlutterMap(
+                        options: MapOptions(
+                          initialCenter: position,
+                          initialZoom: 15,
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate:
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName: 'com.zayka.admin',
+                          ),
+                          MarkerLayer(
+                            markers: [
+                              Marker(
+                                point: position,
+                                width: 80,
+                                height: 80,
+                                child: Column(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(8),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color:
+                                                Colors.black.withOpacity(0.1),
+                                            blurRadius: 4,
+                                          )
+                                        ],
+                                      ),
+                                      child: Text(
+                                        data['name'] ?? 'Driver',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.location_on,
+                                      color: status == 'online'
+                                          ? Colors.green
+                                          : Colors.red,
+                                      size: 40,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  color: Colors.grey[50],
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.grey),
+                      SizedBox(width: 8),
+                      Text(
+                        'Updates live as the driver moves.',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _toggleAvailability(DriverInfo driverInfo) async {
     if (_isActionLoading) return;
     setState(() => _isActionLoading = true);
@@ -1313,9 +1599,7 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
         _showDriverDetails(context);
         break;
       case 'track':
-        final data = widget.driver.data() as Map<String, dynamic>;
-        final GeoPoint? loc = data['currentLocation'] as GeoPoint?;
-        await _openGoogleMapsFor(loc);
+        _showTrackingDialog(context, widget.driver);
         break;
       case 'history':
         final data = widget.driver.data() as Map<String, dynamic>;
@@ -1350,36 +1634,6 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
         }
         await _deleteDriverDoc(context);
         break;
-    }
-  }
-
-  Future<void> _openGoogleMapsFor(GeoPoint? loc) async {
-    if (loc == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Location unavailable for this driver.'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-      return;
-    }
-
-    final lat = loc.latitude.toStringAsFixed(6);
-    final lng = loc.longitude.toStringAsFixed(6);
-    final uri =
-        Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
-
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not open Google Maps.'),
-          backgroundColor: Colors.red,
-        ),
-      );
     }
   }
 
@@ -1459,6 +1713,7 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
 }
 
 /// Card to display driver info
+// ignore: unused_element
 class _DriverCard extends StatelessWidget {
   final DocumentSnapshot<Map<String, dynamic>> driverDoc;
   final VoidCallback onTap;
@@ -1577,16 +1832,16 @@ class _DriverDialogState extends State<_DriverDialog> {
     // Robust vehicle parsing
     String vType = 'Motorcycle';
     String vNum = '';
-    
+
     try {
       if (data?['vehicle'] is Map) {
-         final v = data!['vehicle'] as Map<String, dynamic>;
-         vType = v['type']?.toString() ?? 'Motorcycle';
-         vNum = v['number']?.toString() ?? '';
+        final v = data!['vehicle'] as Map<String, dynamic>;
+        vType = v['type']?.toString() ?? 'Motorcycle';
+        vNum = v['number']?.toString() ?? '';
       } else if (data?['vehicle'] != null) {
-         // Fallback if vehicle is stored as string or other type
-         debugPrint('Warning: Vehicle data is not a map: ${data?['vehicle']}');
-         vType = data?['vehicle'].toString() ?? 'Motorcycle';
+        // Fallback if vehicle is stored as string or other type
+        debugPrint('Warning: Vehicle data is not a map: ${data?['vehicle']}');
+        vType = data?['vehicle'].toString() ?? 'Motorcycle';
       }
     } catch (e) {
       debugPrint('Error parsing vehicle data: $e');
@@ -2037,7 +2292,8 @@ class _DriverDetailsBottomSheet extends StatefulWidget {
   });
 
   @override
-  State<_DriverDetailsBottomSheet> createState() => _DriverDetailsBottomSheetState();
+  State<_DriverDetailsBottomSheet> createState() =>
+      _DriverDetailsBottomSheetState();
 }
 
 class _DriverDetailsBottomSheetState extends State<_DriverDetailsBottomSheet> {
@@ -2085,7 +2341,8 @@ class _DriverDetailsBottomSheetState extends State<_DriverDetailsBottomSheet> {
       if (mounted) {
         setState(() {
           _realDeliveryCount = totalDeliveries;
-          _realAverageRating = ratedOrdersCount > 0 ? totalRating / ratedOrdersCount : 0.0;
+          _realAverageRating =
+              ratedOrdersCount > 0 ? totalRating / ratedOrdersCount : 0.0;
           _isLoadingStats = false;
         });
       }
@@ -2394,13 +2651,11 @@ class _DriverDetailsBottomSheetState extends State<_DriverDetailsBottomSheet> {
 
   Widget _buildStatistics(DriverInfo driverInfo) {
     // Use real-time fetched values instead of static Firestore values
-    final displayRating = _isLoadingStats 
-        ? '...' 
-        : _realAverageRating.toStringAsFixed(1);
-    final displayDeliveries = _isLoadingStats 
-        ? '...' 
-        : _realDeliveryCount.toString();
-    
+    final displayRating =
+        _isLoadingStats ? '...' : _realAverageRating.toStringAsFixed(1);
+    final displayDeliveries =
+        _isLoadingStats ? '...' : _realDeliveryCount.toString();
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -2524,20 +2779,78 @@ class _DriverDetailsBottomSheetState extends State<_DriverDetailsBottomSheet> {
             color: Colors.red,
           ),
           const SizedBox(height: 16),
-          SizedBox(
+          // Embedded Live Tracking Map
+          Container(
+            height: 200,
             width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _openMaps(context, driverInfo.currentLocation),
-              icon: const Icon(Icons.map_rounded),
-              label: const Text('Open in Maps'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.deepPurple,
-                side: BorderSide(color: Colors.deepPurple.shade300),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey[300]!),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: StreamBuilder<DocumentSnapshot>(
+              stream: widget.driver.reference.snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final data =
+                    snapshot.data!.data() as Map<String, dynamic>? ?? {};
+                final geoPoint = data['currentLocation'] as GeoPoint?;
+                final status = data['status'] ?? 'offline';
+
+                if (geoPoint == null ||
+                    (geoPoint.latitude == 0 && geoPoint.longitude == 0)) {
+                  return const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.location_off, size: 48, color: Colors.grey),
+                        SizedBox(height: 8),
+                        Text('No GPS data available',
+                            style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      ],
+                    ),
+                  );
+                }
+
+                final position = LatLng(geoPoint.latitude, geoPoint.longitude);
+
+                return FlutterMap(
+                  options: MapOptions(
+                    initialCenter: position,
+                    initialZoom: 15,
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.zayka.admin',
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: position,
+                          width: 60,
+                          height: 60,
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.location_on,
+                                color: status == 'online'
+                                    ? Colors.green
+                                    : Colors.red,
+                                size: 30,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -2791,34 +3104,6 @@ class _DriverDetailsBottomSheetState extends State<_DriverDetailsBottomSheet> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  Future<void> _openMaps(BuildContext context, GeoPoint? location) async {
-    if (location == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Location unavailable for this driver.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    final lat = location.latitude.toStringAsFixed(6);
-    final lng = location.longitude.toStringAsFixed(6);
-    final uri =
-        Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
-
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not open Google Maps.'),
           backgroundColor: Colors.red,
         ),
       );
@@ -3156,7 +3441,8 @@ class _OrderHistoryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
                           color: _getStatusColor(status).withOpacity(0.1),
                           borderRadius: BorderRadius.circular(8)),
@@ -3173,7 +3459,8 @@ class _OrderHistoryCard extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
+                            const Icon(Icons.star_rounded,
+                                color: Colors.amber, size: 16),
                             const SizedBox(width: 4),
                             Text(
                               rating.toStringAsFixed(1),
@@ -3217,7 +3504,9 @@ class _OrderHistoryCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text('QAR ${totalAmount.toStringAsFixed(2)}',
                 style: const TextStyle(
-                    fontWeight: FontWeight.bold, color: Colors.deepPurple, fontSize: 16)),
+                    fontWeight: FontWeight.bold,
+                    color: Colors.deepPurple,
+                    fontSize: 16)),
           ],
         ),
       ),
