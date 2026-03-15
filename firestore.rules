@@ -17,22 +17,36 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/Drivers/$(request.auth.uid));
     }
 
-    // Check if user is staff member (admin or branch admin)
+    // Check if user is staff member (supports Email or Phone document keys)
     function isStaff() {
-      return isAuthenticated() && 
-        exists(/databases/$(database)/documents/staff/$(request.auth.uid));
+      let email = request.auth.token.email;
+      let phone = request.auth.token.phone_number;
+      return isAuthenticated() && (
+        (email != null && exists(/databases/$(database)/documents/staff/$(email))) ||
+        (phone != null && exists(/databases/$(database)/documents/staff/$(phone))) ||
+        exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+      );
+    }
+
+    // Helper to get staff data safely
+    function getStaffData() {
+      let email = request.auth.token.email;
+      let phone = request.auth.token.phone_number;
+      return (email != null && exists(/databases/$(database)/documents/staff/$(email)))
+        ? get(/databases/$(database)/documents/staff/$(email)).data
+        : (phone != null && exists(/databases/$(database)/documents/staff/$(phone)))
+          ? get(/databases/$(database)/documents/staff/$(phone)).data
+          : get(/databases/$(database)/documents/staff/$(request.auth.uid)).data;
     }
 
     // Check if user is super admin
     function isSuperAdmin() {
-      return isStaff() && 
-        get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role == 'super_admin';
+      return isStaff() && getStaffData().role == 'super_admin';
     }
 
     // Check if user is branch admin
     function isBranchAdmin() {
-      return isStaff() && 
-        get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role == 'branchadmin';
+      return isStaff() && getStaffData().role == 'branchadmin';
     }
 
     // Check if status field is being modified
@@ -44,7 +58,7 @@ service cloud.firestore {
     function hasAccessToBranch(branchId) {
       return isAuthenticated() && (
         isSuperAdmin() ||
-        branchId in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.branchIds
+        branchId in getStaffData().branchIds
       );
     }
 
@@ -177,6 +191,8 @@ service cloud.firestore {
       // Staff can read their own document
       allow read: if isAuthenticated() && (
         request.auth.uid == staffId ||
+        request.auth.token.email == staffId ||
+        request.auth.token.phone_number == staffId ||
         isSuperAdmin()
       );
       

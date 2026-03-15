@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../Widgets/Permissions.dart';
 import '../Widgets/RestaurantStatusService.dart';
+import '../Widgets/BranchFilterService.dart';
 import '../main.dart';
 import 'DashboardScreen.dart';
 import 'inventory/InventoryDashboardScreen.dart';
@@ -331,8 +332,7 @@ class _HomeScreenState extends State<HomeScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) =>
-          _BranchStatusToggleSheet(branchId: userScope.branchIds.isNotEmpty ? userScope.branchIds.first : ''),
+      builder: (context) => _BranchStatusToggleSheet(branchIds: userScope.branchIds),
     );
   }
 
@@ -642,12 +642,111 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ✅ Global branch selector widget for app bar
+  Widget _buildGlobalBranchSelector() {
+    final userScope = context.watch<UserScopeService>();
+    final branchFilter = context.watch<BranchFilterService>();
+    final showSelector = userScope.isSuperAdmin && userScope.branchIds.length > 1;
+
+    if (!showSelector) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      child: PopupMenuButton<String>(
+        offset: const Offset(0, 45),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.deepPurple.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.deepPurple.withOpacity(0.2),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.store, size: 16, color: Colors.deepPurple),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 120),
+                child: Text(
+                  branchFilter.selectedBranchId == null
+                      ? 'All Branches'
+                      : branchFilter.getBranchName(branchFilter.selectedBranchId!),
+                  style: const TextStyle(
+                    color: Colors.deepPurple,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 2),
+              const Icon(Icons.arrow_drop_down, color: Colors.deepPurple, size: 18),
+            ],
+          ),
+        ),
+        itemBuilder: (context) => [
+          PopupMenuItem<String>(
+            value: BranchFilterService.allBranchesValue,
+            child: Row(
+              children: [
+                Icon(
+                  branchFilter.selectedBranchId == null
+                      ? Icons.check_circle
+                      : Icons.circle_outlined,
+                  size: 18,
+                  color: branchFilter.selectedBranchId == null
+                      ? Colors.deepPurple
+                      : Colors.grey,
+                ),
+                const SizedBox(width: 10),
+                const Text('All Branches'),
+              ],
+            ),
+          ),
+          const PopupMenuDivider(),
+          ...userScope.branchIds.map((branchId) => PopupMenuItem<String>(
+                value: branchId,
+                child: Row(
+                  children: [
+                    Icon(
+                      branchFilter.selectedBranchId == branchId
+                          ? Icons.check_circle
+                          : Icons.circle_outlined,
+                      size: 18,
+                      color: branchFilter.selectedBranchId == branchId
+                          ? Colors.deepPurple
+                          : Colors.grey,
+                    ),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        branchFilter.getBranchName(branchId),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+        ],
+        onSelected: (value) {
+          branchFilter.selectBranch(value);
+        },
+      ),
+    );
+  }
+
   PreferredSizeWidget _buildAppBar(String appBarTitle,
       RestaurantStatusService statusService, UserScopeService userScope,
       {bool isMobile = true}) {
     return AppBar(
       title: Text(appBarTitle),
       actions: [
+        // ✅ Global branch selector
+        _buildGlobalBranchSelector(),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0),
           child: Row(
@@ -1136,9 +1235,8 @@ class BadgeCountProvider with ChangeNotifier {
 
 // ✅ NEW: Branch status toggle sheet for SuperAdmin
 class _BranchStatusToggleSheet extends StatefulWidget {
-  final String branchId;
-
-  const _BranchStatusToggleSheet({required this.branchId});
+  final List<String> branchIds;
+  const _BranchStatusToggleSheet({Key? key, required this.branchIds}) : super(key: key);
 
   @override
   State<_BranchStatusToggleSheet> createState() =>
@@ -1157,8 +1255,7 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
   }
 
   Future<void> _loadBranches() async {
-    // Edge case: empty branchIds
-    if (widget.branchId.isEmpty) {
+    if (widget.branchIds.isEmpty) {
       setState(() {
         _branches = [];
         _isLoading = false;
@@ -1167,38 +1264,35 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
     }
 
     try {
-      // Load only assigned branches
       final List<Map<String, dynamic>> loadedBranches = [];
 
-      for (final branchId in [widget.branchId]) {
-        try {
-          final doc = await FirebaseFirestore.instance
-              .collection('Branch')
-              .doc(branchId)
-              .get();
-          if (doc.exists) {
-            final data = doc.data()!;
-            loadedBranches.add({
-              'id': doc.id,
-              'name': data['name'] ?? doc.id,
-              'isOpen': data['isOpen'] ?? false,
-            });
-          } else {
-            // Branch document was deleted but still in branchIds
-            debugPrint('Branch $branchId not found - may have been deleted');
-          }
-        } catch (e) {
-          debugPrint('Error loading branch $branchId: $e');
+      // Fetch all branches in parallel for better performance
+      final futures = widget.branchIds.map((id) => 
+        FirebaseFirestore.instance.collection('Branch').doc(id).get()
+      ).toList();
+
+      final snapshots = await Future.wait(futures);
+
+      for (final doc in snapshots) {
+        if (doc.exists) {
+          final data = doc.data()!;
+          loadedBranches.add({
+            'id': doc.id,
+            'name': data['name'] ?? doc.id,
+            'isOpen': data['isOpen'] ?? false,
+          });
         }
       }
 
-      setState(() {
-        _branches = loadedBranches;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _branches = loadedBranches;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       debugPrint('Error loading branches: $e');
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 

@@ -681,8 +681,10 @@ class PrintingService {
         final List<dynamic> rawItems = (order['items'] ?? []) as List<dynamic>;
         final items = rawItems.map((e) {
           final m = Map<String, dynamic>.from(e as Map);
+          final bool isAddOn = m['isAddOn'] == true;
+          final String baseName = (m['name'] ?? 'Item').toString();
           return {
-            'name': (m['name'] ?? 'Item').toString(),
+            'name': isAddOn ? '[ADD-ON] $baseName' : baseName,
             'qty': int.tryParse(
                     (m['quantity'] ?? m['qty'] ?? '1').toString()) ??
                 1,

@@ -51,13 +51,18 @@ class BranchFilterService with ChangeNotifier {
     return userBranchIds;
   }
 
+  final Set<String> _loadingIds = {};
+
   /// Load branch names from Firestore for the given branch IDs
   Future<void> loadBranchNames(List<String> branchIds) async {
-    if (branchIds.isEmpty) return;
+    final toLoad = branchIds.where((id) => !_branchNames.containsKey(id) && !_loadingIds.contains(id)).toList();
+    if (toLoad.isEmpty) return;
+
+    _loadingIds.addAll(toLoad);
 
     try {
       // Fetch branch documents in parallel
-      final futures = branchIds.map((id) =>
+      final futures = toLoad.map((id) =>
           _db.collection('Branch').doc(id).get()
       ).toList();
 
@@ -74,6 +79,8 @@ class BranchFilterService with ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Error loading branch names: $e');
+    } finally {
+      _loadingIds.removeAll(toLoad);
     }
   }
 

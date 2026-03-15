@@ -2922,6 +2922,8 @@ class _MenuItemDialog extends StatefulWidget {
 
 class _MenuItemDialogState extends State<_MenuItemDialog> {
   final _formKey = GlobalKey<FormState>();
+  late final RecipeService _recipeService;
+  late final IngredientService _ingredientService;
   late TextEditingController _nameController;
   late TextEditingController _nameArController;
   late TextEditingController _descController;
@@ -2951,6 +2953,13 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
   double _foodCostPct = 0.0;
   List<Map<String, dynamic>> _allRecipes = [];
   bool _loadingRecipes = true;
+
+  // Integrated Recipe Editor state
+  List<RecipeIngredientLine> _ingredientLines = [];
+  List<String> _instructions = [''];
+  double _liveRecipeCost = 0.0;
+  List<IngredientModel> _allIngredients = [];
+  bool _loadingIngredients = true;
 
   // Preparation time options in 5-minute intervals
   static const List<int> _prepTimeOptions = [
@@ -3063,6 +3072,56 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
     }).catchError((_) {
       if (mounted) setState(() => _loadingRecipes = false);
     });
+
+    if (_linkedRecipeId != null) {
+      _loadLinkedRecipeDetails(_linkedRecipeId!);
+    }
+  }
+
+  Future<void> _loadIngredients() async {
+    final userScope = context.read<UserScopeService>();
+    final branchIds = userScope.branchIds;
+    _ingredientService.streamAllIngredients(branchIds).listen((snap) {
+      if (mounted) {
+        setState(() {
+          _allIngredients = snap;
+          _loadingIngredients = false;
+        });
+        _recalcLiveRecipeCost();
+      }
+    });
+  }
+
+  Future<void> _loadLinkedRecipeDetails(String recipeId) async {
+    try {
+      final recipe = await _recipeService.getRecipe(recipeId);
+      if (recipe != null && mounted) {
+        setState(() {
+          _ingredientLines = List.from(recipe.ingredients);
+          _instructions = recipe.instructions.isNotEmpty 
+              ? List.from(recipe.instructions) 
+              : [''];
+          _recalcLiveRecipeCost();
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading recipe details: $e');
+    }
+  }
+
+  void _recalcLiveRecipeCost() {
+    double cost = 0.0;
+    for (final line in _ingredientLines) {
+      final ingredient = _allIngredients.where((i) => i.id == line.ingredientId).firstOrNull;
+      if (ingredient != null) {
+        cost += ingredient.costPerUnit * line.quantity;
+      }
+    }
+    setState(() {
+      _liveRecipeCost = cost;
+      final currentPrice = double.tryParse(_priceController.text) ?? 0.0;
+      _foodCostPct = (currentPrice > 0 && cost > 0) ? (cost / currentPrice) * 100 : 0.0;
+    });
   }
 
   void _applyRecipeLink(Map<String, dynamic> recipe,
@@ -3169,12 +3228,67 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       'lastUpdated': FieldValue.serverTimestamp(),
       // Recipe link fields
       'recipeId': _linkedRecipeId,
-      'prepTimeMinutes': _linkedPrepTimeMinutes,
+      'prepTimeMinutes': _preparationTime,
       'allergenWarnings': _linkedAllergens,
       'foodCostPercentage': _foodCostPct > 0 ? _foodCostPct : null,
     };
 
     try {
+      // ── Handle Recipe saving/updating ──
+      String? finalRecipeId = _linkedRecipeId;
+      if (_ingredientLines.isNotEmpty || _instructions.any((s) => s.trim().isNotEmpty)) {
+        final cleanInstructions = _instructions.where((s) => s.trim().isNotEmpty).toList();
+        final cleanIngredients = _ingredientLines.where((l) => l.ingredientId.isNotEmpty).toList();
+
+        if (cleanInstructions.isNotEmpty || cleanIngredients.isNotEmpty) {
+          if (finalRecipeId != null) {
+            final existingRecipe = await _recipeService.getRecipe(finalRecipeId);
+            if (existingRecipe != null) {
+              final updatedRecipe = existingRecipe.copyWith(
+                branchIds: branchIdsToSave,
+                name: _nameController.text.trim(),
+                description: _descController.text.trim(),
+                ingredients: cleanIngredients,
+                totalCost: _liveRecipeCost,
+                instructions: cleanInstructions,
+                prepTimeMinutes: _preparationTime,
+                linkedMenuItemId: widget.doc?.id,
+                linkedMenuItemName: _nameController.text.trim(),
+                updatedAt: DateTime.now(),
+              );
+              await _recipeService.updateRecipe(updatedRecipe);
+            }
+          } else {
+            final newRecipeId = db.collection('recipes').doc().id;
+            final newRecipe = RecipeModel(
+              id: newRecipeId,
+              branchIds: branchIdsToSave,
+              name: _nameController.text.trim(),
+              description: _descController.text.trim(),
+              ingredients: cleanIngredients,
+              totalCost: _liveRecipeCost,
+              instructions: cleanInstructions,
+              prepTimeMinutes: _preparationTime,
+              yield_: '',
+              servingSize: '',
+              difficultyLevel: 'medium',
+              categoryTags: [],
+              allergenTags: [],
+              photoUrls: [],
+              linkedMenuItemId: widget.doc?.id,
+              linkedMenuItemName: _nameController.text.trim(),
+              isActive: true,
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            );
+            await _recipeService.addRecipe(newRecipe);
+            finalRecipeId = newRecipeId;
+          }
+        }
+      }
+
+      data['recipeId'] = finalRecipeId;
+
       if (_isEdit) {
         // âœ… CRITICAL FIX: Atomic Stock Updates
         // If we are editing and have a valid branch context, we add atomic operations
@@ -3337,6 +3451,356 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       setState(() => _imageUrlController.text = url);
       _showSuccess('Image uploaded successfully!');
     }
+  }
+  Widget _sectionLabel(String label) {
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 18,
+          decoration: BoxDecoration(
+              color: Colors.deepPurple, borderRadius: BorderRadius.circular(2)),
+        ),
+        const SizedBox(width: 10),
+        Text(label,
+            style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87)),
+      ],
+    );
+  }
+
+  Widget _buildIngredientTable() {
+    if (_ingredientLines.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(24),
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Column(
+          children: [
+            Icon(Icons.inventory_2_outlined, color: Colors.grey.shade400, size: 32),
+            const SizedBox(height: 12),
+            Text('No ingredients added yet.', style: TextStyle(color: Colors.grey.shade600)),
+          ],
+        ),
+      );
+    }
+    return Column(
+      children: List.generate(_ingredientLines.length, (idx) {
+        return _buildIngredientRow(idx, _ingredientLines[idx]);
+      }),
+    );
+  }
+
+  Widget _buildIngredientRow(int idx, RecipeIngredientLine line) {
+    final selectedIngredient = _allIngredients.where((i) => i.id == line.ingredientId).firstOrNull;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 28, height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: Colors.deepPurple.withOpacity(0.1), shape: BoxShape.circle),
+                child: Text('${idx + 1}', style: const TextStyle(color: Colors.deepPurple, fontWeight: FontWeight.bold, fontSize: 12)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: line.ingredientId.isNotEmpty ? line.ingredientId : null,
+                  hint: const Text('Select Ingredient', style: TextStyle(fontSize: 13)),
+                  isExpanded: true,
+                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                  decoration: InputDecoration(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
+                  items: _allIngredients.map((i) => DropdownMenuItem(
+                    value: i.id,
+                    child: Text(i.name, overflow: TextOverflow.ellipsis),
+                  )).toList(),
+                  onChanged: (newId) {
+                    if (newId == null) return;
+                    final ing = _allIngredients.where((i) => i.id == newId).firstOrNull;
+                    if (ing == null) return;
+                    setState(() {
+                      _ingredientLines[idx] = line.copyWith(
+                        ingredientId: newId,
+                        ingredientName: ing.name,
+                        unit: ing.unit,
+                      );
+                      _recalcLiveRecipeCost();
+                    });
+                  },
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                onPressed: () {
+                  setState(() {
+                    _ingredientLines.removeAt(idx);
+                    _recalcLiveRecipeCost();
+                  });
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const SizedBox(width: 40),
+              SizedBox(
+                width: 100,
+                child: TextFormField(
+                  initialValue: line.quantity > 0 ? line.quantity.toString() : '',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: const TextStyle(fontSize: 13),
+                  decoration: InputDecoration(
+                    labelText: 'Quantity',
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
+                  onChanged: (v) {
+                    final qty = double.tryParse(v) ?? 0;
+                    setState(() {
+                      _ingredientLines[idx] = line.copyWith(quantity: qty);
+                      _recalcLiveRecipeCost();
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(selectedIngredient?.unit ?? line.unit, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInstructionsList() {
+    return Column(
+      children: List.generate(_instructions.length, (idx) {
+        return _buildInstructionRow(idx, _instructions[idx], key: ValueKey('step_$idx'));
+      }),
+    );
+  }
+
+  Widget _buildInstructionRow(int idx, String text, {required Key key}) {
+    return Container(
+      key: key,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 26, height: 26,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: Colors.deepPurple.withOpacity(0.1), shape: BoxShape.circle),
+            child: Text('${idx + 1}', style: const TextStyle(color: Colors.deepPurple, fontWeight: FontWeight.bold, fontSize: 11)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextFormField(
+              initialValue: text,
+              maxLines: null,
+              style: const TextStyle(fontSize: 13),
+              decoration: const InputDecoration(
+                hintText: 'Describe this step...',
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+              onChanged: (v) => _instructions[idx] = v,
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.remove_circle_outline, color: Colors.grey, size: 18),
+            onPressed: () => setState(() => _instructions.removeAt(idx)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  final List<Map<String, dynamic>> _commonAllergens = [
+    {'label': 'Dairy', 'icon': Icons.water_drop, 'color': Colors.blue},
+    {'label': 'Eggs', 'icon': Icons.egg, 'color': Colors.orangeAccent},
+    {'label': 'Gluten', 'icon': Icons.local_pizza, 'color': Colors.amber},
+    {'label': 'Nuts', 'icon': Icons.cookie, 'color': Colors.brown},
+    {'label': 'Soy', 'icon': Icons.grass, 'color': Colors.green},
+    {'label': 'Fish', 'icon': Icons.set_meal, 'color': Colors.teal},
+    {'label': 'Shellfish', 'icon': Icons.bug_report, 'color': Colors.redAccent},
+  ];
+
+  void _showAllergenDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              backgroundColor: Colors.white,
+              title: const Text('Edit Allergen Profile'),
+              content: SizedBox(
+                width: 400,
+                child: Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: _commonAllergens.map((alg) {
+                    final label = alg['label'] as String;
+                    final isSelected = _linkedAllergens.contains(label);
+                    return FilterChip(
+                      selected: isSelected,
+                      label: Text(label),
+                      avatar: Icon(alg['icon'] as IconData, color: alg['color'] as Color, size: 16),
+                      onSelected: (val) {
+                        setStateDialog(() {
+                          if (val) {
+                            _linkedAllergens.add(label);
+                          } else {
+                            _linkedAllergens.remove(label);
+                          }
+                        });
+                        setState(() {}); // update main screen
+                      },
+                    );
+                  }).toList(),
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildAllergenProfileCard() {
+    final activeAllergens = _commonAllergens.where((a) => _linkedAllergens.contains(a['label'])).toList();
+    
+    return Container(
+      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(top: 16),
+      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Allergen Profile', style: TextStyle(color: Colors.black87, fontSize: 13, fontWeight: FontWeight.w600)),
+              IconButton(icon: const Icon(Icons.edit, size: 16, color: Colors.deepPurple), onPressed: _showAllergenDialog),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (activeAllergens.isEmpty)
+             const Text('No allergens selected.', style: TextStyle(color: Colors.grey, fontSize: 12))
+          else
+            Wrap(
+              spacing: 8, runSpacing: 8,
+              children: activeAllergens.map((a) => Container(
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[200]!)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(a['icon'] as IconData, color: a['color'] as Color, size: 14),
+                    const SizedBox(width: 6),
+                    Text(a['label'] as String, style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                  ],
+                ),
+              )).toList(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInventoryForecastCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(top: 16),
+      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+           const Text('Inventory Forecast', style: TextStyle(color: Colors.black87, fontSize: 13, fontWeight: FontWeight.w600)),
+           const SizedBox(height: 12),
+           const Text('Link a recipe and maintain ingredient stock to enable forecasting.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWeeklySalesCard() {
+    final heights = [0.4, 0.35, 0.55, 0.60, 0.85, 1.0, 0.90];
+    final labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    return Container(
+      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(top: 16),
+      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Weekly Sales', style: TextStyle(color: Colors.black87, fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 80,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: List.generate(7, (i) {
+                return Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    child: FractionallySizedBox(
+                      heightFactor: heights[i],
+                      alignment: Alignment.bottomCenter,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.withOpacity(heights[i] > 0.8 ? 1.0 : heights[i] > 0.5 ? 0.6 : 0.2),
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(2))
+                        ),
+                      ),
+                    ),
+                  )
+                );
+              }),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+             children: labels.map((l) => Expanded(child: Center(child: Text(l, style: const TextStyle(color: Colors.grey, fontSize: 10))))).toList(),
+          )
+        ],
+      )
+    );
   }
 
   void _showMultiSelect() async {
@@ -4221,121 +4685,114 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
               ),
               const SizedBox(height: 16),
 
-              // ── LINKED RECIPE SECTION ─────────────────────────────────
-              _buildSectionHeader(
-                  'Linked Recipe', Icons.restaurant_menu_outlined),
-              const SizedBox(height: 12),
-              GestureDetector(
-                onTap: _loadingRecipes ? null : () => _showRecipePickerDialog(),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: _linkedRecipeId != null
-                          ? Colors.deepPurple.shade300
-                          : Colors.grey.shade300,
-                      width: _linkedRecipeId != null ? 1.5 : 1,
-                    ),
+              // ── RECIPE & INGREDIENTS SECTION ─────────────────────────────
+              const Divider(height: 48),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildSectionHeader('Recipe & Ingredients', Icons.restaurant_menu),
+                  TextButton.icon(
+                    onPressed: _loadingRecipes ? null : () => _showRecipePickerDialog(),
+                    icon: const Icon(Icons.link, size: 16),
+                    label: const Text('Link Existing', style: TextStyle(fontSize: 12)),
                   ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.book_outlined,
-                        color: _linkedRecipeId != null
-                            ? Colors.deepPurple
-                            : Colors.grey[500],
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _loadingRecipes
-                            ? const Text('Loading recipes…',
-                                style:
-                                    TextStyle(color: Colors.grey, fontSize: 14))
-                            : Text(
-                                _linkedRecipeName ??
-                                    'Tap to link a recipe (optional)',
-                                style: TextStyle(
-                                  color: _linkedRecipeId != null
-                                      ? Colors.black87
-                                      : Colors.grey[500],
-                                  fontSize: 14,
-                                  fontWeight: _linkedRecipeId != null
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                      ),
-                      if (_linkedRecipeId != null)
-                        GestureDetector(
-                          onTap: () => setState(() {
+                ],
+              ),
+              if (_linkedRecipeName != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 16),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.deepPurple.shade100),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.link, color: Colors.deepPurple, size: 16),
+                        const SizedBox(width: 8),
+                        const Text('Linked to: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                        Expanded(child: Text(_linkedRecipeName!, style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.bold))),
+                        IconButton(
+                          icon: const Icon(Icons.link_off, size: 16, color: Colors.red),
+                          onPressed: () => setState(() {
                             _linkedRecipeId = null;
                             _linkedRecipeName = null;
-                            _linkedPrepTimeMinutes = null;
-                            _linkedAllergens = [];
-                            _foodCostPct = 0.0;
+                            _ingredientLines = [];
+                            _instructions = [''];
+                            _recalcLiveRecipeCost();
                           }),
-                          child: Icon(Icons.close,
-                              size: 18, color: Colors.grey[500]),
-                        )
-                      else
-                        Icon(Icons.chevron_right,
-                            size: 20, color: Colors.grey[400]),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
+              
+              const SizedBox(height: 16),
+              _sectionLabel('Ingredients'),
+              const SizedBox(height: 12),
+              _loadingIngredients 
+                ? const Center(child: CircularProgressIndicator())
+                : _buildIngredientTable(),
+              
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _ingredientLines.add(const RecipeIngredientLine(
+                      ingredientId: '',
+                      ingredientName: '',
+                      quantity: 1,
+                      unit: '',
+                    ));
+                  });
+                },
+                icon: const Icon(Icons.add_circle_outline, size: 18),
+                label: const Text('Add Ingredient', style: TextStyle(fontSize: 13)),
               ),
 
-              // Auto-filled info panel
-              if (_linkedRecipeId != null) ...[
-                const SizedBox(height: 8),
+              const SizedBox(height: 24),
+              _sectionLabel('Preparation Steps'),
+              const SizedBox(height: 12),
+              _buildInstructionsList(),
+              
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: () => setState(() => _instructions.add('')),
+                icon: const Icon(Icons.add_task, size: 18),
+                label: const Text('Add Step', style: TextStyle(fontSize: 13)),
+              ),
+              
+              if (_foodCostPct > 0) ...[
+                const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.deepPurple.shade50,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.deepPurple.shade100),
+                    color: _foodCostPct > 35 ? Colors.red.shade50 : Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _foodCostPct > 35 ? Colors.red.shade100 : Colors.green.shade100),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     children: [
-                      if (_linkedPrepTimeMinutes != null)
-                        _buildRecipeInfoRow(Icons.timer_outlined, 'Prep Time',
-                            '$_linkedPrepTimeMinutes min'),
-                      if (_foodCostPct > 0)
-                        _buildRecipeInfoRow(
-                            Icons.percent_outlined,
-                            'Food Cost %',
-                            '${_foodCostPct.toStringAsFixed(1)}%',
-                            color: _foodCostPct > 35
-                                ? Colors.red.shade700
-                                : Colors.green.shade700),
-                      if (_linkedAllergens.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(Icons.warning_amber_outlined,
-                                size: 14, color: Colors.orange.shade700),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                'Allergens: ${_linkedAllergens.join(', ')}',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.orange.shade800),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                      Icon(Icons.analytics_outlined, size: 18, color: _foodCostPct > 35 ? Colors.red : Colors.green),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Est. Food Cost', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                          Text('${_foodCostPct.toStringAsFixed(1)}%', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _foodCostPct > 35 ? Colors.red : Colors.green)),
+                        ],
+                      ),
+                      const Spacer(),
+                      Text('Margin: ${(100 - _foodCostPct).toStringAsFixed(1)}%', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
               ],
+              _buildAllergenProfileCard(),
+              _buildInventoryForecastCard(),
+              _buildWeeklySalesCard(),
               const SizedBox(height: 24),
               Row(
                 children: [

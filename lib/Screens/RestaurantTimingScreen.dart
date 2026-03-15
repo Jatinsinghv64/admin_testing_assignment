@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../main.dart';
 import '../Widgets/BranchFilterService.dart';
+import '../Widgets/BranchSelectorDialog.dart';
+import '../constants.dart';
 import 'ConnectionUtils.dart';
 
 class RestaurantTimingScreen extends StatefulWidget {
@@ -83,12 +85,12 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
       return;
     }
 
-    // Use global branch filter if available, otherwise fallback to first assigned branch
+    // Use specific branch from filter if one is selected, 
+    // otherwise default to first assigned branch
     String? targetBranchId;
-    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
-    
-    if (filterBranchIds.isNotEmpty) {
-      targetBranchId = filterBranchIds.first;
+    if (branchFilter.selectedBranchId != null && 
+        userScope.branchIds.contains(branchFilter.selectedBranchId)) {
+      targetBranchId = branchFilter.selectedBranchId;
     } else if (userScope.branchIds.isNotEmpty) {
       targetBranchId = userScope.branchIds.first;
     }
@@ -111,7 +113,11 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
 
   Future<void> _loadTimings() async {
     if (_selectedBranchId == null || _selectedBranchId!.isEmpty) {
-      setState(() => _isLoading = false);
+      setState(() {
+        _isLoading = false;
+        _hasError = true;
+        _errorMessage = 'No branch selected.';
+      });
       return;
     }
 
@@ -123,7 +129,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
 
     try {
       final doc = await FirebaseFirestore.instance
-          .collection('Branch')
+          .collection(AppConstants.collectionBranch)
           .doc(_selectedBranchId)
           .get()
           .timeout(const Duration(seconds: 15));
@@ -147,7 +153,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
           _isLoading = false;
           _hasError = true;
           _errorMessage =
-              'Failed to load timings. Please check your connection.';
+              'Failed to load timings for $_selectedBranchId. Please check your connection.';
         });
       }
     }
@@ -202,7 +208,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
     if (_selectedBranchId == null || _selectedBranchId!.isEmpty) return;
     
     _branchSubscription = FirebaseFirestore.instance
-        .collection('Branch')
+        .collection(AppConstants.collectionBranch)
         .doc(_selectedBranchId)
         .snapshots()
         .listen((snapshot) {
@@ -381,7 +387,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
 
     try {
       await FirebaseFirestore.instance
-          .collection('Branch')
+          .collection(AppConstants.collectionBranch)
           .doc(_selectedBranchId)
           .set({'workingHours': _workingHours},
               SetOptions(merge: true)).timeout(const Duration(seconds: 15));
@@ -548,7 +554,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
   Future<void> _performUpdateWithRetry(int clampedValue) async {
     try {
       await FirebaseFirestore.instance
-          .collection('Branch')
+          .collection(AppConstants.collectionBranch)
           .doc(_selectedBranchId)
           .set({
             'estimatedTime': clampedValue,
@@ -1177,10 +1183,15 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
       );
     }
 
+    final userScope = context.watch<UserScopeService>();
+    final branchFilter = context.watch<BranchFilterService>();
+
     return Column(
       children: [
-        // Branch selector only for SuperAdmin with multiple branches
-        const SizedBox.shrink(),
+        // Branch selector header for users with multiple branches
+        if (userScope.branchIds.length > 1)
+          _buildBranchHeader(userScope, branchFilter),
+
         if (_selectedBranchId != null) ...[
           // Unsaved changes indicator
           if (_hasUnsavedChanges)
@@ -1200,14 +1211,32 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                 ],
               ),
             ),
-          _buildBulkActions(),
+          
           Expanded(
-            child: ListView.builder(
+            child: ListView(
               padding: const EdgeInsets.only(bottom: 80),
-              itemCount: _days.length,
-              itemBuilder: (context, index) {
-                return _buildDayCard(_days[index]);
-              },
+              children: [
+                // 1. Kitchen Operations (Estimated Time)
+                _buildKitchenOperationsCard(),
+                
+                // 2. Quick Actions
+                _buildBulkActions(),
+                
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
+                  child: Text(
+                    'Operating Hours',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.deepPurple,
+                    ),
+                  ),
+                ),
+                
+                // 3. Daily Cards
+                ..._days.map((day) => _buildDayCard(day)).toList(),
+              ],
             ),
           ),
         ] else
@@ -1220,6 +1249,89 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildBranchHeader(UserScopeService userScope, BranchFilterService branchFilter) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            offset: const Offset(0, 2),
+            blurRadius: 4,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'MANAGING BRANCH',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+              letterSpacing: 1.1,
+            ),
+          ),
+          const SizedBox(height: 8),
+          InkWell(
+            onTap: () async {
+              final result = await showDialog<List<String>>(
+                context: context,
+                builder: (context) => BranchSelectorDialog(
+                  initialSelectedBranchIds: _selectedBranchId != null ? [_selectedBranchId!] : [],
+                  isMultiSelect: false,
+                ),
+              );
+              
+              if (result != null && result.isNotEmpty && result.first != _selectedBranchId) {
+                // Check for unsaved changes before switching
+                if (_hasUnsavedChanges) {
+                  final shouldDiscard = await _onWillPop();
+                  if (!shouldDiscard) return;
+                }
+                
+                setState(() {
+                  _selectedBranchId = result.first;
+                  _isLoading = true;
+                });
+                _loadTimings();
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.deepPurple.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.deepPurple.shade100),
+              ),
+              child: Row(
+                children: [
+                   Icon(Icons.store, color: Colors.deepPurple.shade700, size: 20),
+                   const SizedBox(width: 12),
+                   Expanded(
+                     child: Text(
+                       branchFilter.getBranchName(_selectedBranchId ?? 'Select Branch'),
+                       style: TextStyle(
+                         color: Colors.deepPurple.shade900,
+                         fontWeight: FontWeight.bold,
+                         fontSize: 16,
+                       ),
+                     ),
+                   ),
+                   Icon(Icons.swap_horiz, color: Colors.deepPurple.shade700, size: 20),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

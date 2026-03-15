@@ -36,12 +36,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _initBranchFilter() {
+    if (!mounted) return;
     final userScope = context.read<UserScopeService>();
     final branchFilter = context.read<BranchFilterService>();
 
-    // Only load if user has multiple branches
-    if (userScope.branchIds.length > 1 && !branchFilter.isLoaded) {
-      branchFilter.loadBranchNames(userScope.branchIds);
+    // Load names if they haven't been loaded yet for the current list of branches
+    if (userScope.branchIds.isNotEmpty) {
+      // Check if we have names for all current branch IDs
+      final currentNames = branchFilter.branchNames;
+      final missingNames = userScope.branchIds.any((id) => !currentNames.containsKey(id));
+      
+      if (missingNames || !branchFilter.isLoaded) {
+        branchFilter.loadBranchNames(userScope.branchIds);
+      }
     }
   }
 
@@ -67,7 +74,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
-    final bool showBranchSelector = userScope.branchIds.length > 1;
 
     final themeService = context.watch<DashboardThemeService>();
     final isDark = themeService.isDarkMode;
@@ -81,7 +87,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         elevation: 0,
         backgroundColor: surfaceColor,
-        centerTitle: !showBranchSelector,
+        centerTitle: true,
         iconTheme: IconThemeData(color: textColor),
         title: Text(
           'Dashboard',
@@ -91,9 +97,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             fontSize: 24,
           ),
         ),
-        actions: [
-          if (showBranchSelector) _buildBranchSelector(userScope, branchFilter, isDark),
-        ],
+        // Branch selector removed — now global in MainScreen app bar
       ),
       body: Center(
         child: ConstrainedBox(
@@ -117,104 +121,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildBranchSelector(
-      UserScopeService userScope, BranchFilterService branchFilter, bool isDark) {
-    final textColor = isDark ? Colors.white : Colors.deepPurple;
-    final dropdownColor = isDark ? const Color(0xFF16213E) : Colors.white;
-    
-    return Container(
-      margin: const EdgeInsets.only(right: 12),
-      child: PopupMenuButton<String>(
-        offset: const Offset(0, 45),
-        color: dropdownColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: isDark ? Colors.white.withOpacity(0.05) : Colors.deepPurple.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isDark ? Colors.white.withOpacity(0.1) : Colors.deepPurple.withOpacity(0.3),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.store, size: 18, color: textColor),
-              const SizedBox(width: 6),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 100),
-                child: Text(
-                  branchFilter.selectedBranchId == null
-                      ? 'All Branches'
-                      : branchFilter
-                          .getBranchName(branchFilter.selectedBranchId!),
-                  style: TextStyle(
-                    color: textColor,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(Icons.arrow_drop_down, color: textColor, size: 20),
-            ],
-          ),
-        ),
-        itemBuilder: (context) => [
-          // "All Branches" option - use sentinel value, not null
-          PopupMenuItem<String>(
-            value: BranchFilterService.allBranchesValue,
-            child: Row(
-              children: [
-                Icon(
-                  branchFilter.selectedBranchId == null
-                      ? Icons.check_circle
-                      : Icons.circle_outlined,
-                  size: 18,
-                  color: branchFilter.selectedBranchId == null
-                      ? Colors.deepPurple
-                      : Colors.grey,
-                ),
-                const SizedBox(width: 10),
-                Text('All Branches', style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
-              ],
-            ),
-          ),
-          const PopupMenuDivider(),
-          // Individual branch options
-          ...userScope.branchIds.map((branchId) => PopupMenuItem<String>(
-                value: branchId,
-                child: Row(
-                  children: [
-                    Icon(
-                      branchFilter.selectedBranchId == branchId
-                          ? Icons.check_circle
-                          : Icons.circle_outlined,
-                      size: 18,
-                      color: branchFilter.selectedBranchId == branchId
-                          ? Colors.deepPurple
-                          : Colors.grey,
-                    ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        branchFilter.getBranchName(branchId),
-                        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              )),
-        ],
-        onSelected: (value) {
-          branchFilter.selectBranch(value);
-        },
-      ),
-    );
-  }
+  // Branch selector removed — now global in MainScreen app bar
 
   Widget _buildSectionHeader(String title, IconData icon) {
     final isDark = context.watch<DashboardThemeService>().isDarkMode;

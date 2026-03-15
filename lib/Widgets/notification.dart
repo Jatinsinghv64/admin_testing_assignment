@@ -253,17 +253,22 @@ class OrderNotificationService with ChangeNotifier {
                       .doc(orderId)
                       .get();
                   if (orderDoc.exists && context.mounted) {
-                    await PrintingService.printReceipt(context, orderDoc);
-                    debugPrint("✅ Auto-printed receipt for order $orderId");
+                    // Start printing in background, don't await it here to avoid blocking UI feedback
+                    unawaited(PrintingService.printReceipt(context, orderDoc).catchError((printError) {
+                      debugPrint("⚠️ Background auto-print failed: $printError");
+                    }));
+                    debugPrint("✅ Initiated auto-print for order $orderId");
                   }
                 } catch (printError) {
                   debugPrint(
-                      "⚠️ Auto-print failed (non-blocking): $printError");
+                      "⚠️ Auto-print preparation failed (non-blocking): $printError");
                 }
               } catch (e) {
-                debugPrint("❌ Failed to accept order: $e");
+                debugPrint("❌ CRITICAL: Failed to accept order $orderId: $e");
                 if (context.mounted) {
-                  String msg = e.toString().replaceAll("Exception:", "").trim();
+                  String msg = e.toString().contains("MissingPluginException")
+                    ? "Plugin error: Please restart the app completely."
+                    : e.toString().replaceAll("Exception:", "").trim();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text(msg), backgroundColor: Colors.red),
                   );
@@ -383,11 +388,8 @@ class NewOrderDialog extends StatefulWidget {
 
 class NewOrderDialogState extends State<NewOrderDialog>
     with WidgetsBindingObserver {
-  Map<String, dynamic>? _orderData;
-  bool _isLoading = true;
-  String? _errorMessage;
-
   Timer? _timer;
+  Timer? _vibrationTimer;
   int _countdown = 60;
   bool _isStale = false;
 
@@ -395,6 +397,10 @@ class NewOrderDialogState extends State<NewOrderDialog>
   bool _isAudioPlaying = false;
   bool _isProcessing = false;
   bool _isClosing = false; // Prevent multiple pop() calls
+
+  Map<String, dynamic>? _orderData;
+  bool _isLoading = true;
+  String? _errorMessage;
 
   String get orderNumber =>
       _orderData?['dailyOrderNumber']?.toString() ?? '---';
@@ -578,8 +584,25 @@ class NewOrderDialogState extends State<NewOrderDialog>
     }
 
     if (widget.vibrate) {
-      if (await Vibration.hasVibrator() ?? false) {
-        Vibration.vibrate(pattern: [500, 1000, 500, 1000], repeat: 0);
+      try {
+        final hasVibrator = await Vibration.hasVibrator() ?? false;
+        if (hasVibrator) {
+          // Instead of repeat: 0 (which can be hard to cancel), 
+          // we use a finite pattern and a timer to pulse it.
+          _vibrationTimer?.cancel();
+          _vibrationTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+             try {
+               await Vibration.vibrate(pattern: [500, 1000, 500, 1000]);
+             } catch (e) {
+               debugPrint("⚠️ Periodic vibration error: $e");
+               timer.cancel();
+             }
+          });
+          // Initial vibration
+          await Vibration.vibrate(pattern: [500, 1000, 500, 1000]);
+        }
+      } catch (e) {
+        debugPrint("Vibration Error: $e");
       }
     }
   }
@@ -591,7 +614,13 @@ class NewOrderDialogState extends State<NewOrderDialog>
         await _player.release();
         _isAudioPlaying = false;
       }
-      Vibration.cancel();
+      _vibrationTimer?.cancel();
+      _vibrationTimer = null;
+      try {
+        await Vibration.cancel();
+      } catch (e) {
+        debugPrint("Vibration Cancel Error: $e");
+      }
     } catch (e) {
       debugPrint("Stop Audio Error: $e");
     }

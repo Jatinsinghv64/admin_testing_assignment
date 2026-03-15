@@ -183,6 +183,8 @@ class MyApp extends StatelessWidget {
             branchFilter ??= BranchFilterService();
             if (userScope.isLoaded) {
               branchFilter.validateSelection(userScope.branchIds);
+              // Automatically load names for all accessible branches
+              branchFilter.loadBranchNames(userScope.branchIds);
             }
             return branchFilter;
           },
@@ -432,23 +434,24 @@ class UserScopeService with ChangeNotifier {
   List<String> _branchIds = [];
   Map<String, bool> _permissions = {};
   bool _isLoaded = false;
-  bool _isAccountMissing = false; // ✅ New state
+  bool _isAccountMissing = false;
   String _userEmail = '';
-  String _userIdentifier = ''; // ✅ Email or phone number for staff lookup
+  String _userIdentifier = '';
 
   String get role => _role;
   List<String> get branchIds => _branchIds;
   String get userEmail => _userEmail;
-  String get userIdentifier =>
-      _userIdentifier; // ✅ Primary identifier (email or phone)
+  String get userIdentifier => _userIdentifier;
   bool get isLoaded => _isLoaded;
-  bool get isAccountMissing => _isAccountMissing; // ✅ Getter
-  bool get isSuperAdmin => _role == 'super_admin';
+  bool get isAccountMissing => _isAccountMissing;
+  bool get isSuperAdmin => _isSuperAdminRole(_role);
   Map<String, bool> get permissions => _permissions;
 
-  bool can(String permissionKey) {
-    if (isSuperAdmin) return true;
-    return _permissions[permissionKey] ?? false;
+  /// Normalized check for super_admin role
+  bool _isSuperAdminRole(String? role) {
+    if (role == null) return false;
+    final r = role.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+    return r == 'super_admin' || r == 'superadmin';
   }
 
   Future<bool> loadUserScope(User user, AuthService authService) async {
@@ -457,7 +460,6 @@ class UserScopeService with ChangeNotifier {
     _scopeSubscription = null;
 
     try {
-      // ✅ Support both email and phone authentication
       _userEmail = user.email ?? '';
       _userIdentifier = user.email ?? user.phoneNumber ?? '';
       if (_userIdentifier.isEmpty)
@@ -481,11 +483,7 @@ class UserScopeService with ChangeNotifier {
         return false;
       }
 
-      _role = data?['role'] as String? ?? 'unknown';
-      _branchIds = List<String>.from(data?['branchIds'] ?? []).toSet().toList();
-      _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
-      _isLoaded = true;
-      _isAccountMissing = false;
+      await _applyData(data, notify: false);
 
       _scopeSubscription = _db
           .collection(AppConstants.collectionStaff)
@@ -496,21 +494,56 @@ class UserScopeService with ChangeNotifier {
             onError: (error) => _handleScopeError(error, authService),
           );
 
+      _isLoaded = true;
+      _isAccountMissing = false;
       notifyListeners();
       return true;
     } catch (e) {
+      debugPrint('Error loading user scope: $e');
       await clearScope();
       return false;
     }
   }
 
-  void _handleScopeUpdate(DocumentSnapshot snapshot, AuthService authService) {
+  /// Internal method to apply data from staff document, 
+  /// handling SuperAdmin branch expansion.
+  Future<void> _applyData(Map<String, dynamic>? data, {bool notify = true}) async {
+    if (data == null) return;
+
+    _role = data['role'] as String? ?? 'unknown';
+    _permissions = Map<String, bool>.from(data['permissions'] ?? {});
+    
+    final List<String> explicitBranchIds = 
+        List<String>.from(data['branchIds'] ?? []).toSet().toList();
+
+    if (_isSuperAdminRole(_role)) {
+      try {
+        // Super Admins should have access to ALL branches
+        final branchesSnap = await _db.collection(AppConstants.collectionBranch).get();
+        final allIds = branchesSnap.docs.map((doc) => doc.id).toSet();
+        
+        // Combine explicitly assigned with all available
+        final combined = explicitBranchIds.toSet()..addAll(allIds);
+        _branchIds = combined.toList();
+      } catch (e) {
+        debugPrint('Error fetching all branches for super admin: $e');
+        _branchIds = explicitBranchIds; // Fallback
+      }
+    } else {
+      _branchIds = explicitBranchIds;
+    }
+
+    if (notify) notifyListeners();
+  }
+
+  void _handleScopeUpdate(DocumentSnapshot snapshot, AuthService authService) async {
     if (!snapshot.exists) {
       _isAccountMissing = true;
       _isLoaded = false;
       notifyListeners();
       return;
     }
+    
     final data = snapshot.data() as Map<String, dynamic>?;
     if (data?['isActive'] != true) {
       _isAccountMissing = true;
@@ -518,12 +551,15 @@ class UserScopeService with ChangeNotifier {
       notifyListeners();
       return;
     }
+
     _isAccountMissing = false;
-    _role = data?['role'] as String? ?? 'unknown';
-    _branchIds = List<String>.from(data?['branchIds'] ?? []).toSet().toList();
-    _permissions = Map<String, bool>.from(data?['permissions'] ?? {});
+    await _applyData(data, notify: true);
     _isLoaded = true;
-    notifyListeners();
+  }
+
+  bool can(String permissionKey) {
+    if (isSuperAdmin) return true;
+    return _permissions[permissionKey] ?? false;
   }
 
   void _handleScopeError(Object error, AuthService authService) {

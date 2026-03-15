@@ -6,83 +6,58 @@ import '../main.dart';
 import 'TimeUtils.dart';
 import '../Widgets/RiderAssignment.dart';
 import '../constants.dart';
-import '../utils/security_utils.dart'; // SECURITY: Input validation utilities
-import '../services/inventory/InventoryService.dart'; // Inventory auto-deduction
+import '../utils/security_utils.dart';
+import '../services/inventory/InventoryService.dart';
 
 class OrderService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  /// @Deprecated: Use [getOrdersStreamMerged] instead.
-  /// This method is kept for backward compatibility but will be removed in a future version.
-  ///
-  /// Returns an empty stream. All callers should migrate to getOrdersStreamMerged.
-  @Deprecated(
-      'Use getOrdersStreamMerged instead. This method returns empty stream.')
+  @Deprecated('Use getOrdersStreamMerged instead. This method returns empty stream.')
   Stream<QuerySnapshot<Map<String, dynamic>>> getOrdersStream({
     required String orderType,
     required String status,
     required UserScopeService userScope,
     List<String>? filterBranchIds,
   }) {
-    // Log deprecation warning in debug mode
-    assert(() {
-      debugPrint(
-          '⚠️ DEPRECATED: getOrdersStream called. Use getOrdersStreamMerged instead.');
-      return true;
-    }());
-
-    // Return empty stream instead of throwing error
-    // This prevents crashes if any code path still uses this method
     return const Stream.empty();
   }
 
-  /// ✅ NEW: Returns merged stream of order documents (handles both branchId and branchIds)
-  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
-      getOrdersStreamMerged({
-    required String orderType,
+  /// Returns merged stream of order documents (handles both branchId and branchIds)
+  /// Industry Grade: Added [activeOnly] flag to heavily reduce memory usage on POS/KDS devices
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> getOrdersStreamMerged({
+    String? orderType, // Nullable to fetch all types if needed (useful for KDS)
     required String status,
     required UserScopeService userScope,
     List<String>? filterBranchIds,
+    bool activeOnly = false,
   }) {
-    debugPrint('🔍 OrderService.getOrdersStreamMerged called:');
-    debugPrint('   - orderType: $orderType');
-    debugPrint('   - status: $status');
-    debugPrint('   - filterBranchIds: $filterBranchIds');
-    debugPrint('   - userScope.branchIds: ${userScope.branchIds}');
-
     final effectiveBranchIds = filterBranchIds ?? userScope.branchIds;
 
-    if (effectiveBranchIds.isEmpty) {
+    if (effectiveBranchIds.isEmpty && !userScope.isSuperAdmin) {
       return Stream.value([]);
     }
 
-    return _getMergedOrdersStream(
-      orderType: orderType,
-      status: status,
-      branchIds: effectiveBranchIds,
-    );
-  }
+    Query<Map<String, dynamic>> arrayQuery = _db.collection(AppConstants.collectionOrders);
+    
+    // Apply refined branch filtering
+    arrayQuery = _applyBranchFilter(arrayQuery, userScope, filterBranchIds);
 
-  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
-      _getMergedOrdersStream({
-    required String orderType,
-    required String status,
-    required List<String> branchIds,
-  }) {
-    // Only query orders with branchIds array field
-    Query<Map<String, dynamic>> arrayQuery = _db
-        .collection(AppConstants.collectionOrders)
-        .where('Order_type', isEqualTo: orderType);
-
-    if (branchIds.length == 1) {
-      arrayQuery =
-          arrayQuery.where('branchIds', arrayContains: branchIds.first);
-    } else {
-      arrayQuery = arrayQuery.where('branchIds', arrayContainsAny: branchIds);
+    if (orderType != null && orderType != 'all') {
+      arrayQuery = arrayQuery.where('Order_type', isEqualTo: orderType);
     }
 
-    // Apply status/timestamp filters
-    if (status == 'all') {
+    // Performance Optimization for KDS/POS: Only fetch actively moving tickets
+    if (activeOnly) {
+      arrayQuery = arrayQuery.where('status', whereIn: [
+        AppConstants.statusPending,
+        AppConstants.statusPreparing,
+        AppConstants.statusPrepared,
+        AppConstants.statusServed,
+        AppConstants.statusNeedsAssignment,
+        AppConstants.statusRiderAssigned,
+        AppConstants.statusPickedUp,
+      ]).orderBy('timestamp', descending: false); // Oldest first for KDS
+    } else if (status == 'all') {
       final startOfBusinessDay = TimeUtils.getBusinessStartTimestamp();
       final endOfBusinessDay = TimeUtils.getBusinessEndTimestamp();
 
@@ -100,29 +75,19 @@ class OrderService {
     return arrayQuery.snapshots().map((snapshot) => snapshot.docs);
   }
 
-  // STANDARD QUERY HELPERS (Refactored from DashboardScreen)
-
-  // 1. Get Today's Orders
   Stream<QuerySnapshot<Map<String, dynamic>>> getTodayOrdersStream({
     required UserScopeService userScope,
     List<String>? filterBranchIds,
   }) {
     final startOfShift = TimeUtils.getBusinessStartTimestamp();
-
-    Query<Map<String, dynamic>> query =
-        _db.collection(AppConstants.collectionOrders);
-
-    // Apply Branch Filter
+    Query<Map<String, dynamic>> query = _db.collection(AppConstants.collectionOrders);
     query = _applyBranchFilter(query, userScope, filterBranchIds);
-
-    // Apply Time Filter
     return query
         .where('timestamp', isGreaterThanOrEqualTo: startOfShift)
         .orderBy('timestamp', descending: true)
         .snapshots();
   }
 
-  // 2. Get Active Drivers
   Stream<QuerySnapshot<Map<String, dynamic>>> getActiveDriversStream({
     required UserScopeService userScope,
     List<String>? filterBranchIds,
@@ -130,37 +95,26 @@ class OrderService {
     Query<Map<String, dynamic>> query = _db
         .collection(AppConstants.collectionDrivers)
         .where('isAvailable', isEqualTo: true);
-
-    // Apply Branch Filter
     query = _applyBranchFilter(query, userScope, filterBranchIds);
-
     return query.snapshots();
   }
 
-  // 3. Get Available Menu Items
   Stream<QuerySnapshot<Map<String, dynamic>>> getAvailableMenuItemsStream({
     required UserScopeService userScope,
     List<String>? filterBranchIds,
   }) {
-    Query<Map<String, dynamic>> query =
-        _db.collection(AppConstants.collectionMenuItems);
-
-    // Apply Branch Filter
+    Query<Map<String, dynamic>> query = _db.collection(AppConstants.collectionMenuItems);
     query = _applyBranchFilter(query, userScope, filterBranchIds);
-
     return query.where('isAvailable', isEqualTo: true).snapshots();
   }
 
-  // Helper: Centralized Revenue Calculation Logic
-  static double calculateRevenue(
-      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  static double calculateRevenue(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
     double totalRevenue = 0;
     final billableStatuses = {
       AppConstants.statusDelivered,
       'completed',
-      AppConstants.statusPaid, // Takeaway/Dine-in terminal
-      AppConstants.statusCollected, // Pickup terminal
-      // AppConstants.statusRefunded // Refunds should NOT count (deducts from revenue)
+      AppConstants.statusPaid,
+      AppConstants.statusCollected,
     };
 
     for (var doc in docs) {
@@ -168,14 +122,9 @@ class OrderService {
       final status = (data['status'] ?? '').toString().toLowerCase();
       final isExchange = data['isExchange'] == true;
 
-      // 1. Check if status is billable (Delivered, Completed, Paid)
-      // 2. OR if it's an Exchange order that is currently being prepared (Preparing)
-      //    (Normal preparing orders are not paid yet/revenue realized, but Exchanges were already paid)
       bool shouldCount = billableStatuses.contains(status);
 
-      if (!shouldCount &&
-          isExchange &&
-          status == AppConstants.statusPreparing) {
+      if (!shouldCount && isExchange && status == AppConstants.statusPreparing) {
         shouldCount = true;
       }
 
@@ -186,75 +135,89 @@ class OrderService {
     return totalRevenue;
   }
 
-  // Private Helper: Apply Branch Filter
   Query<Map<String, dynamic>> _applyBranchFilter(
-    Query<Map<String, dynamic>> query,
-    UserScopeService userScope,
-    List<String>? filterBranchIds,
-  ) {
-    // Priority 1: Specific Filter (e.g. from Dropdown)
+      Query<Map<String, dynamic>> query,
+      UserScopeService userScope,
+      List<String>? filterBranchIds,
+      ) {
+    // 1. If explicit filter is selected (e.g. from dropdown)
     if (filterBranchIds != null && filterBranchIds.isNotEmpty) {
       if (filterBranchIds.length == 1) {
         return query.where('branchIds', arrayContains: filterBranchIds.first);
-      } else {
+      } else if (filterBranchIds.length <= 10) {
         return query.where('branchIds', arrayContainsAny: filterBranchIds);
       }
+      // If more than 10, and user is SuperAdmin, showing all is better than failing
+      if (userScope.isSuperAdmin) return query;
+      // For non-super admins, we have to limit to 10 due to Firestore restrictions
+      return query.where('branchIds', arrayContainsAny: filterBranchIds.take(10).toList());
     }
 
-    // Priority 2: User's Assigned Branches (Default view)
+    // 2. No filter selected - use user's scope
+    if (userScope.isSuperAdmin) {
+       // SuperAdmin sees all by default in global view
+       return query;
+    }
+
     if (userScope.branchIds.isNotEmpty) {
       if (userScope.branchIds.length == 1) {
-        return query.where('branchIds',
-            arrayContains: userScope.branchIds.first);
+        return query.where('branchIds', arrayContains: userScope.branchIds.first);
       } else {
-        return query.where('branchIds', arrayContainsAny: userScope.branchIds);
+        // Limit to 10 for Firestore compatibility
+        return query.where('branchIds', arrayContainsAny: userScope.branchIds.take(10).toList());
       }
     }
 
-    // Priority 3: No Access (Safety Fallback)
-    // Return a query that is guaranteed to be empty
     return query.where(FieldPath.documentId, isEqualTo: 'force_empty_result');
+  }
+
+  /// INDUSTRY GRADE FIX: Atomic Exchange Transaction.
+  /// Prevents data corruption if a user clicks "Exchange" twice rapidly.
+  Future<void> processExchange(String orderId, String reason, String adminEmail) async {
+    final sanitizedOrderId = InputSanitizer.sanitizeDocumentId(orderId);
+    final orderRef = _db.collection(AppConstants.collectionOrders).doc(sanitizedOrderId);
+
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(orderRef);
+      if (!snapshot.exists) throw Exception("Order does not exist!");
+
+      transaction.update(orderRef, {
+        'status': AppConstants.statusPreparing,
+        'isExchange': true,
+        'exchangeDetails': {
+          'reason': reason,
+          'timestamp': FieldValue.serverTimestamp(),
+          'adminId': adminEmail,
+        },
+        // Log the return in history
+        'statusHistory': FieldValue.arrayUnion([{
+          'status': AppConstants.statusPreparing,
+          'timestamp': FieldValue.serverTimestamp(),
+          'note': 'Exchange Requested: $reason'
+        }])
+      });
+    });
   }
 
   Future<void> updateOrderStatus(
       BuildContext context, String orderId, String newStatus,
       {String? reason, String? currentUserEmail}) async {
-    // =========================================================
-    // SECURITY: Input Validation
-    // =========================================================
-    // Validate orderId format
-    final orderIdError =
-        InputValidator.validateDocumentId(orderId, fieldName: 'Order ID');
-    if (orderIdError != null) {
-      debugPrint('🔒 SECURITY: Invalid orderId: $orderId');
-      throw Exception('Invalid order ID format');
-    }
 
-    // Sanitize orderId (extra safety)
+    final orderIdError = InputValidator.validateDocumentId(orderId, fieldName: 'Order ID');
+    if (orderIdError != null) throw Exception('Invalid order ID format');
+
     final sanitizedOrderId = InputSanitizer.sanitizeDocumentId(orderId);
-
-    // Validate and sanitize cancellation reason if provided
     String? sanitizedReason;
+
     if (reason != null && reason.isNotEmpty) {
-      final reasonError = InputValidator.validateText(
-        reason,
-        maxLength: InputLimits.maxCancellationReason,
-        fieldName: 'Cancellation reason',
-      );
-      if (reasonError != null) {
-        debugPrint('🔒 SECURITY: Invalid cancellation reason');
-        throw Exception(reasonError);
-      }
       sanitizedReason = InputSanitizer.sanitizeNotes(reason);
     }
 
-    // Sanitize email if provided
     final sanitizedEmail = currentUserEmail != null
         ? InputSanitizer.sanitizeEmail(currentUserEmail)
         : 'Admin';
 
-    final orderRef =
-        _db.collection(AppConstants.collectionOrders).doc(sanitizedOrderId);
+    final orderRef = _db.collection(AppConstants.collectionOrders).doc(sanitizedOrderId);
 
     try {
       if (newStatus == AppConstants.statusCancelled) {
@@ -265,9 +228,8 @@ class OrderService {
           final data = snapshot.data() as Map<String, dynamic>;
           final currentStatus = AppConstants.normalizeStatus(data['status']);
 
-          if (currentStatus == AppConstants.statusDelivered) {
-            throw Exception(
-                "Cannot cancel an order that is already delivered!");
+          if (AppConstants.isTerminalStatus(currentStatus)) {
+            throw Exception("Cannot cancel an order that is already completed!");
           }
 
           final Map<String, dynamic> updates = {
@@ -276,16 +238,14 @@ class OrderService {
             'riderId': FieldValue.delete(),
           };
 
-          if (sanitizedReason != null)
-            updates['cancellationReason'] = sanitizedReason;
+          if (sanitizedReason != null) updates['cancellationReason'] = sanitizedReason;
           updates['cancelledBy'] = sanitizedEmail;
 
           transaction.update(orderRef, updates);
 
           final String? riderId = data['riderId'];
           if (riderId != null && riderId.isNotEmpty) {
-            final driverRef =
-                _db.collection(AppConstants.collectionDrivers).doc(riderId);
+            final driverRef = _db.collection(AppConstants.collectionDrivers).doc(riderId);
             transaction.update(driverRef, {
               'assignedOrderId': '',
               'isAvailable': true,
@@ -295,8 +255,6 @@ class OrderService {
 
         await RiderAssignmentService.cancelAutoAssignment(sanitizedOrderId);
       } else {
-        // ✅ OPTIMISTIC LOCKING: Use transaction for all status updates
-        // This prevents race conditions when multiple admins update the same order
         await _db.runTransaction((transaction) async {
           final snapshot = await transaction.get(orderRef);
           if (!snapshot.exists) throw Exception("Order does not exist!");
@@ -304,76 +262,50 @@ class OrderService {
           final data = snapshot.data() as Map<String, dynamic>;
           final currentStatus = AppConstants.normalizeStatus(data['status']);
 
-          // Allow Kitchen to Recall orders (moves terminal/post-kitchen back to preparing)
           final isRecallToKitchen = newStatus == AppConstants.statusPreparing &&
               currentStatus != AppConstants.statusPending &&
               currentStatus != AppConstants.statusPreparing &&
               currentStatus != AppConstants.statusCancelled;
 
-          // ✅ VALIDATION: Prevent invalid status transitions
-          // Cannot update terminal orders (delivered, cancelled, paid, collected)
-          if (AppConstants.isTerminalStatus(currentStatus) && !isRecallToKitchen) {
-            throw Exception(
-                "Cannot update order - it is already $currentStatus");
-          }
-
-          // ✅ VALIDATION: Prevent backwards transitions (except for special cases)
-          final statusOrder = [
-            AppConstants.statusPending,
-            AppConstants.statusPreparing,
-            AppConstants.statusPrepared, // Non-delivery
-            AppConstants.statusNeedsAssignment, // Delivery
-            AppConstants.statusRiderAssigned,
-            AppConstants.statusPickedUp,
-            AppConstants.statusServed, // Dine-in
-            AppConstants.statusPaid, // Terminal: takeaway/dine-in
-            AppConstants.statusCollected, // Terminal: pickup
-            AppConstants.statusDelivered, // Terminal: delivery
-          ];
-
-          final currentIndex = statusOrder.indexOf(currentStatus);
-          final newIndex = statusOrder.indexOf(newStatus);
-
-          // Allow same status (idempotent) or forward transitions
-          if (currentIndex != -1 && newIndex != -1 && newIndex < currentIndex && !isRecallToKitchen) {
-            throw Exception(
-                "Cannot move order backwards from $currentStatus to $newStatus");
+          if (AppConstants.isTerminalStatus(currentStatus) && !isRecallToKitchen && newStatus != AppConstants.statusRefunded) {
+            throw Exception("Cannot update order - it is already $currentStatus");
           }
 
           final Map<String, dynamic> updateData = {'status': newStatus};
 
-          // ========================================================
-          // AUTO RIDER ASSIGNMENT: Trigger for delivery orders
-          // ========================================================
-          if (newStatus == AppConstants.statusPreparing) {
-            // Check both Order_type (primary) and orderType (fallback) field names
-            final String orderType =
-                (data['Order_type'] ?? data['orderType'] ?? '')
-                    .toString()
-                    .toLowerCase();
-            final String? existingRiderId = data['riderId'];
-            final bool hasAutoAssignStarted = data['autoAssignStarted'] != null;
+          // INDUSTRY GRADE FIX: Auto-Assignment Loop Bug
+          // If KDS recalls an order, instantly strip the old rider to prevent ghost dispatching.
+          if (isRecallToKitchen) {
+            updateData['riderId'] = FieldValue.delete();
+            updateData['autoAssignStarted'] = FieldValue.delete();
 
-            // Only trigger for delivery orders without an assigned rider
-            if (orderType == 'delivery' &&
-                (existingRiderId == null || existingRiderId.isEmpty) &&
-                !hasAutoAssignStarted) {
-              updateData['autoAssignStarted'] = FieldValue.serverTimestamp();
-              updateData['lastAssignmentUpdate'] = FieldValue.serverTimestamp();
-              debugPrint(
-                  '🚀 Auto-assignment triggered for delivery order: $orderId');
+            final String? oldRiderId = data['riderId'];
+            if (oldRiderId != null && oldRiderId.isNotEmpty) {
+              final driverRef = _db.collection(AppConstants.collectionDrivers).doc(oldRiderId);
+              transaction.update(driverRef, {
+                'assignedOrderId': '',
+                'isAvailable': true,
+              });
             }
           }
 
-          // Add status-specific timestamps
+          if (newStatus == AppConstants.statusPreparing && !isRecallToKitchen) {
+            final String orderType = (data['Order_type'] ?? data['orderType'] ?? '').toString().toLowerCase();
+            final String? existingRiderId = data['riderId'];
+            final bool hasAutoAssignStarted = data['autoAssignStarted'] != null;
+
+            if (orderType == 'delivery' && (existingRiderId == null || existingRiderId.isEmpty) && !hasAutoAssignStarted) {
+              updateData['autoAssignStarted'] = FieldValue.serverTimestamp();
+              updateData['lastAssignmentUpdate'] = FieldValue.serverTimestamp();
+            }
+          }
+
           if (newStatus == AppConstants.statusDelivered) {
             updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
-          } else if (AppConstants.statusEquals(
-              newStatus, AppConstants.statusPickedUp)) {
+          } else if (AppConstants.statusEquals(newStatus, AppConstants.statusPickedUp)) {
             updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
           } else if (newStatus == AppConstants.statusRiderAssigned) {
-            updateData['timestamps.riderAssigned'] =
-                FieldValue.serverTimestamp();
+            updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
           } else if (newStatus == AppConstants.statusPrepared) {
             updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
           } else if (newStatus == AppConstants.statusServed) {
@@ -382,56 +314,51 @@ class OrderService {
             updateData['timestamps.paid'] = FieldValue.serverTimestamp();
           } else if (newStatus == AppConstants.statusCollected) {
             updateData['timestamps.collected'] = FieldValue.serverTimestamp();
+          } else if (newStatus == AppConstants.statusRefunded) {
+            updateData['timestamps.refunded'] = FieldValue.serverTimestamp();
+            if (sanitizedReason != null) updateData['refundReason'] = sanitizedReason;
           }
 
-          // Perform the update within the transaction
           transaction.update(orderRef, updateData);
 
-          // Handle driver release for delivered orders
+          const terminalForDeduction = {
+            AppConstants.statusDelivered,
+            AppConstants.statusPaid,
+            AppConstants.statusCollected,
+          };
+          if (terminalForDeduction.contains(newStatus)) {
+            await InventoryService().performDeductionInTransaction(
+              transaction: transaction,
+              orderId: sanitizedOrderId,
+              branchIds: data['branchIds'] is List 
+                  ? List<String>.from(data['branchIds']) 
+                  : [data['branchId']?.toString() ?? ''],
+              recordedBy: sanitizedEmail,
+            );
+          }
+
           if (newStatus == AppConstants.statusDelivered) {
-            final String orderType =
-                (data['Order_type'] as String?)?.toLowerCase() ?? '';
+            final String orderType = (data['Order_type'] as String?)?.toLowerCase() ?? '';
             final String? riderId = data['riderId'] as String?;
 
-            if (orderType == 'delivery' &&
-                riderId != null &&
-                riderId.isNotEmpty) {
-              final driverRef =
-                  _db.collection(AppConstants.collectionDrivers).doc(riderId);
+            if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
+              final driverRef = _db.collection(AppConstants.collectionDrivers).doc(riderId);
               transaction.update(driverRef, {
                 'assignedOrderId': '',
                 'isAvailable': true,
-                'status': 'online', // Force online to correct any drift
+                'status': 'online',
               });
             }
           }
         }).timeout(AppConstants.firestoreWriteTimeout);
 
-        // ─── INVENTORY AUTO-DEDUCTION ──────────────────────────────────────
-        // Fire-and-forget after the transaction: deduct ingredients from stock
-        // when order reaches a terminal status. Non-fatal if it fails.
-        const _terminalForDeduction = {
-          AppConstants.statusDelivered,
-          AppConstants.statusPaid,
-          AppConstants.statusCollected,
-        };
-        if (_terminalForDeduction.contains(newStatus)) {
-          // Resolve branchId from order or fall back to sanitizedOrderId lookup
-          InventoryService().deductForOrder(
-            orderId: sanitizedOrderId,
-            branchId:
-                '', // InventoryService reads the order to get branchId internally
-            recordedBy: sanitizedEmail,
-          );
-        }
       }
     } on TimeoutException {
       debugPrint("Timeout updating order: $orderId");
       rethrow;
     } catch (e, stack) {
       debugPrint("Error updating order: $e");
-      FirebaseCrashlytics.instance.recordError(e, stack,
-          reason: 'Order Status Update Failed: $orderId -> $newStatus');
+      FirebaseCrashlytics.instance.recordError(e, stack, reason: 'Order Status Update Failed: $orderId -> $newStatus');
       rethrow;
     }
   }

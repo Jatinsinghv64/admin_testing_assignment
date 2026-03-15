@@ -128,16 +128,19 @@ class _ManualAssignmentScreenState extends State<ManualAssignmentScreen> {
         .orderBy('timestamp', descending: true);
 
     // Filter by branch logic (BranchAdmin OR SuperAdmin with selection)
-    final filterBranchIds =
-        branchFilter.getFilterBranchIds(userScope.branchIds);
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
-    if (userScope.isSuperAdmin && userScope.branchIds.isEmpty) {
-      // Show all
+    // If SuperAdmin and 'All Branches' is selected (null) OR too many branches to filter in one query
+    if (userScope.isSuperAdmin && (branchFilter.selectedBranchId == null || filterBranchIds.length > 10)) {
+      // Show all branches
     } else if (filterBranchIds.isNotEmpty) {
-      query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+      if (filterBranchIds.length == 1) {
+        query = query.where('branchIds', arrayContains: filterBranchIds.first);
+      } else {
+        query = query.where('branchIds', arrayContainsAny: filterBranchIds.take(10).toList());
+      }
     } else if (!userScope.isSuperAdmin && userScope.branchIds.isNotEmpty) {
-      // Should be covered above, but safe fallback
-      query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
+      query = query.where('branchIds', arrayContainsAny: userScope.branchIds.take(10).toList());
     }
 
     // ✅ RESPONSIVE SWITCH
