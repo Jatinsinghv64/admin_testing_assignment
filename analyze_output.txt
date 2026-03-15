@@ -1,0 +1,11 @@
+Analyzing SuppliersScreen.dart...                               
+
+   info • The file name 'SuppliersScreen.dart' isn't a lower_case_with_underscores identifier • lib/Screens/purchases/SuppliersScreen.dart:1:1 • file_names
+   info • Statements in an if should be enclosed in a block • lib/Screens/purchases/SuppliersScreen.dart:58:30 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/Screens/purchases/SuppliersScreen.dart:59:37 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/Screens/purchases/SuppliersScreen.dart:207:63 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/Screens/purchases/SuppliersScreen.dart:208:67 • curly_braces_in_flow_control_structures
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/Screens/purchases/SuppliersScreen.dart:315:33 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/Screens/purchases/SuppliersScreen.dart:597:55 • deprecated_member_use
+   info • The 'child' argument should be last in widget constructor invocations • lib/Screens/purchases/SuppliersScreen.dart:898:25 • sort_child_properties_last
+

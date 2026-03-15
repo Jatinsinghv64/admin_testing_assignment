@@ -1,0 +1,1411 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../Models/IngredientModel.dart';
+import '../../Widgets/BranchFilterService.dart';
+import '../../main.dart';
+import '../../services/inventory/InventoryService.dart';
+import '../../services/CsvExportService.dart';
+import '../../utils/responsive_helper.dart';
+import '../MenuManagementWidgets.dart';
+import '../purchases/CreatePurchaseOrderScreen.dart';
+import '../DishEditScreenLarge.dart';
+import 'IngredientStockListScreen.dart';
+import 'StocktakeScreen.dart';
+import 'WasteDashboardScreen.dart';
+import 'WasteEntryScreenLarge.dart';
+import '../../Widgets/IngredientFormSheet.dart';
+import '../../services/ingredients/IngredientService.dart';
+import '../../services/inventory/ExcelImportService.dart';
+
+// ─── Theme Colors (matching app ThemeData: light bg, deepPurple primary) ─────
+class _InvColors {
+  static final Color bgDark       = Colors.grey.shade50;   // app scaffold bg
+  static const Color surfaceDark  = Colors.white;           // card surfaces
+  static final Color surfaceLighter = Colors.grey.shade100; // subtle surfaces
+  static final Color borderDark   = Colors.grey.shade200;   // borders
+  static final Color primary      = Colors.deepPurple;
+  static final Color primaryLight = Colors.deepPurple.shade300;
+  static const Color textMain     = Color(0xFF1E293B);      // slate-800
+  static const Color textMuted    = Color(0xFF64748B);      // slate-500
+}
+
+class InventoryDashboardScreen extends StatefulWidget {
+  const InventoryDashboardScreen({super.key});
+
+  @override
+  State<InventoryDashboardScreen> createState() =>
+      _InventoryDashboardScreenState();
+}
+
+class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  static const _tabLabels = [
+    'Stock Overview',
+    'Stock List',
+    'Stocktake',
+    'Waste',
+    'Categories',
+    'Menu Items',
+  ];
+  static const _tabIcons = [
+    Icons.dashboard_outlined,
+    Icons.inventory_2_outlined,
+    Icons.fact_check_outlined,
+    Icons.delete_sweep_outlined,
+    Icons.category_outlined,
+    Icons.restaurant_menu_outlined,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 6, vsync: this);
+    _tabController.addListener(_onTabChanged);
+  }
+
+  @override
+  void dispose() {
+    _tabController.removeListener(_onTabChanged);
+    _tabController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onTabChanged() => setState(() {});
+
+  void _handleBulkUpload(BuildContext context) async {
+    final userScope = Provider.of<UserScopeService>(context, listen: false);
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
+    final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    final String branchToImportTo =
+        userScope.branchIds.isNotEmpty ? userScope.branchIds.first : (branchIds.firstOrNull ?? '');
+
+    if (branchToImportTo.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No branch selected for import.'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    final excelService = ExcelImportService(IngredientService());
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator(color: Colors.deepPurple)),
+    );
+
+    await excelService.pickAndImportExcel(
+      branchToImportTo,
+      onProgress: (msg) {},
+      onError: (err) {
+        if (mounted) Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Import Error: $err'), backgroundColor: Colors.red),
+        );
+      },
+      onSuccess: () {
+        if (mounted) Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Excel Import Successful!'), backgroundColor: Colors.green),
+        );
+      },
+    );
+  }
+
+  void _openAddIngredientForm(BuildContext context) {
+    final userScope = Provider.of<UserScopeService>(context, listen: false);
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
+    final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => IngredientFormSheet(
+        existing: null,
+        branchIds: userScope.branchIds.isNotEmpty
+            ? userScope.branchIds
+            : branchIds,
+        service: IngredientService(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final idx = _tabController.index;
+    final isCategoryTab = idx == 4;
+    final isMenuTab = idx == 5;
+
+    return Scaffold(
+      backgroundColor: _InvColors.bgDark,
+      body: Column(
+        children: [
+          // ─── Header ────────────────────────────────────────────────
+          _buildHeader(idx, isCategoryTab, isMenuTab),
+          // ─── Search (for Categories / Menu Items) ──────────────────
+          if (isCategoryTab || isMenuTab)
+            Container(
+              color: _InvColors.surfaceDark,
+              padding: const EdgeInsets.fromLTRB(24, 4, 24, 12),
+              child: TextField(
+                controller: _searchController,
+                style: const TextStyle(color: _InvColors.textMain, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: isCategoryTab
+                      ? 'Search categories by name...'
+                      : 'Search menu items by name...',
+                  hintStyle: const TextStyle(color: _InvColors.textMuted, fontSize: 14),
+                  prefixIcon: const Icon(Icons.search_rounded, color: _InvColors.textMuted),
+                  filled: true,
+                  fillColor: _InvColors.bgDark,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: _InvColors.borderDark),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: _InvColors.borderDark),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: _InvColors.primary),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onChanged: (v) => setState(() => _searchQuery = v.toLowerCase()),
+              ),
+            ),
+          // ─── Tab Content ───────────────────────────────────────────
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _StockOverviewTab(
+                  onGoStockList: () => _tabController.animateTo(1),
+                  onGoStocktake: () => _tabController.animateTo(2),
+                  onGoWaste: () => _tabController.animateTo(3),
+                ),
+                const IngredientStockListScreen(),
+                const StocktakeScreen(),
+                const WasteDashboardScreen(),
+                _CategoriesManagementTab(searchQuery: _searchQuery),
+                _MenuItemsManagementTab(searchQuery: _searchQuery),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader(int idx, bool isCategoryTab, bool isMenuTab) {
+    return Container(
+      padding: const EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 16),
+      decoration: BoxDecoration(
+        color: _InvColors.bgDark,
+        border: Border(
+          bottom: BorderSide(color: _InvColors.borderDark, width: 1),
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Title row
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Inventory Management',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                          color: _InvColors.textMain,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Track stock levels, manage waste, and monitor categories.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: _InvColors.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Export button
+                if (idx == 0 || idx == 1) ...[
+                  if (idx == 1) ...[
+                    _headerButton(
+                      icon: Icons.upload_file_rounded,
+                      label: 'Bulk Upload',
+                      onTap: () => _handleBulkUpload(context),
+                    ),
+                    const SizedBox(width: 10),
+                    _headerButton(
+                      icon: Icons.add_rounded,
+                      label: 'Add Ingredient',
+                      filled: true,
+                      onTap: () => _openAddIngredientForm(context),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  _headerButton(
+                    icon: Icons.download_rounded,
+                    label: 'Export',
+                    onTap: () {
+                      final range = DateTimeRange(
+                        start: DateTime.now().subtract(const Duration(days: 30)),
+                        end: DateTime.now(),
+                      );
+                      final userScope = context.read<UserScopeService>();
+                      final branchFilter = context.read<BranchFilterService>();
+                      final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+                      CsvExportService.exportStockMovements(context, branchIds, range);
+                    },
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                // Add button for Categories / Menu Items
+                if (isCategoryTab || isMenuTab)
+                  _headerButton(
+                    icon: Icons.add_rounded,
+                    label: isCategoryTab ? 'Add Category' : 'Add Item',
+                    filled: true,
+                    onTap: () {
+                      if (isCategoryTab) {
+                        showDialog(
+                          context: context,
+                          builder: (_) => const CategoryDialog(),
+                        );
+                      } else {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const DishEditScreenLarge(),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            // Tab pills
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: List.generate(6, (i) {
+                  final selected = _tabController.index == i;
+                  return Padding(
+                    padding: EdgeInsets.only(right: i < 5 ? 8 : 0),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () => _tabController.animateTo(i),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? _InvColors.primary.withOpacity(0.15)
+                                : _InvColors.surfaceDark,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: selected
+                                  ? _InvColors.primary.withOpacity(0.4)
+                                  : _InvColors.borderDark,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _tabIcons[i],
+                                size: 16,
+                                color: selected
+                                    ? _InvColors.primary
+                                    : _InvColors.textMuted,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                _tabLabels[i],
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                                  color: selected
+                                      ? _InvColors.primary
+                                      : _InvColors.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _headerButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool filled = false,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: filled ? _InvColors.primary : _InvColors.surfaceDark,
+            borderRadius: BorderRadius.circular(10),
+            border: filled ? null : Border.all(color: _InvColors.borderDark),
+            boxShadow: filled
+                ? [BoxShadow(color: _InvColors.primary.withOpacity(0.25), blurRadius: 12)]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: filled ? _InvColors.bgDark : _InvColors.textMain),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: filled ? _InvColors.bgDark : _InvColors.textMain,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STOCK OVERVIEW TAB
+// ═══════════════════════════════════════════════════════════════════════════
+class _StockOverviewTab extends StatefulWidget {
+  final VoidCallback onGoStockList;
+  final VoidCallback onGoStocktake;
+  final VoidCallback onGoWaste;
+
+  const _StockOverviewTab({
+    required this.onGoStockList,
+    required this.onGoStocktake,
+    required this.onGoWaste,
+  });
+
+  @override
+  State<_StockOverviewTab> createState() => _StockOverviewTabState();
+}
+
+class _StockOverviewTabState extends State<_StockOverviewTab> {
+  late final InventoryService _service;
+  bool _serviceInitialized = false;
+  int _rangeDays = 7;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_serviceInitialized) {
+      _serviceInitialized = true;
+      _service = Provider.of<InventoryService>(context, listen: false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final userScope = context.watch<UserScopeService>();
+    final branchFilter = context.watch<BranchFilterService>();
+    final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
+    return StreamBuilder<List<IngredientModel>>(
+      stream: _service.streamIngredients(branchIds,
+          isSuperAdmin: userScope.isSuperAdmin),
+      builder: (context, ingSnap) {
+        if (ingSnap.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: CircularProgressIndicator(color: _InvColors.primary),
+          );
+        }
+        if (ingSnap.hasError) {
+          return Center(
+            child: Text(
+              'Failed to load inventory data: ${ingSnap.error}',
+              style: const TextStyle(color: Colors.red),
+            ),
+          );
+        }
+        final items = ingSnap.data ?? [];
+        final totalValue = items.fold<double>(
+          0,
+          (sum, i) => sum + (i.currentStock * i.costPerUnit),
+        );
+        final lowCount = items.where((i) => i.isLowStock).length;
+        final outCount = items.where((i) => i.isOutOfStock).length;
+        final expiringCount =
+            items.where((i) => i.isExpiringSoon || i.isExpired).length;
+
+        return StreamBuilder<List<Map<String, dynamic>>>(
+          stream: _service.streamRecentMovements(branchIds,
+              limit: 50, isSuperAdmin: userScope.isSuperAdmin),
+          builder: (context, movSnap) {
+            final movements = movSnap.data ?? [];
+            final now = DateTime.now();
+            final from =
+                now.subtract(Duration(days: _rangeDays == 1 ? 1 : _rangeDays));
+            final ranged = movements.where((m) {
+              final dt = (m['createdAt'] as Timestamp?)?.toDate();
+              if (dt == null) return false;
+              return !dt.isBefore(from);
+            }).toList();
+            final received =
+                ranged.where((m) => m['movementType'] == 'receiving').length;
+            final deducted = ranged.where((m) {
+              final t = (m['movementType'] ?? '').toString();
+              return t == 'order_deduction' || t == 'waste';
+            }).length;
+            final adjusted = ranged
+                .where((m) => m['movementType'] == 'manual_adjustment')
+                .length;
+
+            return ListView(
+              padding: const EdgeInsets.all(24),
+              children: [
+                // ─── KPI Stats ─────────────────────────────────
+                _kpiGrid(
+                  totalItems: items.length,
+                  totalValue: totalValue,
+                  lowCount: lowCount,
+                  outCount: outCount,
+                  expiringCount: expiringCount,
+                  onTapLow: widget.onGoStockList,
+                  onTapOut: widget.onGoStockList,
+                  onTapExpiring: widget.onGoStockList,
+                ),
+                const SizedBox(height: 20),
+                // ─── Stock Movement Summary ────────────────────
+                _card(
+                  title: 'Stock Movement Summary',
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          _rangeChip('Today', 1),
+                          const SizedBox(width: 8),
+                          _rangeChip('7 Days', 7),
+                          const SizedBox(width: 8),
+                          _rangeChip('30 Days', 30),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(child: _countTile('Received', received, Colors.green)),
+                          const SizedBox(width: 10),
+                          Expanded(child: _countTile('Deducted', deducted, Colors.red)),
+                          const SizedBox(width: 10),
+                          Expanded(child: _countTile('Adjustments', adjusted, Colors.orange)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                // ─── Recent Movements ──────────────────────────
+                _card(
+                  title: 'Recent Movements',
+                  trailing: TextButton(
+                    onPressed: widget.onGoStockList,
+                    child: Text(
+                      'View All',
+                      style: TextStyle(color: _InvColors.primary, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  child: movements.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'No movement records yet.',
+                            style: TextStyle(color: _InvColors.textMuted),
+                          ),
+                        )
+                      : Column(
+                          children: movements.take(10).map((m) {
+                            final qty = (m['quantity'] as num?)?.toDouble() ?? 0.0;
+                            final createdAt = (m['createdAt'] as Timestamp?)?.toDate();
+                            return Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                border: Border(
+                                  bottom: BorderSide(
+                                    color: _InvColors.borderDark.withOpacity(0.5),
+                                  ),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 28,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: (qty >= 0 ? Colors.green : Colors.red).withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(
+                                      qty >= 0 ? Icons.arrow_downward : Icons.arrow_upward,
+                                      color: qty >= 0 ? Colors.green : Colors.red,
+                                      size: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          (m['ingredientName'] ?? '').toString(),
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: _InvColors.textMain,
+                                          ),
+                                        ),
+                                        Text(
+                                          (m['movementType'] ?? '').toString(),
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: _InvColors.textMuted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        '${qty >= 0 ? '+' : ''}${qty.toStringAsFixed(2)}',
+                                        style: TextStyle(
+                                          color: qty >= 0 ? Colors.green : Colors.red,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      Text(
+                                        createdAt?.toLocal().toString().split('.').first ?? '-',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          color: _InvColors.textMuted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                ),
+                const SizedBox(height: 20),
+                // ─── Quick Actions ─────────────────────────────
+                _card(
+                  title: 'Quick Actions',
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      _actionButton(
+                        icon: Icons.delete_sweep_outlined,
+                        label: 'Log Waste',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const WasteEntryScreenLarge())),
+                      ),
+                      _actionButton(
+                        icon: Icons.shopping_cart_outlined,
+                        label: 'Purchase Order',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const CreatePurchaseOrderScreen())),
+                      ),
+                      _actionButton(
+                        icon: Icons.fact_check_outlined,
+                        label: 'Stocktake',
+                        onTap: widget.onGoStocktake,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _actionButton({required IconData icon, required String label, required VoidCallback onTap}) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _InvColors.borderDark),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: _InvColors.textMuted),
+              const SizedBox(width: 8),
+              Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _InvColors.textMain)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _rangeChip(String label, int days) {
+    final selected = _rangeDays == days;
+    return GestureDetector(
+      onTap: () => setState(() => _rangeDays = days),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? _InvColors.primary.withOpacity(0.15) : _InvColors.bgDark,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected ? _InvColors.primary.withOpacity(0.4) : _InvColors.borderDark,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? _InvColors.primary : _InvColors.textMuted,
+            fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _countTile(String label, int value, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value.toString(),
+            style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 20),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: _InvColors.textMuted, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _kpiGrid({
+    required int totalItems,
+    required double totalValue,
+    required int lowCount,
+    required int outCount,
+    required int expiringCount,
+    required VoidCallback onTapLow,
+    required VoidCallback onTapOut,
+    required VoidCallback onTapExpiring,
+  }) {
+    return GridView.count(
+      physics: const NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      crossAxisCount: ResponsiveHelper.isDesktop(context) ? 4 : 2,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      childAspectRatio: ResponsiveHelper.isDesktop(context) ? 1.6 : 1.35,
+      children: [
+        _kpiCard(
+          title: 'Total Items',
+          value: totalItems.toString(),
+          icon: Icons.category_outlined,
+          color: _InvColors.primary,
+        ),
+        _kpiCard(
+          title: 'Inventory Value',
+          value: 'QAR ${totalValue.toStringAsFixed(0)}',
+          icon: Icons.account_balance_wallet_outlined,
+          color: Colors.blue,
+        ),
+        _kpiCard(
+          title: 'Low Stock',
+          value: '$lowCount',
+          icon: Icons.warning_amber_rounded,
+          color: Colors.red,
+          isAlert: lowCount > 0,
+          onTap: onTapLow,
+        ),
+        _kpiCard(
+          title: 'Expiring Soon',
+          value: '$expiringCount',
+          icon: Icons.event_busy_outlined,
+          color: Colors.orange,
+          onTap: onTapExpiring,
+        ),
+      ],
+    );
+  }
+
+  Widget _kpiCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+    bool isAlert = false,
+    VoidCallback? onTap,
+  }) {
+    return Material(
+      color: _InvColors.surfaceDark,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isAlert ? Colors.red.withOpacity(0.4) : _InvColors.borderDark,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              const Spacer(),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: _InvColors.textMuted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: TextStyle(
+                  color: isAlert ? Colors.red : _InvColors.textMain,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _card({
+    required String title,
+    required Widget child,
+    Widget? trailing,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: _InvColors.surfaceDark,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _InvColors.borderDark),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: _InvColors.textMain,
+                  ),
+                ),
+              ),
+              if (trailing != null) trailing,
+            ],
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CATEGORIES TAB
+// ═══════════════════════════════════════════════════════════════════════════
+class _CategoriesManagementTab extends StatefulWidget {
+  final String searchQuery;
+  const _CategoriesManagementTab({required this.searchQuery});
+
+  @override
+  State<_CategoriesManagementTab> createState() =>
+      _CategoriesManagementTabState();
+}
+
+class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
+  @override
+  Widget build(BuildContext context) {
+    final userScope = context.watch<UserScopeService>();
+    final db = FirebaseFirestore.instance;
+
+    final branchFilter = context.watch<BranchFilterService>();
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    Query<Map<String, dynamic>> query;
+
+    if (filterBranchIds.isNotEmpty) {
+      if (filterBranchIds.length == 1) {
+        query = db.collection('menu_categories')
+            .where('branchIds', arrayContains: filterBranchIds.first)
+            .orderBy('sortOrder');
+      } else {
+        query = db.collection('menu_categories')
+            .where('branchIds', arrayContainsAny: filterBranchIds)
+            .orderBy('sortOrder');
+      }
+    } else {
+      query = db.collection('menu_categories').orderBy('sortOrder');
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: db.collection('menu_categories').snapshots(),
+      builder: (context, catSnap) {
+        final catMap = <String, String>{};
+        if (catSnap.hasData) {
+          for (var doc in catSnap.data!.docs) {
+            catMap[doc.id] = (doc.data() as Map<String, dynamic>)['name'] ?? 'Unnamed';
+          }
+        }
+        return StreamBuilder<QuerySnapshot>(
+          stream: query.snapshots(),
+          builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: CircularProgressIndicator(color: _InvColors.primary),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              'Unable to load categories: ${snapshot.error}',
+              style: const TextStyle(color: Colors.red),
+            ),
+          );
+        }
+        final docs = snapshot.data?.docs ?? [];
+        final filtered = docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final name = (data['name'] ?? '').toString().toLowerCase();
+          final nameAr = (data['name_ar'] ?? '').toString().toLowerCase();
+          return name.contains(widget.searchQuery) ||
+              nameAr.contains(widget.searchQuery);
+        }).toList();
+
+        if (filtered.isEmpty) {
+          return Center(
+            child: Text(
+              widget.searchQuery.isNotEmpty
+                  ? 'No categories match your search.'
+                  : 'No categories found.',
+              style: const TextStyle(color: _InvColors.textMuted),
+            ),
+          );
+        }
+
+        // ─── Table layout ─────────────────────────────────────────
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Container(
+            decoration: BoxDecoration(
+              color: _InvColors.surfaceDark,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _InvColors.borderDark),
+            ),
+            child: Column(
+              children: [
+                // Header row
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: _InvColors.surfaceLighter,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                  ),
+                  child: const Row(children: [
+                    SizedBox(width: 52),  // image col
+                    Expanded(flex: 3, child: Text('CATEGORY NAME', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
+                    Expanded(flex: 1, child: Text('SORT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
+                    Expanded(flex: 1, child: Text('BRANCHES', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
+                    Expanded(flex: 1, child: Text('STATUS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
+                    SizedBox(width: 100, child: Text('ACTIONS', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
+                  ]),
+                ),
+                // Data rows
+                ...filtered.map((category) {
+                  final data = category.data() as Map<String, dynamic>;
+                  final isActive = data['isActive'] ?? false;
+                  final imageUrl = data['imageUrl'] as String? ?? '';
+                  final name = data['name'] ?? 'Unnamed';
+                  final nameAr = data['name_ar'] as String? ?? '';
+                  final sortOrder = data['sortOrder'] ?? 0;
+                  final branchIds = List<String>.from(data['branchIds'] ?? []);
+
+                  return Container(
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: _InvColors.borderDark, width: 0.5)),
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => showDialog(context: context, builder: (_) => CategoryDialog(doc: category)),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                          child: Row(children: [
+                            // Image
+                            Container(
+                              width: 40, height: 40,
+                              margin: const EdgeInsets.only(right: 12),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.deepPurple.withOpacity(0.08),
+                              ),
+                              child: imageUrl.isNotEmpty
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(imageUrl, fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => const Icon(Icons.category_rounded, color: Colors.deepPurple, size: 20)),
+                                    )
+                                  : const Icon(Icons.category_rounded, color: Colors.deepPurple, size: 20),
+                            ),
+                            // Name
+                            Expanded(flex: 3, child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: _InvColors.textMain), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                if (nameAr.isNotEmpty)
+                                  Text(nameAr, style: const TextStyle(fontSize: 12, color: _InvColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis, textDirection: TextDirection.rtl),
+                              ],
+                            )),
+                            // Sort Order
+                            Expanded(flex: 1, child: Text('$sortOrder', style: const TextStyle(fontSize: 13, color: _InvColors.textMuted))),
+                            // Branches
+                            Expanded(flex: 1, child: Text('${branchIds.length}', style: const TextStyle(fontSize: 13, color: _InvColors.textMuted))),
+                            // Status
+                            Expanded(flex: 1, child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isActive ? Colors.green.withOpacity(0.08) : Colors.red.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: isActive ? Colors.green : Colors.red)),
+                                const SizedBox(width: 6),
+                                Text(isActive ? 'Active' : 'Inactive', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: isActive ? Colors.green.shade700 : Colors.red.shade700)),
+                              ]),
+                            )),
+                            // Actions
+                            SizedBox(width: 100, child: Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined, size: 18),
+                                  color: Colors.deepPurple,
+                                  onPressed: () => showDialog(context: context, builder: (_) => CategoryDialog(doc: category)),
+                                  tooltip: 'Edit',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                                  color: Colors.red.shade400,
+                                  onPressed: () => _deleteDoc(context, category, 'Category'),
+                                  tooltip: 'Delete',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                                ),
+                              ],
+                            )),
+                          ]),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+      },
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MENU ITEMS TAB
+// ═══════════════════════════════════════════════════════════════════════════
+class _MenuItemsManagementTab extends StatefulWidget {
+  final String searchQuery;
+  const _MenuItemsManagementTab({required this.searchQuery});
+
+  @override
+  State<_MenuItemsManagementTab> createState() =>
+      _MenuItemsManagementTabState();
+}
+
+class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
+  @override
+  Widget build(BuildContext context) {
+    final userScope = context.watch<UserScopeService>();
+    final db = FirebaseFirestore.instance;
+
+    final branchFilter = context.watch<BranchFilterService>();
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    Query<Map<String, dynamic>> query;
+
+    if (filterBranchIds.isNotEmpty) {
+      if (filterBranchIds.length == 1) {
+        query = db.collection('menu_items')
+            .where('branchIds', arrayContains: filterBranchIds.first)
+            .orderBy('sortOrder');
+      } else {
+        query = db.collection('menu_items')
+            .where('branchIds', arrayContainsAny: filterBranchIds)
+            .orderBy('sortOrder');
+      }
+    } else {
+      query = db.collection('menu_items').orderBy('sortOrder');
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: db.collection('menu_categories').snapshots(),
+      builder: (context, catSnap) {
+        final catMap = <String, String>{};
+        if (catSnap.hasData) {
+          for (var doc in catSnap.data!.docs) {
+            catMap[doc.id] = (doc.data() as Map<String, dynamic>)['name'] ?? 'Unnamed';
+          }
+        }
+        return StreamBuilder<QuerySnapshot>(
+          stream: query.snapshots(),
+          builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: CircularProgressIndicator(color: _InvColors.primary),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              'Unable to load menu items: ${snapshot.error}',
+              style: const TextStyle(color: Colors.red),
+            ),
+          );
+        }
+        final docs = snapshot.data?.docs ?? [];
+        final filtered = docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final name = (data['name'] ?? '').toString().toLowerCase();
+          final nameAr = (data['name_ar'] ?? '').toString().toLowerCase();
+          return name.contains(widget.searchQuery) ||
+              nameAr.contains(widget.searchQuery);
+        }).toList();
+
+        if (filtered.isEmpty) {
+          return Center(
+            child: Text(
+              widget.searchQuery.isNotEmpty
+                  ? 'No menu items match your search.'
+                  : 'No menu items found.',
+              style: const TextStyle(color: _InvColors.textMuted),
+            ),
+          );
+        }
+
+        // ─── Table layout ─────────────────────────────────────────
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Container(
+            decoration: BoxDecoration(
+              color: _InvColors.surfaceDark,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _InvColors.borderDark),
+            ),
+            child: Column(
+              children: [
+                // Header row
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: _InvColors.surfaceLighter,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                  ),
+                  child: const Row(children: [
+                    SizedBox(width: 52),  // image col
+                    Expanded(flex: 3, child: Text('ITEM NAME', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
+                    Expanded(flex: 2, child: Text('CATEGORY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
+                    Expanded(flex: 1, child: Text('PRICE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
+                    Expanded(flex: 1, child: Text('STATUS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
+                    SizedBox(width: 100, child: Text('ACTIONS', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
+                  ]),
+                ),
+                // Data rows
+                ...filtered.map((item) {
+                  final data = item.data() as Map<String, dynamic>;
+                  final isActive = data['isAvailable'] ?? false;
+                  final imageUrl = data['imageUrl'] as String? ?? '';
+                  final name = data['name'] ?? 'Unnamed';
+                  final nameAr = data['name_ar'] as String? ?? '';
+                  final categoryName = catMap[data['categoryId']] ?? 'Uncategorized';
+                  final price = (data['price'] ?? 0).toDouble();
+                  final discountedPrice = (data['discountedPrice'] ?? 0).toDouble();
+                  final hasDiscount = discountedPrice > 0 && discountedPrice < price;
+                  final isPopular = data['isPopular'] ?? false;
+
+                  return Container(
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: _InvColors.borderDark, width: 0.5)),
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => DishEditScreenLarge(doc: item),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                          child: Row(children: [
+                            // Image
+                            Container(
+                              width: 40, height: 40,
+                              margin: const EdgeInsets.only(right: 12),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.amber.withOpacity(0.08),
+                              ),
+                              child: imageUrl.isNotEmpty
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(imageUrl, fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => Icon(Icons.fastfood_rounded, color: Colors.amber.shade600, size: 20)),
+                                    )
+                                  : Icon(Icons.fastfood_rounded, color: Colors.amber.shade600, size: 20),
+                            ),
+                            // Name
+                            Expanded(flex: 3, child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(children: [
+                                  Flexible(child: Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: _InvColors.textMain), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                                  if (isPopular) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(color: Colors.amber.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
+                                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                        Icon(Icons.star_rounded, size: 12, color: Colors.amber.shade700),
+                                        const SizedBox(width: 2),
+                                        Text('Popular', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.amber.shade700)),
+                                      ]),
+                                    ),
+                                  ],
+                                ]),
+                                if (nameAr.isNotEmpty)
+                                  Text(nameAr, style: const TextStyle(fontSize: 12, color: _InvColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis, textDirection: TextDirection.rtl),
+                              ],
+                            )),
+                            // Category
+                            Expanded(flex: 2, child: categoryName.isNotEmpty
+                              ? Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.deepPurple.withOpacity(0.08),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(categoryName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.deepPurple), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                )
+                              : const Text('—', style: TextStyle(color: _InvColors.textMuted)),
+                            ),
+                            // Price
+                            Expanded(flex: 1, child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'QAR ${(hasDiscount ? discountedPrice : price).toStringAsFixed(2)}',
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: hasDiscount ? Colors.green.shade700 : _InvColors.textMain),
+                                ),
+                                if (hasDiscount)
+                                  Text('QAR ${price.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: _InvColors.textMuted, decoration: TextDecoration.lineThrough)),
+                              ],
+                            )),
+                            // Status
+                            Expanded(flex: 1, child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isActive ? Colors.green.withOpacity(0.08) : Colors.red.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: isActive ? Colors.green : Colors.red)),
+                                const SizedBox(width: 6),
+                                Text(isActive ? 'Active' : 'Inactive', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: isActive ? Colors.green.shade700 : Colors.red.shade700)),
+                              ]),
+                            )),
+                            // Actions
+                            SizedBox(width: 100, child: Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined, size: 18),
+                                  color: Colors.deepPurple,
+                                  onPressed: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => DishEditScreenLarge(doc: item),
+                                    ),
+                                  ),
+                                  tooltip: 'Edit',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                                  color: Colors.red.shade400,
+                                  onPressed: () => _deleteDoc(context, item, 'Menu item'),
+                                  tooltip: 'Delete',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                                ),
+                              ],
+                            )),
+                          ]),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+      },
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SHARED HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+Future<void> _deleteDoc(
+  BuildContext context,
+  QueryDocumentSnapshot doc,
+  String itemType,
+) async {
+  final confirm = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text('Delete $itemType?'),
+          content: Text('This will permanently delete this $itemType.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  if (!confirm) return;
+  try {
+    await doc.reference.delete();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$itemType deleted successfully.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Delete failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}

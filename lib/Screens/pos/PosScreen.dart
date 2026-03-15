@@ -1,0 +1,865 @@
+// lib/Screens/pos/PosScreen.dart
+// Main POS Screen — Odoo-style split-pane with category sidebar + product grid + cart
+// Includes POS ↔ Delivery toggle in the header bar
+
+import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../main.dart';
+import '../../constants.dart';
+import '../../Widgets/BranchFilterService.dart';
+import '../../services/pos/pos_service.dart';
+import '../../services/pos/pos_models.dart';
+import '../../Widgets/PrintingService.dart';
+import 'PosProductTile.dart';
+import 'PosCartPanel.dart';
+import 'PosPaymentDialog.dart';
+import 'DeliveryOrdersPanel.dart';
+import 'DineInFloorPlanPanel.dart';
+import 'components/VariantSelectionDialog.dart';
+
+enum PosViewMode { pos, delivery, dineIn }
+
+class PosScreen extends StatefulWidget {
+  const PosScreen({super.key});
+
+  @override
+  State<PosScreen> createState() => _PosScreenState();
+}
+
+class _PosScreenState extends State<PosScreen> {
+  String? _selectedCategoryId; // null = All
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+  bool _isSubmittingOrder = false;
+
+  // ── POS ↔ Delivery ↔ Dine In Toggle ──
+  PosViewMode _viewMode = PosViewMode.pos;
+
+  // ── Stream Caching ──
+  Stream<QuerySnapshot>? _categoryStream;
+  List<String> _lastCategoryBranchIds = [];
+
+  Stream<QuerySnapshot>? _productStream;
+  String? _lastProductBranchId;
+  String? _lastCategoryId;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => PosService(),
+      child: Builder(
+        builder: (context) {
+          return Scaffold(
+            backgroundColor: Colors.grey[100],
+            body: Column(
+              children: [
+                _buildPosHeader(context),
+                Expanded(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    switchInCurve: Curves.easeInOut,
+                    switchOutCurve: Curves.easeInOut,
+                    child: _buildCurrentView(context),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCurrentView(BuildContext context) {
+    switch (_viewMode) {
+      case PosViewMode.delivery:
+        return DeliveryOrdersPanel(
+          key: const ValueKey('delivery'),
+          onSwitchToPos: () => setState(() => _viewMode = PosViewMode.pos),
+        );
+      case PosViewMode.dineIn:
+        return DineInFloorPlanPanel(
+          key: const ValueKey('dineIn'),
+          onSwitchToPos: () {
+            setState(() => _viewMode = PosViewMode.pos);
+          },
+        );
+      case PosViewMode.pos:
+      default:
+        return _buildPosBody(context);
+    }
+  }
+
+  // ── POS Body (Split pane) ──────────────────────────────────────
+  Widget _buildPosBody(BuildContext context) {
+    final userScope = Provider.of<UserScopeService>(context);
+    final branchFilter = Provider.of<BranchFilterService>(context);
+    final effectiveBranchIds =
+        branchFilter.getFilterBranchIds(userScope.branchIds);
+
+    bool categoryBranchChanged = _lastCategoryBranchIds.length != effectiveBranchIds.length;
+    if (!categoryBranchChanged) {
+      for (int i = 0; i < effectiveBranchIds.length; i++) {
+        if (_lastCategoryBranchIds[i] != effectiveBranchIds[i]) {
+          categoryBranchChanged = true;
+          break;
+        }
+      }
+    }
+
+    if (categoryBranchChanged || _categoryStream == null) {
+      _lastCategoryBranchIds = List.from(effectiveBranchIds);
+      if (effectiveBranchIds.isNotEmpty) {
+        _categoryStream = FirebaseFirestore.instance
+            .collection(AppConstants.collectionMenuCategories)
+            .where('branchIds', arrayContainsAny: effectiveBranchIds)
+            .orderBy('name')
+            .snapshots();
+      } else {
+        _categoryStream = null;
+      }
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: _categoryStream ?? const Stream.empty(),
+      builder: (context, catSnapshot) {
+        final categories = catSnapshot.data?.docs ?? [];
+        final Map<String, String> categoryMap = {
+          for (var doc in categories)
+            doc.id: (doc.data() as Map<String, dynamic>)['name']?.toString() ?? 'Category'
+        };
+
+        return _buildBranchCheckWrapper(context, userScope, branchFilter, (activeBranchId) {
+          return Row(
+            key: const ValueKey('pos'),
+            children: [
+              // ── Left: Products Panel (65%) ──
+              Expanded(
+                flex: 65,
+                child: Row(
+                  children: [
+                    _buildCategorySidebar(context, categories, activeBranchId),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: _buildProductGrid(context, categoryMap, activeBranchId)),
+                  ],
+                ),
+              ),
+              // ── Right: Cart Panel (35%) ──
+              const VerticalDivider(width: 1),
+              Expanded(
+                flex: 35,
+                child: PosCartPanel(
+                  onOrderSubmit: () => _submitOrder(context, activeBranchId),
+                  onPaymentTap: () => _openPaymentDialog(context, activeBranchId),
+                  isSubmittingOrder: _isSubmittingOrder,
+                ),
+              ),
+            ],
+          );
+        });
+      }
+    );
+  }
+
+  // ── Branch Enforcement Wrapper ──────────────────────────────
+  Widget _buildBranchCheckWrapper(
+    BuildContext context,
+    UserScopeService userScope,
+    BranchFilterService branchFilter,
+    Widget Function(String activeBranchId) builder,
+  ) {
+    final pos = context.watch<PosService>();
+    
+    final globalBranchId = branchFilter.selectedBranchId;
+
+    // 1. If global filter is a SINGLE branch, sync and allow POS
+    if (globalBranchId != null && globalBranchId != BranchFilterService.allBranchesValue) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (pos.activeBranchId != globalBranchId) {
+          pos.setActiveBranch(globalBranchId);
+        }
+      });
+      return builder(globalBranchId);
+    }
+
+    // 2. Otherwise (All Branches or no selection), block POS with an overlay
+    return Container(
+      color: Colors.grey[100],
+      child: Center(
+        child: Container(
+          width: 480,
+          padding: const EdgeInsets.all(40),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.storefront, size: 56, color: Colors.orange),
+              ),
+              const SizedBox(height: 32),
+              const Text(
+                'Branch Selection Required',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Point of Sale operations must be tied to a specific location for accurate inventory and reporting.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey[600], fontSize: 16, height: 1.4),
+              ),
+              const SizedBox(height: 32),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                decoration: BoxDecoration(
+                  color: Colors.deepPurple.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.deepPurple.withOpacity(0.15)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.arrow_upward, color: Colors.deepPurple[700], size: 28),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Text(
+                        'Please select a specific branch from the dropdown in the top App Bar.',
+                        style: TextStyle(color: Colors.deepPurple[800], fontWeight: FontWeight.w600, fontSize: 15),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── POS Header Bar with Toggle ─────────────────────────────────
+  Widget _buildPosHeader(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // ── POS ↔ Delivery Toggle ──
+          _buildViewToggle(),
+
+          const Spacer(),
+
+          // ── Search Bar (POS mode only) ──
+          if (_viewMode == PosViewMode.pos)
+            SizedBox(
+              width: 300,
+              height: 42,
+              child: TextField(
+                controller: _searchController,
+                focusNode: _searchFocus,
+                onChanged: (value) {
+                  setState(() => _searchQuery = value.toLowerCase());
+                },
+                decoration: InputDecoration(
+                  hintText: 'Search products...',
+                  hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
+                  prefixIcon:
+                      Icon(Icons.search, color: Colors.grey[400], size: 20),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: Icon(Icons.close,
+                              color: Colors.grey[400], size: 18),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                            _searchFocus.unfocus();
+                          },
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: Colors.grey[100],
+                  contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey[200]!),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(
+                        color: Colors.deepPurple, width: 1.5),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── Animated POS / Delivery / Dine In Toggle ───────────────────────────────
+  Widget _buildViewToggle() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildToggleButton(
+            label: 'POS',
+            icon: Icons.point_of_sale,
+            isSelected: _viewMode == PosViewMode.pos,
+            color: Colors.deepPurple,
+            onTap: () => setState(() => _viewMode = PosViewMode.pos),
+          ),
+          _buildToggleButton(
+            label: 'Order',
+            icon: Icons.receipt_long,
+            isSelected: _viewMode == PosViewMode.delivery,
+            color: const Color(0xFFFF6F00),
+            onTap: () => setState(() => _viewMode = PosViewMode.delivery),
+          ),
+          _buildToggleButton(
+            label: 'Floor',
+            icon: Icons.table_bar,
+            isSelected: _viewMode == PosViewMode.dineIn,
+            color: Colors.teal,
+            onTap: () => setState(() => _viewMode = PosViewMode.dineIn),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleButton({
+    required String label,
+    required IconData icon,
+    required bool isSelected,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(11),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? color : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: isSelected ? Colors.white : Colors.grey[600],
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  color: isSelected ? Colors.white : Colors.grey[700],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Category Sidebar ────────────────────────────────────────
+  Color _getCategoryColor(String? name) {
+    if (name == null) return Colors.deepPurple;
+    final normalized = name.toLowerCase();
+    if (normalized.contains('drink') || normalized.contains('beverage') || normalized.contains('juice') || normalized.contains('water')) {
+      return Colors.red[400]!;
+    }
+    if (normalized.contains('dessert') || normalized.contains('sweet') || normalized.contains('cake') || normalized.contains('ice cream')) {
+      return Colors.amber[600]!;
+    }
+    if (normalized.contains('starter') || normalized.contains('appetizer') || normalized.contains('snack')) {
+      return Colors.teal[400]!;
+    }
+    if (normalized.contains('main') || normalized.contains('food') || normalized.contains('dish') || normalized.contains('dinner')) {
+      return Colors.blue[600]!;
+    }
+    if (normalized.contains('burger') || normalized.contains('pizza') || normalized.contains('fast food')) {
+      return Colors.orange[700]!;
+    }
+    if (normalized.contains('vegan') || normalized.contains('salad') || normalized.contains('healthy')) {
+      return Colors.green[600]!;
+    }
+    // Deterministic fallback based on name hash
+    final hash = name.hashCode.abs();
+    final colList = [
+      Colors.deepPurple[400]!,
+      Colors.indigo[400]!,
+      Colors.cyan[600]!,
+      Colors.pink[400]!,
+      Colors.brown[400]!,
+    ];
+    return colList[hash % colList.length];
+  }
+
+  Widget _buildCategorySidebar(
+      BuildContext context, List<QueryDocumentSnapshot> categories, String activeBranchId) {
+    return Container(
+      width: 130,
+      color: Colors.white,
+      child: Column(
+        children: [
+          // "All" category
+          _buildCategoryItem(null, 'All Items', Icons.apps_rounded, Colors.deepPurple),
+          const Divider(height: 1),
+          // Categories passed from parent
+          Expanded(
+            child: categories.isEmpty
+                ? const Center(
+                    child: Text(
+                      'No categories',
+                      style: TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
+                  )
+                : _buildCategoryList(categories),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryList(List<QueryDocumentSnapshot> categories) {
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemCount: categories.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 2),
+      itemBuilder: (context, index) {
+        final cat = categories[index];
+        final catData = cat.data() as Map<String, dynamic>;
+        final name = catData['name']?.toString() ?? 'Category';
+        final color = _getCategoryColor(name);
+        return _buildCategoryItem(cat.id, name, Icons.restaurant_menu, color);
+      },
+    );
+  }
+
+  Widget _buildCategoryItem(String? id, String name, IconData icon, Color color) {
+    final isSelected = _selectedCategoryId == id;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          setState(() => _selectedCategoryId = id);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? color.withOpacity(0.15)
+                : color.withOpacity(0.02),
+            border: Border(
+              left: BorderSide(
+                color: isSelected ? color : Colors.transparent,
+                width: 4,
+              ),
+            ),
+          ),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isSelected ? color : color.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  size: 20,
+                  color: isSelected ? Colors.white : color,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                name,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                  color: isSelected ? color.withOpacity(0.9) : Colors.grey[800],
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Product Grid ──────────────────────────────────────────
+  Widget _buildProductGrid(
+      BuildContext context, Map<String, String> categoryMap, String activeBranchId) {
+      
+    if (_lastProductBranchId != activeBranchId || _lastCategoryId != _selectedCategoryId || _productStream == null) {
+      _lastProductBranchId = activeBranchId;
+      _lastCategoryId = _selectedCategoryId;
+      
+      Query query = FirebaseFirestore.instance.collection(AppConstants.collectionMenuItems);
+      query = query.where('branchIds', arrayContainsAny: [activeBranchId]);
+      
+      if (_selectedCategoryId != null) {
+        query = query.where('categoryId', isEqualTo: _selectedCategoryId);
+      }
+      
+      _productStream = query.snapshots();
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: _productStream,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
+                const SizedBox(height: 12),
+                Text(
+                  'Failed to load products',
+                  style: TextStyle(fontSize: 14, color: Colors.red[400]),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () => setState(() {}),
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Retry'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.restaurant_menu, size: 64, color: Colors.grey[300]),
+                const SizedBox(height: 16),
+                Text(
+                  'No products found',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey[400],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        var docs = snapshot.data!.docs;
+
+        // Apply search filter client-side
+        if (_searchQuery.isNotEmpty) {
+          docs = docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final name = (data['name'] ?? '').toString().toLowerCase();
+            return name.contains(_searchQuery);
+          }).toList();
+        }
+
+        if (docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.search_off, size: 64, color: Colors.grey[300]),
+                const SizedBox(height: 16),
+                Text(
+                  'No results for "$_searchQuery"',
+                  style: TextStyle(fontSize: 14, color: Colors.grey[400]),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return GridView.builder(
+          padding: const EdgeInsets.all(16),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 4,
+            crossAxisSpacing: 14,
+            mainAxisSpacing: 14,
+            childAspectRatio: 1.6,
+          ),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final doc = docs[index];
+            final data = doc.data() as Map<String, dynamic>;
+            final name = data['name']?.toString() ?? 'Item';
+            final price = (data['price'] ?? 0).toDouble();
+            final imageUrl = data['imageUrl']?.toString();
+            final isAvailable = data['isAvailable'] ?? true;
+
+            final catId = data['categoryId']?.toString();
+            final catName = categoryMap[catId] ?? data['categoryName']?.toString();
+            final chinColor = _getCategoryColor(catName);
+
+            return PosProductTile(
+              name: name,
+              price: price,
+              imageUrl: imageUrl,
+              isAvailable: isAvailable == true,
+              chinColor: chinColor,
+              onTap: () async {
+                final pos = context.read<PosService>();
+                final variants = data['variants'] as Map<String, dynamic>?;
+
+                List<PosAddon> selectedAddons = [];
+                if (variants != null && variants.isNotEmpty) {
+                  final result = await showDialog<List<PosAddon>>(
+                    context: context,
+                    builder: (ctx) => VariantSelectionDialog(
+                      productName: name,
+                      variants: variants,
+                    ),
+                  );
+                  if (result == null) return; // User cancelled
+                  selectedAddons = result;
+                }
+
+                pos.addItem(PosCartItem(
+                  productId: doc.id,
+                  name: name,
+                  nameAr: data['nameAr']?.toString(),
+                  price: price,
+                  imageUrl: imageUrl,
+                  categoryId: catId,
+                  categoryName: catName,
+                  addons: selectedAddons,
+                ));
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ── Actions ─────────────────────────────────────────────────
+  Future<void> _submitOrder(BuildContext context, String activeBranchId) async {
+    final pos = context.read<PosService>();
+    final userScope = context.read<UserScopeService>();
+
+    if (pos.orderType == PosOrderType.dineIn && pos.selectedTableId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a table for dine-in orders'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSubmittingOrder = true;
+    });
+
+    try {
+
+      final orderId = await pos.submitOrder(
+        userScope: userScope,
+        branchIds: [activeBranchId],
+        initialStatus: AppConstants.statusPreparing,
+      );
+
+      if (mounted) {
+        // Clear search and category filters upon success
+        _searchController.clear();
+        setState(() {
+          _searchQuery = '';
+          _selectedCategoryId = null;
+          _searchFocus.unfocus();
+        });
+
+        // User requested: "after placing an order the receipt should not appear"
+        // _printReceipt(orderId);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit order: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmittingOrder = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openPaymentDialog(BuildContext context, String activeBranchId) async {
+    final pos = context.read<PosService>();
+    final userScope = context.read<UserScopeService>();
+
+    if (pos.orderType == PosOrderType.dineIn && pos.selectedTableId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a table for dine-in orders before payment.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (pos.orderType == PosOrderType.dineIn && pos.selectedTableId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a table for dine-in orders before payment.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Use centralized state from PosService
+    double existingTableTotal = pos.ongoingTotal;
+    List<DocumentSnapshot> existingOrders = pos.ongoingOrders;
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => ChangeNotifierProvider.value(
+        value: pos,
+        child: PosPaymentDialog(
+          totalAmount: pos.total,
+          branchIds: [activeBranchId],
+          existingTableTotal: existingTableTotal,
+          existingOrders: existingOrders,
+          onPaymentComplete: (orderId) {
+            if (orderId != null) {
+              // Clear search and category filters upon success
+              _searchController.clear();
+              setState(() {
+                _searchQuery = '';
+                _selectedCategoryId = null;
+                _searchFocus.unfocus();
+              });
+
+              // Prompt to print receipt
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (promptCtx) => AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  title: Row(
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.green[600]),
+                      const SizedBox(width: 10),
+                      const Text('Payment Successful'),
+                    ],
+                  ),
+                  content: const Text('Do you want to print the receipt?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(promptCtx),
+                      child: const Text('No'),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(promptCtx);
+                        _printReceipt(orderId);
+                      },
+                      icon: const Icon(Icons.print, size: 18),
+                      label: const Text('Print Receipt'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepPurple,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _printReceipt(String orderId) async {
+    try {
+      final orderDoc = await FirebaseFirestore.instance
+          .collection(AppConstants.collectionOrders)
+          .doc(orderId)
+          .get();
+
+      if (orderDoc.exists && mounted) {
+        await PrintingService.printReceipt(context, orderDoc);
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error fetching order for receipt: $e');
+    }
+  }
+}
