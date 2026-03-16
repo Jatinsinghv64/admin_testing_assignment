@@ -212,23 +212,24 @@ class PosService extends ChangeNotifier {
     try {
       if (branchIds.isEmpty) return 1;
       final branchId = branchIds.first;
-      final startOfBusinessDay = TimeUtils.getBusinessStartTimestamp();
-      final snapshot = await FirebaseFirestore.instance
-          .collection(AppConstants.collectionOrders)
-          .where('branchIds', arrayContains: branchId)
-          .where('timestamp', isGreaterThanOrEqualTo: startOfBusinessDay)
-          .orderBy('timestamp', descending: true)
-          .limit(1)
-          .get();
+      final dynamic businessStart = TimeUtils.getBusinessStartTimestamp();
+      final DateTime businessStartDt = businessStart is Timestamp ? businessStart.toDate() : businessStart;
+      final dateKey = businessStartDt.toIso8601String().split('T')[0];
+      final counterRef = FirebaseFirestore.instance.collection('Counters').doc('orders_${branchId}_$dateKey');
 
-      if (snapshot.docs.isEmpty) return 1;
-
-      final lastNumber =
-          (snapshot.docs.first.data()['dailyOrderNumber'] as int?) ?? 0;
-      return lastNumber + 1;
+      return await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final counterSnap = await transaction.get(counterRef);
+        if (!counterSnap.exists) {
+          transaction.set(counterRef, {'count': 1});
+          return 1;
+        }
+        final currentCount = (counterSnap.data()?['count'] as int?) ?? 0;
+        final nextCount = currentCount + 1;
+        transaction.update(counterRef, {'count': nextCount});
+        return nextCount;
+      });
     } catch (e) {
       debugPrint('⚠️ Error generating daily order number: $e');
-      // Fallback: use timestamp-based number
       return DateTime.now().millisecondsSinceEpoch % 10000;
     }
   }
@@ -297,44 +298,54 @@ class PosService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final dailyNumber = await _generateDailyOrderNumber(branchIds);
-      final orderData = _buildOrderData(branchIds, userScope, initialStatus, dailyNumber);
-
       final docRef = FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc();
       final String orderId = docRef.id;
 
-      // ── INDUSTRY GRADE FIX: Use Batch for atomic Order + Table Update ──
-      final batch = FirebaseFirestore.instance.batch();
-      
-      batch.set(docRef, orderData);
+      // ── INDUSTRY GRADE FIX: Wrap in Transaction for Table & Counter Safety ──
+      final String finalOrderId = await FirebaseFirestore.instance.runTransaction((transaction) async {
+        // 1. Check Table Status (if Dine-In)
+        if (_orderType == PosOrderType.dineIn && _selectedTableId != null) {
+          final branchRef = FirebaseFirestore.instance.collection(AppConstants.collectionBranch).doc(primaryBranchId);
+          final branchSnap = await transaction.get(branchRef);
+          final tables = (branchSnap.data()?['tables'] as Map<dynamic, dynamic>?) ?? {};
+          final tableData = tables[_selectedTableId] as Map<dynamic, dynamic>?;
+          
+          if (tableData?['status'] == 'occupied' && tableData?['currentOrderId'] != null) {
+             throw Exception('Table was just taken by another device!');
+          }
+          
+          // Book the table
+          transaction.update(branchRef, {
+            'tables.$_selectedTableId.status': 'occupied',
+            'tables.$_selectedTableId.currentOrderId': orderId,
+          });
+        }
 
-      if (_orderType == PosOrderType.dineIn && _selectedTableId != null) {
-        final branchDoc = FirebaseFirestore.instance.collection(AppConstants.collectionBranch).doc(primaryBranchId);
-        batch.update(branchDoc, {
-          'tables.$_selectedTableId.status': 'occupied',
-          'tables.$_selectedTableId.currentOrderId': orderId,
-        });
-      }
+        // 2. Generate Daily Number (Atomic inside transaction)
+        final dailyNumber = await _generateDailyOrderNumber(branchIds);
+        final orderData = _buildOrderData(branchIds, userScope, initialStatus, dailyNumber);
+        
+        // 3. Create Order
+        transaction.set(docRef, orderData);
 
-      await batch.commit().timeout(_firestoreWriteTimeout, onTimeout: () {
-        throw Exception('Order submission timed out. Please check your internet connection.');
-      });
+        return orderId;
+      }).timeout(_firestoreWriteTimeout);
 
-      // ── Ingredient deduction (background, non-blocking but logged) ──
+      // ── Ingredient deduction (background) ──
       final recordedBy = _getRecorder(userScope);
-      
       InventoryService().deductForOrder(
-        orderId: orderId,
+        orderId: finalOrderId,
         branchIds: branchIds,
         recordedBy: recordedBy,
-      ).catchError((e) {
-        _logError('POS: Ingredient deduction failed for order $orderId', e);
-      });
+      ).catchError((e) => _logError('POS: Ingredient deduction failed', e));
 
       clearCart();
-      return orderId;
+      return finalOrderId;
     } catch (e) {
       _logError('POS: Failed to submit order', e);
+      if (e is TimeoutException) {
+        throw Exception('Network timeout. Check KDS/Orders list before retrying to prevent duplicates.');
+      }
       rethrow;
     } finally {
       _isSubmitting = false;
@@ -494,6 +505,9 @@ class PosService extends ChangeNotifier {
       return orderIdToReturn ?? 'paid';
     } catch (e) {
       _logError('POS: Payment submission failed', e);
+      if (e is TimeoutException) {
+        throw Exception('Network timeout during payment. Verify status in Orders list before retrying.');
+      }
       rethrow;
     } finally {
       _isSubmitting = false;

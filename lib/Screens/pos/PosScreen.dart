@@ -698,12 +698,14 @@ class _PosScreenState extends State<PosScreen> {
     final userScope = context.read<UserScopeService>();
 
     if (pos.orderType == PosOrderType.dineIn && pos.selectedTableId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select a table for dine-in orders'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select a table for dine-in orders'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
       return;
     }
 
@@ -754,22 +756,14 @@ class _PosScreenState extends State<PosScreen> {
     final userScope = context.read<UserScopeService>();
 
     if (pos.orderType == PosOrderType.dineIn && pos.selectedTableId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select a table for dine-in orders before payment.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    if (pos.orderType == PosOrderType.dineIn && pos.selectedTableId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select a table for dine-in orders before payment.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select a table for dine-in orders before payment.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
       return;
     }
 

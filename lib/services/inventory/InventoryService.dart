@@ -316,100 +316,20 @@ class InventoryService {
     required List<String> branchIds,
     required String orderId,
     required String recordedBy,
+    String batchKey = 'main',
+    String reason = 'Inventory deduction',
   }) async {
-    final Map<String, double> runningBalances = {};
-    final List<Function()> pendingWrites = [];
-
-    for (final item in items) {
-      final menuItemId = (item['menuItemId'] ?? item['itemId'] ?? item['productId'] ?? '').toString();
-      final int orderedCount = (item['quantity'] as num?)?.toInt() ?? 1;
-      if (menuItemId.isEmpty || orderedCount <= 0) continue;
-
-      // Fetch menu_item in transaction
-      final menuRef = _db.collection(AppConstants.collectionMenuItems).doc(menuItemId);
-      final menuSnap = await transaction.get(menuRef);
-      if (!menuSnap.exists) continue;
-
-      final recipeId = (menuSnap.data()?['recipeId'] ?? '').toString();
-      DocumentSnapshot? recipeSnap;
-
-      if (recipeId.isNotEmpty) {
-        final recipeRef = _db.collection(AppConstants.collectionRecipes).doc(recipeId);
-        recipeSnap = await transaction.get(recipeRef);
-      }
-
-      if (recipeSnap == null || !recipeSnap.exists) {
-        final recipeQuery = await _db
-            .collection(AppConstants.collectionRecipes)
-            .where('linkedMenuItemId', isEqualTo: menuItemId)
-            .where('isActive', isEqualTo: true)
-            .limit(1)
-            .get();
-        if (recipeQuery.docs.isEmpty) continue;
-        recipeSnap = await transaction.get(recipeQuery.docs.first.reference);
-      }
-
-      final recipeData = recipeSnap?.data() as Map<String, dynamic>? ?? {};
-      final recipeIngredients = List<Map<String, dynamic>>.from(recipeData['ingredients'] ?? []);
-
-      for (final ri in recipeIngredients) {
-        final ingredientId = (ri['ingredientId'] ?? '').toString();
-        if (ingredientId.isEmpty) continue;
-
-        final double recipeQty = (ri['quantity'] as num?)?.toDouble() ?? 0.0;
-        final String recipeUnit = (ri['unit'] ?? '').toString();
-
-        final ingRef = _ingredientsCol.doc(ingredientId);
-        final ingSnap = await transaction.get(ingRef);
-        if (!ingSnap.exists) continue;
-
-        final ingData = ingSnap.data()!;
-        final String ingUnit = (ingData['unit'] ?? '').toString();
-        
-        // Use running balance if we already modified it in this transaction
-        final double before = runningBalances[ingredientId] ?? (ingData['currentStock'] as num?)?.toDouble() ?? 0.0;
-
-        double deductQty = recipeQty * orderedCount;
-        if (recipeUnit != ingUnit) {
-          final converted = IngredientService.convertUnit(deductQty, recipeUnit, ingUnit);
-          if (converted == null) continue;
-          deductQty = converted;
-        }
-
-        final double after = (before - deductQty).clamp(0.0, double.infinity);
-        final bool clamped = (before - deductQty) < 0;
-
-        runningBalances[ingredientId] = after;
-
-        pendingWrites.add(() {
-          transaction.update(ingRef, {
-            'currentStock': after,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-
-          final movRef = _movementsCol.doc();
-          transaction.set(movRef, {
-            'branchIds': branchIds,
-            'ingredientId': ingredientId,
-            'ingredientName': (ingData['name'] ?? '').toString(),
-            'movementType': 'order_deduction',
-            'quantity': -deductQty,
-            'balanceBefore': before,
-            'balanceAfter': after,
-            'referenceId': orderId,
-            'reason': 'Inventory deduction',
-            if (clamped) 'warning': 'Stock clamped to 0 (insufficient stock)',
-            'recordedBy': recordedBy,
-            'createdAt': FieldValue.serverTimestamp(),
-          });
-        });
-      }
-    }
-
-    // Execute all buffered writes safely at the end to abide by Firestore Rules
-    for (final write in pendingWrites) {
-      write();
-    }
+    await _applyInventoryDeltaInTransaction(
+      transaction: transaction,
+      items: items,
+      branchIds: branchIds,
+      orderId: orderId,
+      recordedBy: recordedBy,
+      movementType: 'order_deduction',
+      reason: reason,
+      batchKey: batchKey,
+      direction: -1,
+    );
   }
 
   /// Restores ingredient stock for a cancelled order or item.
@@ -460,16 +380,53 @@ class InventoryService {
     required String orderId,
     required String recordedBy,
     required String reason,
+    String batchKey = 'main',
   }) async {
+    await _applyInventoryDeltaInTransaction(
+      transaction: transaction,
+      items: items,
+      branchIds: branchIds,
+      orderId: orderId,
+      recordedBy: recordedBy,
+      movementType: 'order_restoration',
+      reason: reason,
+      batchKey: batchKey,
+      direction: 1,
+    );
+  }
+
+  Future<void> _applyInventoryDeltaInTransaction({
+    required Transaction transaction,
+    required List<Map<String, dynamic>> items,
+    required List<String> branchIds,
+    required String orderId,
+    required String recordedBy,
+    required String movementType,
+    required String reason,
+    required String batchKey,
+    required int direction,
+  }) async {
+    final normalizedBatchKey = batchKey.trim().isEmpty ? 'main' : batchKey.trim();
+    final operationRef = _db
+        .collection(AppConstants.collectionOrders)
+        .doc(orderId)
+        .collection('inventoryOperations')
+        .doc('${movementType}_$normalizedBatchKey');
+
+    final operationSnap = await transaction.get(operationRef);
+    if (operationSnap.exists && operationSnap.data()?['applied'] == true) {
+      return;
+    }
+
     final Map<String, double> runningBalances = {};
     final List<Function()> pendingWrites = [];
 
-    for (final item in items) {
+    for (int itemIndex = 0; itemIndex < items.length; itemIndex++) {
+      final item = items[itemIndex];
       final menuItemId = (item['menuItemId'] ?? item['itemId'] ?? item['productId'] ?? '').toString();
-      final int qtyToRestore = (item['quantity'] as num?)?.toInt() ?? 1;
-      if (menuItemId.isEmpty || qtyToRestore <= 0) continue;
+      final int itemQuantity = (item['quantity'] as num?)?.toInt() ?? 1;
+      if (menuItemId.isEmpty || itemQuantity <= 0) continue;
 
-      // Fetch menu_item in transaction
       final menuRef = _db.collection(AppConstants.collectionMenuItems).doc(menuItemId);
       final menuSnap = await transaction.get(menuRef);
       if (!menuSnap.exists) continue;
@@ -495,6 +452,7 @@ class InventoryService {
 
       final recipeData = recipeSnap?.data() as Map<String, dynamic>? ?? {};
       final recipeIngredients = List<Map<String, dynamic>>.from(recipeData['ingredients'] ?? []);
+      if (recipeIngredients.isEmpty) continue;
 
       for (final ri in recipeIngredients) {
         final ingredientId = (ri['ingredientId'] ?? '').toString();
@@ -509,17 +467,23 @@ class InventoryService {
 
         final ingData = ingSnap.data()!;
         final String ingUnit = (ingData['unit'] ?? '').toString();
-        
-        final double before = runningBalances[ingredientId] ?? (ingData['currentStock'] as num?)?.toDouble() ?? 0.0;
+        final double before = runningBalances[ingredientId] ??
+            (ingData['currentStock'] as num?)?.toDouble() ??
+            0.0;
 
-        double restoreQty = recipeQty * qtyToRestore;
+        double adjustedQty = recipeQty * itemQuantity;
         if (recipeUnit != ingUnit) {
-          final converted = IngredientService.convertUnit(restoreQty, recipeUnit, ingUnit);
+          final converted = IngredientService.convertUnit(adjustedQty, recipeUnit, ingUnit);
           if (converted == null) continue;
-          restoreQty = converted;
+          adjustedQty = converted;
         }
+        if (adjustedQty <= 0) continue;
 
-        final double after = before + restoreQty;
+        final signedQty = adjustedQty * direction;
+        final rawAfter = before + signedQty;
+        final double after = direction < 0 ? rawAfter.clamp(0.0, double.infinity) : rawAfter;
+        final bool clamped = direction < 0 && rawAfter < 0;
+
         runningBalances[ingredientId] = after;
 
         pendingWrites.add(() {
@@ -533,12 +497,17 @@ class InventoryService {
             'branchIds': branchIds,
             'ingredientId': ingredientId,
             'ingredientName': (ingData['name'] ?? '').toString(),
-            'movementType': 'order_restoration',
-            'quantity': restoreQty,
+            'movementType': movementType,
+            'quantity': signedQty,
             'balanceBefore': before,
             'balanceAfter': after,
             'referenceId': orderId,
+            'batchKey': normalizedBatchKey,
+            'itemIndex': itemIndex,
+            'menuItemId': menuItemId,
+            'recipeId': recipeSnap?.id,
             'reason': reason,
+            if (clamped) 'warning': 'Stock clamped to 0 (insufficient stock)',
             'recordedBy': recordedBy,
             'createdAt': FieldValue.serverTimestamp(),
           });
@@ -549,5 +518,15 @@ class InventoryService {
     for (final write in pendingWrites) {
       write();
     }
+
+    transaction.set(operationRef, {
+      'applied': true,
+      'movementType': movementType,
+      'batchKey': normalizedBatchKey,
+      'itemCount': items.length,
+      'recordedBy': recordedBy,
+      'createdAt': FieldValue.serverTimestamp(),
+      'reason': reason,
+    });
   }
 }

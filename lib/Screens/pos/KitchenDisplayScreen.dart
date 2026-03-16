@@ -95,12 +95,10 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
       AppConstants.statusPending,
       AppConstants.statusPreparing,
       AppConstants.statusPrepared,
-      AppConstants.statusServed,
       AppConstants.statusNeedsAssignment,
-      AppConstants.statusCancelled,
-      'ready',
       'placed',
-      AppConstants.statusPaid, // Include PAID (prepaid) so they don't vanish
+      // AppConstants.statusServed, // Exclude terminal states to save Firestore reads
+      // AppConstants.statusPaid,   // Exclude terminal states to save Firestore reads
     ]).where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(_dateStart));
 
     if (branchIds.isNotEmpty) {
@@ -312,6 +310,30 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                               ? _buildListView(visibleDocs, _activeTab)
                               : _buildMainGrid(visibleDocs),
                     ),
+                    // ── Web Audio Autoplay Fix Banner ──
+                    if (Theme.of(context).platform == TargetPlatform.android || Theme.of(context).platform == TargetPlatform.iOS ? false : true)
+                      GestureDetector(
+                        onTap: () {
+                          _playNewOrderSound(); // Dummy play to unlock audio
+                          setState(() {}); // Re-build to hide
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          color: Colors.amber.shade700,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.volume_up, color: Colors.white, size: 16),
+                              SizedBox(width: 8),
+                              Text(
+                                'Tap anywhere to enable notification sounds',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                   ],
                 );
               },
@@ -949,13 +971,27 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
   }
 
   Future<void> _bumpItem(int index) async {
+    final bool wasBumped = _bumpedItems.contains(index);
+    
+    // Optimistic UI update
     setState(() {
-      _bumpedItems.contains(index) ? _bumpedItems.remove(index) : _bumpedItems.add(index);
+      wasBumped ? _bumpedItems.remove(index) : _bumpedItems.add(index);
     });
+    
     try {
-      await widget.orderDoc.reference.update({'completedItems': _bumpedItems.toList()});
+      // Industry Grade: Atomic array operations
+      await widget.orderDoc.reference.update({
+        'completedItems': wasBumped 
+            ? FieldValue.arrayRemove([index]) 
+            : FieldValue.arrayUnion([index])
+      });
     } catch (e) {
-      _loadBumpedItems();
+      // Revert on failure
+      if (mounted) {
+        setState(() {
+          _loadBumpedItems();
+        });
+      }
     }
   }
 
