@@ -440,14 +440,9 @@ class InventoryService {
       }
 
       if (recipeSnap == null || !recipeSnap.exists) {
-        final recipeQuery = await _db
-            .collection(AppConstants.collectionRecipes)
-            .where('linkedMenuItemId', isEqualTo: menuItemId)
-            .where('isActive', isEqualTo: true)
-            .limit(1)
-            .get();
-        if (recipeQuery.docs.isEmpty) continue;
-        recipeSnap = await transaction.get(recipeQuery.docs.first.reference);
+        // Fallback: If no direct recipeId, we skip. 
+        // We removed the .get() query here because it violates transaction rules on Web.
+        continue;
       }
 
       final recipeData = recipeSnap?.data() as Map<String, dynamic>? ?? {};

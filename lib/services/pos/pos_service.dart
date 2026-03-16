@@ -64,6 +64,13 @@ class PosService extends ChangeNotifier {
 
   double get ongoingTotal => double.parse(_ongoingOrders.fold(0.0, (acc, doc) {
         final data = doc.data() as Map<String, dynamic>;
+        
+        // 🛠️ INDUSTRY GRADE FIX: Ignore already paid orders when calculating outstanding table balance
+        final isPaid = data['isPaid'] == true || getPaymentStatus(data) == 'paid';
+        if (isPaid) {
+          return acc; // Outstanding balance for this specific order is $0.00
+        }
+        
         return acc + (data['totalAmount'] as num? ?? 0).toDouble();
       }).toStringAsFixed(2));
 
@@ -208,29 +215,27 @@ class PosService extends ChangeNotifier {
   }
 
   // ── Daily Order Number ──────────────────────────────────────
-  Future<int> _generateDailyOrderNumber(List<String> branchIds) async {
+  // 🛠️ FIX: Accept the parent 'Transaction' and return data for later writing
+  Future<Map<String, dynamic>> _prepareDailyOrderNumber(List<String> branchIds, Transaction transaction) async {
     try {
-      if (branchIds.isEmpty) return 1;
+      if (branchIds.isEmpty) return {'value': 1, 'ref': null, 'exists': false};
       final branchId = branchIds.first;
       final dynamic businessStart = TimeUtils.getBusinessStartTimestamp();
       final DateTime businessStartDt = businessStart is Timestamp ? businessStart.toDate() : businessStart;
       final dateKey = businessStartDt.toIso8601String().split('T')[0];
       final counterRef = FirebaseFirestore.instance.collection('Counters').doc('orders_${branchId}_$dateKey');
 
-      return await FirebaseFirestore.instance.runTransaction((transaction) async {
-        final counterSnap = await transaction.get(counterRef);
-        if (!counterSnap.exists) {
-          transaction.set(counterRef, {'count': 1});
-          return 1;
-        }
-        final currentCount = (counterSnap.data()?['count'] as int?) ?? 0;
-        final nextCount = currentCount + 1;
-        transaction.update(counterRef, {'count': nextCount});
-        return nextCount;
-      });
+      final counterSnap = await transaction.get(counterRef);
+      if (!counterSnap.exists) {
+        return {'value': 1, 'ref': counterRef, 'exists': false};
+      }
+      final currentCount = (counterSnap.data()?['count'] as int?) ?? 0;
+      final nextCount = currentCount + 1;
+      return {'value': nextCount, 'ref': counterRef, 'exists': true};
+      
     } catch (e) {
       debugPrint('⚠️ Error generating daily order number: $e');
-      return DateTime.now().millisecondsSinceEpoch % 10000;
+      return {'value': DateTime.now().millisecondsSinceEpoch % 10000, 'ref': null, 'exists': false};
     }
   }
 
@@ -303,29 +308,48 @@ class PosService extends ChangeNotifier {
 
       // ── INDUSTRY GRADE FIX: Wrap in Transaction for Table & Counter Safety ──
       final String finalOrderId = await FirebaseFirestore.instance.runTransaction((transaction) async {
-        // 1. Check Table Status (if Dine-In)
+        // 1. ALL READS (Must happen before any writes)
+        final dailyNumData = await _prepareDailyOrderNumber(branchIds, transaction);
+        
+        DocumentSnapshot? branchSnap;
+        final branchRef = FirebaseFirestore.instance.collection(AppConstants.collectionBranch).doc(primaryBranchId);
         if (_orderType == PosOrderType.dineIn && _selectedTableId != null) {
-          final branchRef = FirebaseFirestore.instance.collection(AppConstants.collectionBranch).doc(primaryBranchId);
-          final branchSnap = await transaction.get(branchRef);
-          final tables = (branchSnap.data()?['tables'] as Map<dynamic, dynamic>?) ?? {};
+          branchSnap = await transaction.get(branchRef);
+        }
+
+        // 2. LOGIC / CALCULATIONS
+        final int dailyNumber = dailyNumData['value'] as int;
+        if (branchSnap != null) {
+          final tables = (branchSnap.data() as Map<String, dynamic>?)?['tables'] as Map<dynamic, dynamic>? ?? {};
           final tableData = tables[_selectedTableId] as Map<dynamic, dynamic>?;
-          
           if (tableData?['status'] == 'occupied' && tableData?['currentOrderId'] != null) {
              throw Exception('Table was just taken by another device!');
           }
-          
-          // Book the table
+        }
+        
+        final orderData = _buildOrderData(branchIds, userScope, initialStatus, dailyNumber);
+
+        // 3. ALL WRITES (Strictly after all reads)
+        
+        // A. Update Counter
+        if (dailyNumData['ref'] != null) {
+          final DocumentReference ref = dailyNumData['ref'] as DocumentReference;
+          if (dailyNumData['exists'] == true) {
+            transaction.update(ref, {'count': dailyNumber});
+          } else {
+            transaction.set(ref, {'count': dailyNumber});
+          }
+        }
+
+        // B. Book Table
+        if (_orderType == PosOrderType.dineIn && _selectedTableId != null) {
           transaction.update(branchRef, {
             'tables.$_selectedTableId.status': 'occupied',
             'tables.$_selectedTableId.currentOrderId': orderId,
           });
         }
 
-        // 2. Generate Daily Number (Atomic inside transaction)
-        final dailyNumber = await _generateDailyOrderNumber(branchIds);
-        final orderData = _buildOrderData(branchIds, userScope, initialStatus, dailyNumber);
-        
-        // 3. Create Order
+        // C. Create Order
         transaction.set(docRef, orderData);
 
         return orderId;
@@ -399,15 +423,20 @@ class PosService extends ChangeNotifier {
       
       // ── INDUSTRY GRADE FIX: Wrap EVERYTHING in an atomic Transaction ──
       orderIdToReturn = await FirebaseFirestore.instance.runTransaction<String?>((transaction) async {
-        // ── 1. ALL READS ──
+        // 1. ALL READS (Must happen before any writes)
         
-        // A. Read existing orders to get items and check status
+        // A. Prepare Daily Number
+        final dailyNumData = await _prepareDailyOrderNumber(branchIds, transaction);
+        final int dailyNumber = dailyNumData['value'] as int;
+
+        // B. Read existing orders to get items and check status
         final List<Map<String, dynamic>> itemsToDeduct = [];
+        final List<DocumentSnapshot> orderSnaps = [];
         for (final doc in existingOrders) {
           final orderSnap = await transaction.get(doc.reference);
           if (orderSnap.exists) {
+            orderSnaps.add(orderSnap);
             final data = orderSnap.data() as Map<String, dynamic>;
-            // Only deduct if not already done
             if (data['inventoryDeducted'] != true) {
               final items = (data['items'] ?? data['orderItems'] ?? []) as List<dynamic>;
               itemsToDeduct.addAll(items.cast<Map<String, dynamic>>());
@@ -415,12 +444,12 @@ class PosService extends ChangeNotifier {
           }
         }
 
-        // B. Add current cart items to deduction list
+        // C. Combine items
         if (_cartItems.isNotEmpty) {
           itemsToDeduct.addAll(_cartItems.map((item) => item.toOrderItemMap()).toList());
         }
 
-        // C. Perform Batch Inventory Deduction
+        // D. Perform Inventory Reads & Writes (InventoryService internally groups reads then writes)
         DocumentReference? newOrderDocRef;
         String? newOrderId;
         if (_cartItems.isNotEmpty) {
@@ -438,67 +467,62 @@ class PosService extends ChangeNotifier {
           );
         }
 
-        // ── 2. PREPARE WRITES ──
-        Map<String, dynamic>? newOrderData;
-        if (_cartItems.isNotEmpty && newOrderId != null) {
-          final dailyNumber = await _generateDailyOrderNumber(branchIds);
-          newOrderData = _buildOrderData(branchIds, userScope, AppConstants.statusPaid, dailyNumber);
-          
+        // ── 2. ALL WRITES (Strictly after all initial gets and InventoryService writes) ──
+        
+        // A. Update Counter
+        if (dailyNumData['ref'] != null) {
+          final DocumentReference ref = dailyNumData['ref'] as DocumentReference;
+          if (dailyNumData['exists'] == true) {
+            transaction.update(ref, {'count': dailyNumber});
+          } else {
+            transaction.set(ref, {'count': dailyNumber});
+          }
+        }
+
+        // B. Create New Order (if needed)
+        if (newOrderDocRef != null && newOrderId != null) {
+          final newOrderData = _buildOrderData(branchIds, userScope, AppConstants.statusPreparing, dailyNumber);
           newOrderData['paymentMethod'] = payment.method;
           newOrderData['paymentAmount'] = payment.amount;
           newOrderData['paymentChange'] = payment.change;
           newOrderData['isPaid'] = true;
           newOrderData['paidAt'] = FieldValue.serverTimestamp();
-          newOrderData['completedAt'] = FieldValue.serverTimestamp();
           newOrderData['timestamps.${AppConstants.statusPaid}'] = FieldValue.serverTimestamp();
-          newOrderData['inventoryDeducted'] = true; // IMPORTANT: Mark as deducted
-
-          // ── DUAL STATUS OVERRIDE ──
-          // If paying now, legacy status is 'paid', but orderStatus should be 'placed' or 'preparing'
+          newOrderData['inventoryDeducted'] = true;
           newOrderData['orderStatus'] = 'preparing'; 
           newOrderData['paymentStatus'] = 'paid';
-        }
-
-        // ── 3. PERFORM ALL WRITES ──
-        if (newOrderDocRef != null && newOrderData != null) {
+          
           transaction.set(newOrderDocRef, newOrderData);
         }
 
-        // Handle existing orders if any
-        for (final doc in existingOrders) {
-          transaction.update(doc.reference, {
-            'paymentMethod': payment.method,
-            'paymentAmount': payment.amount,
-            'paymentChange': payment.change,
-            'isPaid': true,
-            'paidAt': FieldValue.serverTimestamp(),
-            'status': AppConstants.statusPaid,
-            'completedAt': FieldValue.serverTimestamp(),
-            'timestamps.${AppConstants.statusPaid}': FieldValue.serverTimestamp(),
-            'inventoryDeducted': true, // IMPORTANT: Mark as deducted
+        // C. Update Existing Orders
+        for (final snap in orderSnaps) {
+          final docData = snap.data() as Map<String, dynamic>;
+          final isAlreadyPaid = docData['isPaid'] == true || getPaymentStatus(docData) == 'paid';
+          
+          if (!isAlreadyPaid) {
+            final currentOrderStatus = docData.containsKey('orderStatus') 
+                ? docData['orderStatus'] 
+                : mapLegacyStatusToOrder(docData['status'] ?? '');
+            final isKitchenDone = currentOrderStatus == 'served';
 
-            // ── DUAL STATUS OVERRIDE ──
-            // For existing orders being paid, keep orderStatus or derive it
-            'paymentStatus': 'paid',
-            // Do NOT touch orderStatus if it already exists, otherwise derive it
-            'orderStatus': (doc.data() as Map<String, dynamic>).containsKey('orderStatus') 
-                ? (doc.data() as Map<String, dynamic>)['orderStatus'] 
-                : mapLegacyStatusToOrder((doc.data() as Map<String, dynamic>)['status'] ?? ''),
-          });
+            transaction.update(snap.reference, {
+              'paymentMethod': payment.method,
+              'paymentAmount': payment.amount,
+              'paymentChange': payment.change,
+              'isPaid': true,
+              'paidAt': FieldValue.serverTimestamp(),
+              'status': isKitchenDone ? AppConstants.statusPaid : docData['status'],
+              if (isKitchenDone) 'completedAt': FieldValue.serverTimestamp(),
+              'timestamps.${AppConstants.statusPaid}': FieldValue.serverTimestamp(),
+              'inventoryDeducted': true,
+              'paymentStatus': 'paid',
+              'orderStatus': currentOrderStatus,
+            });
+          }
         }
 
-        // ── DUAL STATUS FIX ──
-        // Table is NO LONGER freed here, even if paid. 
-        // It remains occupied until the order is explicitly 'completed' via completeOrderWithDualCheck,
-        // which requires BOTH served and paid statuses.
-
-        if (newOrderId != null) {
-          return newOrderId;
-        } else if (existingOrders.isNotEmpty) {
-          return existingOrders.first.id;
-        } else {
-          return null; // Should never happen given the empty guard at start, but keeps type safe
-        }
+        return newOrderId ?? (existingOrders.isNotEmpty ? existingOrders.first.id : null);
       }).timeout(_firestoreWriteTimeout);
 
       clearCart();
@@ -790,12 +814,41 @@ class PosService extends ChangeNotifier {
 
   Future<void> updateOrderStatus(String orderId, String newStatus) async {
     try {
-      await FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId).update({
+      final orderRef = FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId);
+      
+      // 1. Fetch current data to check dual-status (Payment State)
+      final snap = await orderRef.get();
+      final data = snap.data() ?? {};
+      final isPaid = data['isPaid'] == true || getPaymentStatus(data) == 'paid';
+      
+      final updateData = <String, dynamic>{
         'orderStatus': mapLegacyStatusToOrder(newStatus),
         'status': newStatus,
         'lastUpdated': FieldValue.serverTimestamp(),
         'timestamps.$newStatus': FieldValue.serverTimestamp(),
-      });
+      };
+
+      // 2. 🛠️ FIX: Auto-complete if KDS marks 'served' AND the order is already paid
+      if (newStatus == AppConstants.statusServed && isPaid) {
+         updateData['status'] = AppConstants.statusPaid; // Move to terminal state
+         updateData['orderStatus'] = 'completed';
+         updateData['completedAt'] = FieldValue.serverTimestamp();
+      }
+
+      await orderRef.update(updateData);
+
+      // 3. Free the table if dine-in and fully completed
+      if (newStatus == AppConstants.statusServed && isPaid) {
+         final tableId = data['tableId']?.toString();
+         final branchIdsList = data['branchIds'] as List<dynamic>?;
+         if (tableId != null && branchIdsList != null && branchIdsList.isNotEmpty) {
+           await _cleanupTableIfEmpty(
+             branchIds: branchIdsList.cast<String>(), 
+             tableId: tableId
+           );
+         }
+      }
+
       notifyListeners();
     } catch (e) {
       _logError('POS: Failed to update order status', e);
