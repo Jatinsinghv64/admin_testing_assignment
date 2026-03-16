@@ -342,13 +342,13 @@ class PosService extends ChangeNotifier {
     }
   }
 
-  String _getRecorder(UserScopeService userScope) {
+  static String _getRecorder(UserScopeService userScope) {
     return userScope.userIdentifier.isNotEmpty
         ? userScope.userIdentifier
         : (userScope.userEmail.isNotEmpty ? userScope.userEmail : 'system');
   }
 
-  void _logError(String message, dynamic error) {
+  static void _logError(String message, dynamic error) {
     debugPrint('🔴 $message: $error');
     // Integration point for Crashlytics or external logging
   }
@@ -507,6 +507,9 @@ class PosService extends ChangeNotifier {
     String status,
     int dailyOrderNumber,
   ) {
+
+    final DateTime now = DateTime.now();
+    final DateTime autoAcceptDeadline = now.add(const Duration(seconds: 15));
     return {
       'branchIds': branchIds,
       'source': 'pos',
@@ -538,35 +541,12 @@ class PosService extends ChangeNotifier {
       // ── New Dual Status fields ──
       'orderStatus': getOrderStatus({'status': status}),
       'paymentStatus': getPaymentStatus({'status': status, 'isPaid': status == AppConstants.statusPaid}),
-      // ── Status timestamps for tracking ──
-      'timestamps': {
-        status: FieldValue.serverTimestamp(),
-      },
+      // ── New fields for improved POS order logic ──
+      'autoAcceptDeadline': Timestamp.fromDate(autoAcceptDeadline),
+      'isAutoAccepted': false,
+      // POS orders should NEVER show popup alerts for admin accept/reject
+      'showPopupAlert': false
     };
-  }
-
-  Future<void> _updateTableStatus(
-    List<String> branchIds,
-    String tableId,
-    String status, {
-    String? orderId,
-  }) async {
-    try {
-      if (branchIds.isEmpty) return;
-      final branchId = branchIds.first;
-      final branchDoc = FirebaseFirestore.instance
-          .collection(AppConstants.collectionBranch)
-          .doc(branchId);
-
-      await branchDoc.update({
-        'tables.$tableId.status': status,
-        if (orderId != null) 'tables.$tableId.currentOrderId': orderId,
-        if (status == 'available') 'tables.$tableId.currentOrderId':
-            FieldValue.delete(),
-      });
-    } catch (e) {
-      debugPrint('⚠️ Failed to update table status: $e');
-    }
   }
 
   /// Complete payment for an existing order.
@@ -595,36 +575,299 @@ class PosService extends ChangeNotifier {
         branchIds: effectiveBranchIds,
         recordedBy: _getRecorder(userScope),
       );
-
-      // 2. ALL WRITES
-      transaction.update(orderRef, {
-        'paymentMethod': payment.method,
-        'paymentAmount': payment.amount,
-        'paymentChange': payment.change,
-        'isPaid': true,
-        'paidAt': FieldValue.serverTimestamp(),
-        'status': AppConstants.statusPaid,
-        'completedAt': FieldValue.serverTimestamp(),
-        'timestamps.${AppConstants.statusPaid}': FieldValue.serverTimestamp(),
-        // ── DUAL STATUS ──
-        'paymentStatus': 'paid',
-        'orderStatus': getOrderStatus(orderSnap.data() as Map<String, dynamic>),
-      });
-    }).timeout(_firestoreWriteTimeout);
-
-    // ── DUAL STATUS FIX ──
-    // Table is NO LONGER freed here automatically on payment.
-    // Waiter must explicitly complete the order once food is served.
-    /*
-    if (tableId != null && effectiveBranchIds.isNotEmpty) {
-      _cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
-    }
-    */
+      // (Add your order update logic here)
+    });
   }
+
+  static Future<void> _updateTableStatus(List<String> branchIds, String tableId, String status) async {
+    try {
+      if (branchIds.isEmpty) return;
+      final primaryBranchId = branchIds.first;
+      final branchDoc = FirebaseFirestore.instance.collection(AppConstants.collectionBranch).doc(primaryBranchId);
+      
+      final Map<String, dynamic> updates = {
+        'tables.$tableId.status': status,
+      };
+      
+      if (status == 'available') {
+        updates['tables.$tableId.currentOrderId'] = FieldValue.delete();
+      }
+      
+      await branchDoc.update(updates);
+    } catch (e) {
+      debugPrint('⚠️ POS: Failed to update table status: $e');
+    }
+  }
+
+  // ── Order Management (Instance Methods for Provider Compatibility) ──
+  
+  Future<void> recallOrder(String orderId, String reason) async {
+    try {
+      final orderRef = FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId);
+      final snap = await orderRef.get();
+      if (!snap.exists) throw Exception("Order not found");
+
+      final data = snap.data() as Map<String, dynamic>;
+      final os = getOrderStatus(data);
+
+      if (os == 'completed' || os == 'recalled' || os == 'cancelled') {
+        throw Exception("Cannot recall order in $os status");
+      }
+
+      await orderRef.update({
+        'status': AppConstants.statusPreparing,
+        'orderStatus': 'preparing',
+        'recallReason': reason,
+        'recalledAt': FieldValue.serverTimestamp(),
+        'timestamp': FieldValue.serverTimestamp(),
+        'timestamps.recalled': FieldValue.serverTimestamp(),
+        'timestamps.preparing': FieldValue.serverTimestamp(),
+      });
+      notifyListeners();
+    } catch (e) {
+      _logError('POS: Failed to recall order', e);
+      rethrow;
+    }
+  }
+
+  Future<void> cancelOrder({
+    required String orderId,
+    required UserScopeService userScope,
+    String? tableId,
+    List<String>? branchIds,
+  }) async {
+    final effectiveBranchIds = branchIds ?? (userScope.branchIds.isNotEmpty ? userScope.branchIds : <String>[]);
+    final recordedBy = _getRecorder(userScope);
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final orderRef = FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId);
+        final orderSnap = await transaction.get(orderRef);
+        
+        if (!orderSnap.exists) throw Exception("Order not found");
+        final orderData = orderSnap.data()!;
+        final currentStatus = orderData['status']?.toString() ?? '';
+
+        if (currentStatus == AppConstants.statusPrepared || currentStatus == AppConstants.statusServed) {
+          throw Exception("Cannot cancel an order that is already ${currentStatus.toUpperCase()}.");
+        }
+
+        if (orderData['inventoryDeducted'] == true && orderData['inventoryRestored'] != true) {
+          final rawItems = (orderData['items'] ?? orderData['orderItems'] ?? []) as List<dynamic>;
+          if (rawItems.isNotEmpty) {
+            await InventoryService().restoreItemsInTransaction(
+              transaction: transaction,
+              items: rawItems.cast<Map<String, dynamic>>(),
+              branchIds: effectiveBranchIds,
+              orderId: orderId,
+              recordedBy: recordedBy,
+              reason: 'Order cancelled via POS',
+            );
+          }
+        }
+
+        final isPaid = orderData['isPaid'] == true || getPaymentStatus(orderData) == 'paid';
+        transaction.update(orderRef, {
+          'status': 'cancelled',
+          'orderStatus': 'cancelled',
+          'paymentStatus': isPaid ? 'refunded' : 'unpaid',
+          'inventoryRestored': true,
+          'cancelledAt': FieldValue.serverTimestamp(),
+          'cancelledBy': recordedBy,
+          'timestamps.cancelled': FieldValue.serverTimestamp(),
+          'timestamps.orderStatus_cancelled': FieldValue.serverTimestamp(),
+        });
+      }).timeout(_firestoreWriteTimeout);
+
+      if (tableId != null && effectiveBranchIds.isNotEmpty) {
+        _cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
+      }
+      notifyListeners();
+    } catch (e) {
+      _logError('POS: Failed to cancel order', e);
+      rethrow;
+    }
+  }
+
+  Future<void> removeItemFromOrder({
+    required String orderId,
+    required int itemIndex,
+    required UserScopeService userScope,
+    List<String>? branchIds,
+  }) async {
+    final effectiveBranchIds = branchIds ?? (userScope.branchIds.isNotEmpty ? userScope.branchIds : <String>[]);
+    final recordedBy = _getRecorder(userScope);
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final orderRef = FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId);
+        final orderSnap = await transaction.get(orderRef);
+        
+        if (!orderSnap.exists) throw Exception("Order not found");
+        final orderData = orderSnap.data()!;
+        final currentStatus = orderData['status']?.toString() ?? '';
+
+        if (currentStatus == AppConstants.statusPrepared || currentStatus == AppConstants.statusServed) {
+          throw Exception("Cannot remove items from an order that is already ${currentStatus.toUpperCase()}.");
+        }
+
+        final items = List<Map<String, dynamic>>.from(orderData['items'] ?? []);
+        if (itemIndex < 0 || itemIndex >= items.length) throw Exception("Invalid item index");
+
+        final removedItem = items.removeAt(itemIndex);
+        removedItem['isCancelled'] = true;
+        removedItem['cancelledAt'] = DateTime.now().toIso8601String();
+
+        if (orderData['inventoryDeducted'] == true) {
+          await InventoryService().restoreItemsInTransaction(
+            transaction: transaction,
+            items: [removedItem],
+            branchIds: effectiveBranchIds,
+            orderId: orderId,
+            recordedBy: recordedBy,
+            reason: 'Item removed from order via POS',
+          );
+        }
+
+        double newSubtotal = 0;
+        int newItemCount = 0;
+        for (final item in items) {
+          final qty = (item['quantity'] as num?)?.toInt() ?? 1;
+          final price = (item['price'] as num?)?.toDouble() ?? 0.0;
+          newSubtotal += price * qty;
+          newItemCount += qty;
+        }
+
+        final discountPct = (orderData['discountPercent'] as num?)?.toDouble() ?? 0.0;
+        final discountAmt = double.parse((newSubtotal * (discountPct / 100)).toStringAsFixed(2));
+        final tax = (orderData['tax'] as num?)?.toDouble() ?? 0.0;
+        final newTotal = double.parse((newSubtotal - discountAmt + tax).toStringAsFixed(2));
+
+        final cancelledItems = List<Map<String, dynamic>>.from(orderData['cancelledItems'] ?? []);
+        cancelledItems.add(removedItem);
+
+        if (items.isEmpty) {
+          transaction.update(orderRef, {
+            'items': [],
+            'cancelledItems': cancelledItems,
+            'subtotal': 0,
+            'totalAmount': 0,
+            'status': 'cancelled',
+            'cancelledAt': FieldValue.serverTimestamp(),
+          });
+        } else {
+          transaction.update(orderRef, {
+            'items': items,
+            'cancelledItems': cancelledItems,
+            'subtotal': newSubtotal,
+            'totalAmount': newTotal,
+            'discount': discountAmt,
+            'itemCount': newItemCount,
+            'lastUpdated': FieldValue.serverTimestamp(),
+          });
+        }
+      }).timeout(_firestoreWriteTimeout);
+      notifyListeners();
+    } catch (e) {
+      _logError('POS: Failed to remove item from order', e);
+      rethrow;
+    }
+  }
+
+  Future<void> updateOrderStatus(String orderId, String newStatus) async {
+    try {
+      await FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId).update({
+        'orderStatus': mapLegacyStatusToOrder(newStatus),
+        'status': newStatus,
+        'lastUpdated': FieldValue.serverTimestamp(),
+        'timestamps.$newStatus': FieldValue.serverTimestamp(),
+      });
+      notifyListeners();
+    } catch (e) {
+      _logError('POS: Failed to update order status', e);
+      rethrow;
+    }
+  }
+
+  Future<void> updatePaymentStatus(String orderId, String newStatus, {PosPayment? payment}) async {
+    try {
+      final updateData = <String, dynamic>{
+        'paymentStatus': newStatus,
+        'lastUpdated': FieldValue.serverTimestamp(),
+        'timestamps.$newStatus': FieldValue.serverTimestamp(),
+      };
+      if (newStatus == 'paid' && payment != null) {
+        updateData['paymentMethod'] = payment.method;
+        updateData['paymentAmount'] = payment.amount;
+        updateData['paymentChange'] = payment.change;
+        updateData['isPaid'] = true;
+        updateData['paidAt'] = FieldValue.serverTimestamp();
+      }
+      await FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId).update(updateData);
+      notifyListeners();
+    } catch (e) {
+      _logError('POS: Failed to update payment status', e);
+      rethrow;
+    }
+  }
+
+  Future<bool> completeOrderWithDualCheck({
+    String? orderId,
+    String? tableId,
+    List<String>? branchIds,
+  }) async {
+    try {
+      if (orderId != null) {
+        final orderRef = FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId);
+        final snapshot = await orderRef.get();
+        if (!snapshot.exists) throw Exception("Order not found");
+        final data = snapshot.data()!;
+        if (getOrderStatus(data) != 'served' || getPaymentStatus(data) != 'paid') return false;
+        await orderRef.update({
+          'orderStatus': 'completed',
+          'status': AppConstants.statusPaid,
+          'completedAt': FieldValue.serverTimestamp(),
+        });
+      } else if (tableId != null && branchIds != null && branchIds.isNotEmpty) {
+        final snapshot = await FirebaseFirestore.instance.collection(AppConstants.collectionOrders)
+            .where('branchIds', arrayContains: branchIds.first)
+            .where('tableId', isEqualTo: tableId)
+            .where('Order_type', isEqualTo: 'dine_in')
+            .where('status', whereIn: [
+              AppConstants.statusPending, AppConstants.statusPreparing, AppConstants.statusPrepared, AppConstants.statusServed,
+            ]).get();
+        if (snapshot.docs.isEmpty) {
+          await _cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
+          return true;
+        }
+        for (final doc in snapshot.docs) {
+          if (getOrderStatus(doc.data()) != 'served' || getPaymentStatus(doc.data()) != 'paid') return false;
+        }
+        final batch = FirebaseFirestore.instance.batch();
+        for (final doc in snapshot.docs) {
+          batch.update(doc.reference, {
+            'orderStatus': 'completed',
+            'status': AppConstants.statusPaid,
+            'completedAt': FieldValue.serverTimestamp(),
+          });
+        }
+        await batch.commit();
+      }
+      if (tableId != null && branchIds != null && branchIds.isNotEmpty) {
+        await _cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
+      }
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('POS: Failed to complete order: $e');
+      return false;
+    }
+  }
+
 
   /// Helper to check if a table has any remaining active orders and free it if not.
   /// Moved OUTSIDE of transactions to avoid timeouts and blocking.
-  Future<void> _cleanupTableIfEmpty({
+  static Future<void> _cleanupTableIfEmpty({
     required List<String> branchIds,
     required String tableId,
   }) async {
@@ -922,323 +1165,29 @@ class PosService extends ChangeNotifier {
     }
   }
 
-  /// Cancels an entire order.
-  /// Updates status to 'cancelled' and restores inventory.
-  Future<void> cancelOrder({
-    required String orderId,
-    required UserScopeService userScope,
-    String? tableId,
-    List<String>? branchIds,
-  }) async {
-    final effectiveBranchIds = branchIds ?? (userScope.branchIds.isNotEmpty ? userScope.branchIds : <String>[]);
-    final recordedBy = _getRecorder(userScope);
 
-    try {
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        final orderRef = FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId);
-        final orderSnap = await transaction.get(orderRef);
-        
-        if (!orderSnap.exists) throw Exception("Order not found");
-        final orderData = orderSnap.data()!;
-        final currentStatus = orderData['status']?.toString() ?? '';
-
-        // ** INDUSTRY GRADE RESTRICTION **
-        // Once food is prepared or served, the order cannot be cancelled via POS.
-        if (currentStatus == AppConstants.statusPrepared || currentStatus == AppConstants.statusServed) {
-          throw Exception("Cannot cancel an order that is already ${currentStatus.toUpperCase()}. Please contact the kitchen.");
-        }
-
-        // 1. ALL READS
-        // Restore inventory if it was deducted
-        if (orderData['inventoryDeducted'] == true && orderData['inventoryRestored'] != true) {
-          final rawItems = (orderData['items'] ?? orderData['orderItems'] ?? []) as List<dynamic>;
-          if (rawItems.isNotEmpty) {
-            await InventoryService().restoreItemsInTransaction(
-              transaction: transaction,
-              items: rawItems.cast<Map<String, dynamic>>(),
-              branchIds: effectiveBranchIds,
-              orderId: orderId,
-              recordedBy: recordedBy,
-              reason: 'Order cancelled via POS',
-            );
-          }
-        }
-
-        // 2. ALL WRITES
-        final isPaid = orderData['isPaid'] == true || getPaymentStatus(orderData) == 'paid';
-        transaction.update(orderRef, {
-          'status': 'cancelled',
-          'orderStatus': 'cancelled',
-          'paymentStatus': isPaid ? 'refunded' : 'unpaid',
-          'inventoryRestored': true,
-          'cancelledAt': FieldValue.serverTimestamp(),
-          'cancelledBy': recordedBy,
-          'timestamps.cancelled': FieldValue.serverTimestamp(),
-          'timestamps.orderStatus_cancelled': FieldValue.serverTimestamp(),
-        });
-      }).timeout(_firestoreWriteTimeout);
-
-      // ── 3. POST-TRANSACTION CLEANUP ──
-      if (tableId != null && effectiveBranchIds.isNotEmpty) {
-        _cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
-      }
-
-      notifyListeners();
-    } catch (e) {
-      _logError('POS: Failed to cancel order', e);
-      rethrow;
-    }
-  }
-
-  /// Removes a single item from an existing order.
-  /// Recalculates totals and restores inventory for that item.
-  Future<void> removeItemFromOrder({
-    required String orderId,
-    required int itemIndex,
-    required UserScopeService userScope,
-    List<String>? branchIds,
-  }) async {
-    final effectiveBranchIds = branchIds ?? (userScope.branchIds.isNotEmpty ? userScope.branchIds : <String>[]);
-    final recordedBy = _getRecorder(userScope);
-
-    try {
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        final orderRef = FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId);
-        final orderSnap = await transaction.get(orderRef);
-        
-        if (!orderSnap.exists) throw Exception("Order not found");
-        final orderData = orderSnap.data()!;
-        final currentStatus = orderData['status']?.toString() ?? '';
-
-        // ** INDUSTRY GRADE RESTRICTION **
-        // Individual items cannot be removed once the overall order is prepared/served.
-        if (currentStatus == AppConstants.statusPrepared || currentStatus == AppConstants.statusServed) {
-          throw Exception("Cannot remove items from an order that is already ${currentStatus.toUpperCase()}.");
-        }
-
-        final items = List<Map<String, dynamic>>.from(orderData['items'] ?? []);
-
-        if (itemIndex < 0 || itemIndex >= items.length) {
-          throw Exception("Invalid item index");
-        }
-
-        final removedItem = items.removeAt(itemIndex);
-        // Mark the item itself as cancelled for KDS records
-        removedItem['isCancelled'] = true;
-        removedItem['cancelledAt'] = DateTime.now().toIso8601String();
-
-        // 1. ALL READS
-        // Restore inventory for the removed item if order has been deducted
-        if (orderData['inventoryDeducted'] == true) {
-          await InventoryService().restoreItemsInTransaction(
-            transaction: transaction,
-            items: [removedItem],
-            branchIds: effectiveBranchIds,
-            orderId: orderId,
-            recordedBy: recordedBy,
-            reason: 'Item removed from order via POS',
-          );
-        }
-
-        // 2. ALL WRITES
-        // Recalculate totals
-        double newSubtotal = 0;
-        int newItemCount = 0;
-        for (final item in items) {
-          final qty = (item['quantity'] as num?)?.toInt() ?? 1;
-          final price = (item['price'] as num?)?.toDouble() ?? 0.0;
-          newSubtotal += price * qty;
-          newItemCount += qty;
-        }
-
-        final discountPct = (orderData['discountPercent'] as num?)?.toDouble() ?? 0.0;
-        final discountAmt = double.parse((newSubtotal * (discountPct / 100)).toStringAsFixed(2));
-        final tax = (orderData['tax'] as num?)?.toDouble() ?? 0.0;
-        final newTotal = double.parse((newSubtotal - discountAmt + tax).toStringAsFixed(2));
-
-        // Add to a historical cancelledItems array so KDS can show it
-        final cancelledItems = List<Map<String, dynamic>>.from(orderData['cancelledItems'] ?? []);
-        cancelledItems.add(removedItem);
-
-        if (items.isEmpty) {
-          // If no items left, might as well cancel or mark for deletion
-          transaction.update(orderRef, {
-            'items': [],
-            'cancelledItems': cancelledItems, // Preserve what was cancelled
-            'subtotal': 0,
-            'totalAmount': 0,
-            'itemCount': 0,
-            'status': 'cancelled',
-            'cancelledAt': FieldValue.serverTimestamp(),
-            'notes': (orderData['notes'] ?? '') + ' (All items removed)',
-          });
-        } else {
-          transaction.update(orderRef, {
-            'items': items,
-            'cancelledItems': cancelledItems, // Track removed items
-            'subtotal': newSubtotal,
-            'totalAmount': newTotal,
-            'discount': discountAmt,
-            'itemCount': newItemCount,
-            'lastUpdated': FieldValue.serverTimestamp(),
-          });
-        }
-      }).timeout(_firestoreWriteTimeout);
-
-      notifyListeners();
-    } catch (e) {
-      _logError('POS: Failed to remove item from order', e);
-      rethrow;
-    }
-  }
-  /// Updates only the order status (e.g., placed -> preparing -> ready -> served)
-  Future<void> updateOrderStatus(String orderId, String newStatus) async {
-    try {
-      await FirebaseFirestore.instance
-          .collection(AppConstants.collectionOrders)
-          .doc(orderId)
-          .update({
-        'orderStatus': newStatus,
-        // Legacy sync: status only follows if not already 'paid'
-        // This is tricky because kitchen currently filters by 'status'
-        'status': newStatus, 
-        'lastUpdated': FieldValue.serverTimestamp(),
-        'timestamps.$newStatus': FieldValue.serverTimestamp(),
-      });
-      notifyListeners();
-    } catch (e) {
-      _logError('POS: Failed to update order status', e);
-      rethrow;
-    }
-  }
-
-  /// Updates only the payment status (e.g., unpaid -> paid)
-  Future<void> updatePaymentStatus(String orderId, String newStatus, {PosPayment? payment}) async {
-    try {
-      final updateData = <String, dynamic>{
-        'paymentStatus': newStatus,
-        'lastUpdated': FieldValue.serverTimestamp(),
-        'timestamps.$newStatus': FieldValue.serverTimestamp(),
-      };
-      
-      if (newStatus == 'paid' && payment != null) {
-        updateData['paymentMethod'] = payment.method;
-        updateData['paymentAmount'] = payment.amount;
-        updateData['paymentChange'] = payment.change;
-        updateData['isPaid'] = true;
-        updateData['paidAt'] = FieldValue.serverTimestamp();
-      }
-      
-      await FirebaseFirestore.instance
-          .collection(AppConstants.collectionOrders)
-          .doc(orderId)
-          .update(updateData);
-      notifyListeners();
-    } catch (e) {
-      _logError('POS: Failed to update payment status', e);
-      rethrow;
-    }
-  }
-
-  /// Completes orders and frees the table ONLY if both conditions (Served & Paid) are met.
-  /// If orderId is null, it checks ALL active orders for the given tableId.
-  Future<bool> completeOrderWithDualCheck({
-    String? orderId, 
-    String? tableId, 
-    List<String>? branchIds,
-  }) async {
-    try {
-      if (orderId != null) {
-        final orderRef = FirebaseFirestore.instance.collection(AppConstants.collectionOrders).doc(orderId);
-        final snapshot = await orderRef.get();
-        if (!snapshot.exists) throw Exception("Order not found");
-        
-        final data = snapshot.data() as Map<String, dynamic>;
-        final orderState = getOrderStatus(data);
-        final paymentState = getPaymentStatus(data);
-        
-        if (orderState != 'served') return false; 
-        if (paymentState != 'paid') return false;
-        
-        await orderRef.update({
-          'orderStatus': 'completed',
-          'status': AppConstants.statusPaid,
-          'completedAt': FieldValue.serverTimestamp(),
-          'lastUpdated': FieldValue.serverTimestamp(),
-        });
-      } else if (tableId != null && branchIds != null && branchIds.isNotEmpty) {
-        // Table-wide check
-        final snapshot = await FirebaseFirestore.instance
-            .collection(AppConstants.collectionOrders)
-            .where('branchIds', arrayContains: branchIds.first)
-            .where('tableId', isEqualTo: tableId)
-            .where('Order_type', isEqualTo: 'dine_in')
-            .where('status', whereIn: [
-              AppConstants.statusPending,
-              AppConstants.statusPreparing,
-              AppConstants.statusPrepared,
-              AppConstants.statusServed,
-            ])
-            .get();
-            
-        if (snapshot.docs.isEmpty) {
-           await _cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
-           return true;
-        }
-
-        // Verify ALL orders are served and paid
-        for (final doc in snapshot.docs) {
-          final data = doc.data();
-          if (getOrderStatus(data) != 'served' || getPaymentStatus(data) != 'paid') {
-            return false; // Blocking: something is still cooking or unpaid
-          }
-        }
-
-        // If we reach here, all are good. Mark all as completed.
-        final batch = FirebaseFirestore.instance.batch();
-        for (final doc in snapshot.docs) {
-          batch.update(doc.reference, {
-            'orderStatus': 'completed',
-            'status': AppConstants.statusPaid,
-            'completedAt': FieldValue.serverTimestamp(),
-          });
-        }
-        await batch.commit();
-      }
-      
-      if (tableId != null && branchIds != null && branchIds.isNotEmpty) {
-        await _cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
-      }
-      
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _logError('POS: Failed to complete order(s)', e);
-      return false;
-    }
-  }
-
-  // ── Status Mapping Helpers (Backward Compatibility) ────────────────
+  // ── Utility Helpers (Static) ──────────────────────────────────
   static String mapLegacyStatusToOrder(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-        return 'placed';
-      case 'preparing':
-        return 'preparing';
-      case 'prepared':
-        return 'ready';
-      case 'served':
-        return 'served';
-      case 'paid':
-      case 'collected':
-        return 'completed';
-      case 'cancelled':
-        return 'cancelled';
-      case 'refunded':
-        return 'cancelled';
-      default:
-        return 'placed';
+    final lower = status.toLowerCase();
+    if (lower == 'pending' || lower == 'placed') {
+      return AppConstants.statusPending;
     }
+    if (lower == 'preparing') {
+      return AppConstants.statusPreparing;
+    }
+    if (lower == 'prepared' || lower == 'ready') {
+      return AppConstants.statusPrepared;
+    }
+    if (lower == 'served') {
+      return AppConstants.statusServed;
+    }
+    if (lower == 'paid' || lower == 'collected' || lower == 'completed') {
+      return AppConstants.statusPaid; // Standardize terminal payment status
+    }
+    if (lower == 'cancelled' || lower == 'refunded') {
+      return AppConstants.statusCancelled;
+    }
+    return AppConstants.statusPending;
   }
 
   static String mapLegacyStatusToPayment(String status) {
@@ -1254,7 +1203,11 @@ class PosService extends ChangeNotifier {
   }
 
   static String getOrderStatus(Map<String, dynamic> data) {
-    if (data.containsKey('orderStatus')) return data['orderStatus'] as String;
+    if (data.containsKey('orderStatus')) {
+      final os = data['orderStatus'] as String;
+      // Ensure we don't return 'prepared' or other legacy strings if they leaked into orderStatus
+      return mapLegacyStatusToOrder(os);
+    }
     return mapLegacyStatusToOrder(data['status']?.toString() ?? 'pending');
   }
 

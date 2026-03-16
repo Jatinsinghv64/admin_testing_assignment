@@ -596,7 +596,7 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
   String get _source =>
       (widget.data['source']?.toString() ?? 'unknown').toLowerCase();
   String get _status =>
-      widget.data['status']?.toString() ?? AppConstants.statusPending;
+      AppConstants.normalizeStatus(widget.data['status']?.toString() ?? AppConstants.statusPending);
 
   Color get _platformColor {
     if (_source == 'snoonu') return const Color(0xFF00C853);
@@ -702,7 +702,6 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
         badgeColor = Colors.blue;
         break;
       case AppConstants.statusPrepared:
-      case 'ready':
         badgeColor = Colors.green;
         break;
       case AppConstants.statusRiderAssigned:
@@ -789,7 +788,6 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
         nextStatus = AppConstants.statusPrepared;
         break;
       case AppConstants.statusPrepared:
-      case 'ready':
         label = 'Picked Up';
         color = Colors.teal;
         icon = Icons.delivery_dining;

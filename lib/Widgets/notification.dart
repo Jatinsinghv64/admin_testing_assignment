@@ -186,11 +186,69 @@ class OrderNotificationService with ChangeNotifier {
     }
   }
 
-  void _processOrderQueue(UserScopeService scopeService) {
+  void _processOrderQueue(UserScopeService scopeService) async {
     if (_isDialogOpen || _orderQueue.isEmpty) return;
 
     final String nextOrderId = _orderQueue.removeFirst();
+    
+    // ✅ NEW: Check if order is from POS to suppress popup and start auto-accept timer
+    try {
+      final orderSnap = await FirebaseFirestore.instance
+          .collection('Orders')
+          .doc(nextOrderId)
+          .get();
+          
+      if (orderSnap.exists) {
+        final data = orderSnap.data() as Map<String, dynamic>;
+        final String source = data['source']?.toString().toLowerCase() ?? '';
+        final bool showPopup = (data['showPopupAlert'] as bool?) ?? (source != 'pos');
+
+        if (!showPopup) {
+          debugPrint("🚫 Skipping popup for order $nextOrderId (Source: $source)");
+          
+          // Start 15-second auto-accept timer for POS orders
+          _startPosAutoAcceptTimer(nextOrderId);
+          
+          // Process next in queue
+          _processOrderQueue(scopeService);
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint("⚠️ Error checking order source: $e");
+    }
+
     _showRobustOrderDialog(nextOrderId, scopeService);
+  }
+
+  void _startPosAutoAcceptTimer(String orderId) {
+    debugPrint("⏳ Starting 15s auto-accept timer for POS order $orderId");
+    Timer(const Duration(seconds: 15), () async {
+      try {
+        final docRef = FirebaseFirestore.instance.collection('Orders').doc(orderId);
+        await FirebaseFirestore.instance.runTransaction((transaction) async {
+          final snapshot = await transaction.get(docRef);
+          if (!snapshot.exists) return;
+
+          final status = snapshot.get('status');
+          if (status == 'pending' || status == 'pending_payment') {
+            transaction.update(docRef, {
+              'status': 'preparing',
+              'orderStatus': 'preparing',
+              'isAutoAccepted': true,
+              'acceptedBy': 'Auto-Accept (POS)',
+              'acceptedAt': FieldValue.serverTimestamp(),
+              'timestamps.preparing': FieldValue.serverTimestamp(),
+            });
+            debugPrint("✅ Auto-accepted POS order $orderId after 15s");
+          } else {
+            debugPrint("ℹ️ POS order $orderId was already handled (Status: $status)");
+          }
+        });
+      } catch (e) {
+        debugPrint("❌ Failed to auto-accept POS order $orderId: $e");
+      }
+    });
   }
 
   void _showRobustOrderDialog(String orderId, UserScopeService scopeService) {

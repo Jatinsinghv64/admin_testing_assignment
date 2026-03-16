@@ -74,11 +74,13 @@ class AppConstants {
   static const Duration branchCacheExpiration = Duration(minutes: 30);
 
   /// Normalize order status for consistent comparison
-  /// Handles legacy 'pickedup' vs standardized 'pickedUp'
+  /// Handles legacy 'pickedup', 'ready', 'placed' vs standardized versions
   static String normalizeStatus(String? status) {
     if (status == null) return '';
     final lower = status.toLowerCase();
     if (lower == 'pickedup') return statusPickedUp;
+    if (lower == 'ready') return statusPrepared;
+    if (lower == 'placed') return statusPending;
     return status;
   }
 

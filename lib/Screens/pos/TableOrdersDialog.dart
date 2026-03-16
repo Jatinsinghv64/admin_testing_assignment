@@ -425,7 +425,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
   bool _isDeleting = false;
 
   String get _status =>
-      widget.data['status']?.toString() ?? AppConstants.statusPending;
+      AppConstants.normalizeStatus(widget.data['status']?.toString() ?? AppConstants.statusPending);
 
   @override
   Widget build(BuildContext context) {
@@ -495,6 +495,9 @@ class _TableOrderCardState extends State<_TableOrderCard> {
         break;
       case AppConstants.statusServed:
         statusColor = Colors.teal;
+        break;
+      case AppConstants.statusCancelled:
+        statusColor = Colors.red;
         break;
       default:
         statusColor = Colors.grey;
@@ -653,20 +656,21 @@ class _TableOrderCardState extends State<_TableOrderCard> {
 
   Widget _buildStatusBadge(String status) {
     Color statusColor;
-    switch (status) {
-      case 'placed':
+    final s = AppConstants.normalizeStatus(status);
+    switch (s) {
+      case AppConstants.statusPending:
         statusColor = Colors.blue;
         break;
-      case 'preparing':
+      case AppConstants.statusPreparing:
         statusColor = Colors.orange;
         break;
-      case 'ready':
+      case AppConstants.statusPrepared:
         statusColor = Colors.green;
         break;
-      case 'served':
+      case AppConstants.statusServed:
         statusColor = Colors.deepPurple;
         break;
-      case 'cancelled':
+      case AppConstants.statusCancelled:
         statusColor = Colors.red;
         break;
       default:
@@ -705,17 +709,16 @@ class _TableOrderCardState extends State<_TableOrderCard> {
   }
 
   Widget _buildCardFooter(BuildContext context, double totalAmount) {
-    final status = (widget.data['status'] ?? '').toString();
+    final normalized = AppConstants.normalizeStatus(widget.data['status']?.toString() ?? '');
     final statusColors = {
-      'pending': Colors.orange,
-      'preparing': Colors.blue,
-      'prepared': Colors.teal,
-      'served': Colors.green,
+      AppConstants.statusPending: Colors.orange,
+      AppConstants.statusPreparing: Colors.blue,
+      AppConstants.statusPrepared: Colors.teal,
+      AppConstants.statusServed: Colors.green,
+      AppConstants.statusCancelled: Colors.red,
     };
-    final statusColor = statusColors[status] ?? Colors.grey;
-    final statusLabel = status.isNotEmpty
-        ? status[0].toUpperCase() + status.substring(1)
-        : 'Unknown';
+    final statusColor = statusColors[normalized] ?? Colors.grey;
+    final statusLabel = AppConstants.getStatusDisplayText(normalized);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),

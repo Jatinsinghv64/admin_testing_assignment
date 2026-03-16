@@ -219,147 +219,182 @@ class OrderService {
 
     final orderRef = _db.collection(AppConstants.collectionOrders).doc(sanitizedOrderId);
 
-    try {
-      if (newStatus == AppConstants.statusCancelled) {
-        await _db.runTransaction((transaction) async {
-          final snapshot = await transaction.get(orderRef);
-          if (!snapshot.exists) throw Exception("Order does not exist!");
+    int retryCount = 0;
+    const int maxRetries = 3;
+    while (true) {
+      try {
+        if (newStatus == AppConstants.statusCancelled) {
+          await _db.runTransaction((transaction) async {
+            final snapshot = await transaction.get(orderRef);
+            if (!snapshot.exists) throw Exception("Order does not exist!");
 
-          final data = snapshot.data() as Map<String, dynamic>;
-          final currentStatus = AppConstants.normalizeStatus(data['status']);
+            final data = snapshot.data() as Map<String, dynamic>;
+            final currentStatus = AppConstants.normalizeStatus(data['status']);
 
-          if (AppConstants.isTerminalStatus(currentStatus)) {
-            throw Exception("Cannot cancel an order that is already completed!");
-          }
-
-          final Map<String, dynamic> updates = {
-            'status': AppConstants.statusCancelled,
-            'timestamps.cancelled': FieldValue.serverTimestamp(),
-            'riderId': FieldValue.delete(),
-          };
-
-          if (sanitizedReason != null) updates['cancellationReason'] = sanitizedReason;
-          updates['cancelledBy'] = sanitizedEmail;
-
-          transaction.update(orderRef, updates);
-
-          final String? riderId = data['riderId'];
-          if (riderId != null && riderId.isNotEmpty) {
-            final driverRef = _db.collection(AppConstants.collectionDrivers).doc(riderId);
-            transaction.update(driverRef, {
-              'assignedOrderId': '',
-              'isAvailable': true,
-            });
-          }
-        }).timeout(AppConstants.firestoreWriteTimeout);
-
-        await RiderAssignmentService.cancelAutoAssignment(sanitizedOrderId);
-      } else {
-        await _db.runTransaction((transaction) async {
-          final snapshot = await transaction.get(orderRef);
-          if (!snapshot.exists) throw Exception("Order does not exist!");
-
-          final data = snapshot.data() as Map<String, dynamic>;
-          final currentStatus = AppConstants.normalizeStatus(data['status']);
-
-          final isRecallToKitchen = newStatus == AppConstants.statusPreparing &&
-              currentStatus != AppConstants.statusPending &&
-              currentStatus != AppConstants.statusPreparing &&
-              currentStatus != AppConstants.statusCancelled;
-
-          if (AppConstants.isTerminalStatus(currentStatus) && !isRecallToKitchen && newStatus != AppConstants.statusRefunded) {
-            throw Exception("Cannot update order - it is already $currentStatus");
-          }
-
-          final Map<String, dynamic> updateData = {'status': newStatus};
-
-          // INDUSTRY GRADE FIX: Auto-Assignment Loop Bug
-          // If KDS recalls an order, instantly strip the old rider to prevent ghost dispatching.
-          if (isRecallToKitchen) {
-            updateData['riderId'] = FieldValue.delete();
-            updateData['autoAssignStarted'] = FieldValue.delete();
-
-            final String? oldRiderId = data['riderId'];
-            if (oldRiderId != null && oldRiderId.isNotEmpty) {
-              final driverRef = _db.collection(AppConstants.collectionDrivers).doc(oldRiderId);
-              transaction.update(driverRef, {
-                'assignedOrderId': '',
-                'isAvailable': true,
-              });
+            if (AppConstants.isTerminalStatus(currentStatus)) {
+              throw Exception("Cannot cancel an order that is already completed!");
             }
-          }
 
-          if (newStatus == AppConstants.statusPreparing && !isRecallToKitchen) {
-            final String orderType = (data['Order_type'] ?? data['orderType'] ?? '').toString().toLowerCase();
-            final String? existingRiderId = data['riderId'];
-            final bool hasAutoAssignStarted = data['autoAssignStarted'] != null;
+            final Map<String, dynamic> updates = {
+              'status': AppConstants.statusCancelled,
+              'timestamps.cancelled': FieldValue.serverTimestamp(),
+              'riderId': FieldValue.delete(),
+              // Always append to statusHistory for audit
+              'statusHistory': FieldValue.arrayUnion([
+                {
+                  'status': AppConstants.statusCancelled,
+                  'timestamp': FieldValue.serverTimestamp(),
+                  'by': sanitizedEmail,
+                  if (sanitizedReason != null) 'reason': sanitizedReason,
+                }
+              ]),
+            };
 
-            if (orderType == 'delivery' && (existingRiderId == null || existingRiderId.isEmpty) && !hasAutoAssignStarted) {
-              updateData['autoAssignStarted'] = FieldValue.serverTimestamp();
-              updateData['lastAssignmentUpdate'] = FieldValue.serverTimestamp();
-            }
-          }
+            if (sanitizedReason != null) updates['cancellationReason'] = sanitizedReason;
+            updates['cancelledBy'] = sanitizedEmail;
 
-          if (newStatus == AppConstants.statusDelivered) {
-            updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
-          } else if (AppConstants.statusEquals(newStatus, AppConstants.statusPickedUp)) {
-            updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
-          } else if (newStatus == AppConstants.statusRiderAssigned) {
-            updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
-          } else if (newStatus == AppConstants.statusPrepared) {
-            updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
-          } else if (newStatus == AppConstants.statusServed) {
-            updateData['timestamps.served'] = FieldValue.serverTimestamp();
-          } else if (newStatus == AppConstants.statusPaid) {
-            updateData['timestamps.paid'] = FieldValue.serverTimestamp();
-          } else if (newStatus == AppConstants.statusCollected) {
-            updateData['timestamps.collected'] = FieldValue.serverTimestamp();
-          } else if (newStatus == AppConstants.statusRefunded) {
-            updateData['timestamps.refunded'] = FieldValue.serverTimestamp();
-            if (sanitizedReason != null) updateData['refundReason'] = sanitizedReason;
-          }
+            transaction.update(orderRef, updates);
 
-          transaction.update(orderRef, updateData);
-
-          const terminalForDeduction = {
-            AppConstants.statusDelivered,
-            AppConstants.statusPaid,
-            AppConstants.statusCollected,
-          };
-          if (terminalForDeduction.contains(newStatus)) {
-            await InventoryService().performDeductionInTransaction(
-              transaction: transaction,
-              orderId: sanitizedOrderId,
-              branchIds: data['branchIds'] is List 
-                  ? List<String>.from(data['branchIds']) 
-                  : [data['branchId']?.toString() ?? ''],
-              recordedBy: sanitizedEmail,
-            );
-          }
-
-          if (newStatus == AppConstants.statusDelivered) {
-            final String orderType = (data['Order_type'] as String?)?.toLowerCase() ?? '';
-            final String? riderId = data['riderId'] as String?;
-
-            if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
+            final String? riderId = data['riderId'];
+            if (riderId != null && riderId.isNotEmpty) {
               final driverRef = _db.collection(AppConstants.collectionDrivers).doc(riderId);
               transaction.update(driverRef, {
                 'assignedOrderId': '',
                 'isAvailable': true,
-                'status': 'online',
               });
             }
-          }
-        }).timeout(AppConstants.firestoreWriteTimeout);
+          }).timeout(AppConstants.firestoreWriteTimeout);
 
+          await RiderAssignmentService.cancelAutoAssignment(sanitizedOrderId);
+        } else {
+          await _db.runTransaction((transaction) async {
+            final snapshot = await transaction.get(orderRef);
+            if (!snapshot.exists) throw Exception("Order does not exist!");
+
+            final data = snapshot.data() as Map<String, dynamic>;
+            final currentStatus = AppConstants.normalizeStatus(data['status']);
+
+            final isRecallToKitchen = newStatus == AppConstants.statusPreparing &&
+                currentStatus != AppConstants.statusPending &&
+                currentStatus != AppConstants.statusPreparing &&
+                currentStatus != AppConstants.statusCancelled;
+
+            if (AppConstants.isTerminalStatus(currentStatus) && !isRecallToKitchen && newStatus != AppConstants.statusRefunded) {
+              throw Exception("Cannot update order - it is already $currentStatus");
+            }
+
+            final Map<String, dynamic> updateData = {'status': newStatus};
+
+            // Always append to statusHistory for audit
+            updateData['statusHistory'] = FieldValue.arrayUnion([
+              {
+                'status': newStatus,
+                'timestamp': FieldValue.serverTimestamp(),
+                'by': sanitizedEmail,
+                if (sanitizedReason != null) 'reason': sanitizedReason,
+              }
+            ]);
+
+            // INDUSTRY GRADE FIX: Auto-Assignment Loop Bug
+            // If KDS recalls an order, instantly strip the old rider to prevent ghost dispatching.
+            if (isRecallToKitchen) {
+              updateData['riderId'] = FieldValue.delete();
+              updateData['autoAssignStarted'] = FieldValue.delete();
+
+              final String? oldRiderId = data['riderId'];
+              if (oldRiderId != null && oldRiderId.isNotEmpty) {
+                final driverRef = _db.collection(AppConstants.collectionDrivers).doc(oldRiderId);
+                transaction.update(driverRef, {
+                  'assignedOrderId': '',
+                  'isAvailable': true,
+                });
+              }
+            }
+
+            if (newStatus == AppConstants.statusPreparing && !isRecallToKitchen) {
+              final String orderType = (data['Order_type'] ?? data['orderType'] ?? '').toString().toLowerCase();
+              final String? existingRiderId = data['riderId'];
+              final bool hasAutoAssignStarted = data['autoAssignStarted'] != null;
+
+              if (orderType == 'delivery' && (existingRiderId == null || existingRiderId.isEmpty) && !hasAutoAssignStarted) {
+                updateData['autoAssignStarted'] = FieldValue.serverTimestamp();
+                updateData['lastAssignmentUpdate'] = FieldValue.serverTimestamp();
+              }
+            }
+
+            if (newStatus == AppConstants.statusDelivered) {
+              updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
+            } else if (AppConstants.statusEquals(newStatus, AppConstants.statusPickedUp)) {
+              updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
+            } else if (newStatus == AppConstants.statusRiderAssigned) {
+              updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
+            } else if (newStatus == AppConstants.statusPrepared) {
+              updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
+            } else if (newStatus == AppConstants.statusServed) {
+              updateData['timestamps.served'] = FieldValue.serverTimestamp();
+            } else if (newStatus == AppConstants.statusPaid) {
+              updateData['timestamps.paid'] = FieldValue.serverTimestamp();
+            } else if (newStatus == AppConstants.statusCollected) {
+              updateData['timestamps.collected'] = FieldValue.serverTimestamp();
+            } else if (newStatus == AppConstants.statusRefunded) {
+              updateData['timestamps.refunded'] = FieldValue.serverTimestamp();
+              if (sanitizedReason != null) updateData['refundReason'] = sanitizedReason;
+            }
+
+            transaction.update(orderRef, updateData);
+
+            const terminalForDeduction = {
+              AppConstants.statusDelivered,
+              AppConstants.statusPaid,
+              AppConstants.statusCollected,
+            };
+            if (terminalForDeduction.contains(newStatus)) {
+              await InventoryService().performDeductionInTransaction(
+                transaction: transaction,
+                orderId: sanitizedOrderId,
+                branchIds: data['branchIds'] is List 
+                    ? List<String>.from(data['branchIds']) 
+                    : [data['branchId']?.toString() ?? ''],
+                recordedBy: sanitizedEmail,
+              );
+            }
+
+            if (newStatus == AppConstants.statusDelivered) {
+              final String orderType = (data['Order_type'] as String?)?.toLowerCase() ?? '';
+              final String? riderId = data['riderId'] as String?;
+
+              if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
+                final driverRef = _db.collection(AppConstants.collectionDrivers).doc(riderId);
+                transaction.update(driverRef, {
+                  'assignedOrderId': '',
+                  'isAvailable': true,
+                  'status': 'online',
+                });
+              }
+            }
+          }).timeout(AppConstants.firestoreWriteTimeout);
+
+        }
+        break; // Success, exit retry loop
+      } on TimeoutException {
+        retryCount++;
+        if (retryCount > maxRetries) {
+          debugPrint("Timeout updating order: $orderId after $maxRetries retries");
+          throw Exception("Network timeout. Please check your connection and try again.");
+        }
+        await Future.delayed(Duration(milliseconds: 500 * retryCount));
+      } catch (e, stack) {
+        // Retry only on transient Firestore/network errors
+        final isTransient = e.toString().contains('UNAVAILABLE') || e.toString().contains('timeout') || e.toString().contains('network');
+        if (isTransient && retryCount < maxRetries) {
+          retryCount++;
+          await Future.delayed(Duration(milliseconds: 500 * retryCount));
+          continue;
+        }
+        debugPrint("Error updating order: $e");
+        FirebaseCrashlytics.instance.recordError(e, stack, reason: 'Order Status Update Failed: $orderId -> $newStatus');
+        throw Exception("Failed to update order status: ${e.toString()}");
       }
-    } on TimeoutException {
-      debugPrint("Timeout updating order: $orderId");
-      rethrow;
-    } catch (e, stack) {
-      debugPrint("Error updating order: $e");
-      FirebaseCrashlytics.instance.recordError(e, stack, reason: 'Order Status Update Failed: $orderId -> $newStatus');
-      rethrow;
     }
   }
 }

@@ -98,6 +98,8 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
       AppConstants.statusServed,
       AppConstants.statusNeedsAssignment,
       AppConstants.statusCancelled,
+      'ready',
+      'placed',
       AppConstants.statusPaid, // Include PAID (prepaid) so they don't vanish
     ]).where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(_dateStart));
 
@@ -238,26 +240,22 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                   final os = PosService.getOrderStatus(data);
                   final isDismissed = data['isKdsDismissed'] == true;
                   
-                  if (os == 'cancelled') {
+                  if (os == AppConstants.statusCancelled) {
                     if (isDismissed) return false;
                     final ts = (data['cancelledAt'] as Timestamp?)?.toDate() ?? (data['timestamp'] as Timestamp?)?.toDate();
                     if (ts != null && DateTime.now().difference(ts).inMinutes < 10) return true;
                     return false;
                   }
-                  if (os == 'placed' || data['status'] == AppConstants.statusNeedsAssignment) return true;
-                  if (os == 'preparing') {
-                    final t = (data['timestamp'] as Timestamp?)?.toDate();
-                    if (t != null && DateTime.now().difference(t).inMinutes < 2) return true;
-                  }
+                  if (os == AppConstants.statusPending || os == AppConstants.statusPreparing || data['status'] == AppConstants.statusPending || data['status'] == AppConstants.statusNeedsAssignment) return true;
                   return false;
                 }).toList();
 
                 final readyDocs = allDocs
-                    .where((d) => PosService.getOrderStatus(d.data()) == 'ready')
+                    .where((d) => PosService.getOrderStatus(d.data()) == AppConstants.statusPrepared)
                     .toList();
 
                 final servedDocs = allDocs
-                    .where((d) => PosService.getOrderStatus(d.data()) == 'served')
+                    .where((d) => PosService.getOrderStatus(d.data()) == AppConstants.statusServed)
                     .toList();
 
                 // Delayed alert
@@ -600,32 +598,40 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
   // LIST VIEW — 3-column kanban (New Orders / Preparing / Ready)
   // ═══════════════════════════════════════════════════════════════
   Widget _buildListView(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs, _KdsTab activeTab) {
-    // Orders < 2 min old go in New Orders even if marked preparing
+    final now = DateTime.now();
+
     final newOrders = docs.where((d) {
       final data = d.data();
       final os = PosService.getOrderStatus(data);
+      final ts = (data['timestamp'] as Timestamp?)?.toDate() ?? now;
+      final elapsed = now.difference(ts).inMinutes;
       final isDismissed = data['isKdsDismissed'] == true;
-      if (os == 'cancelled') return !isDismissed; 
-      if (os == 'placed' || data['status'] == AppConstants.statusNeedsAssignment) return true;
-      if (os == 'preparing') {
-        final t = (data['timestamp'] as Timestamp?)?.toDate();
-        if (t != null && DateTime.now().difference(t).inMinutes < 2) return true;
-      }
+      
+      if (os == AppConstants.statusCancelled) return !isDismissed; 
+      
+      // INDUSTRY GRADE: "New" if unstarted OR if it just arrived as 'preparing' (< 2 min)
+      if (os == AppConstants.statusPending || 
+          data['status'] == AppConstants.statusNeedsAssignment || 
+          data['status'] == AppConstants.statusPending) return true;
+      
+      if (os == AppConstants.statusPreparing && elapsed < 2) return true;
+      
       return false;
     }).toList();
     
-    // Preparing orders ONLY if they are > 2 min old
+    // Preparing orders
     final preparing = docs.where((d) {
       final data = d.data();
       final os = PosService.getOrderStatus(data);
-      if (os != 'preparing') return false;
-      final t = (data['timestamp'] as Timestamp?)?.toDate();
-      if (t == null) return false;
-      return DateTime.now().difference(t).inMinutes >= 2;
+      final ts = (data['timestamp'] as Timestamp?)?.toDate() ?? now;
+      final elapsed = now.difference(ts).inMinutes;
+
+      // Only show in Preparing column if it's older than 2 minutes (otherwise it's in New)
+      return os == AppConstants.statusPreparing && elapsed >= 2;
     }).toList();
     
-    final ready = docs.where((d) => PosService.getOrderStatus(d.data()) == 'ready').toList();
-    final completed = docs.where((d) => PosService.getOrderStatus(d.data()) == 'served').toList();
+    final ready = docs.where((d) => PosService.getOrderStatus(d.data()) == AppConstants.statusPrepared).toList();
+    final completed = docs.where((d) => PosService.getOrderStatus(d.data()) == AppConstants.statusServed).toList();
 
     return Padding(
       padding: const EdgeInsets.all(12),
@@ -833,29 +839,30 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     if (_processingOrders[orderId] == true) return;
     setState(() => _processingOrders[orderId] = true);
     try {
-      final updateData = <String, dynamic>{};
-      
       if (newStatus == 'dismiss_cancelled') {
-        updateData['isKdsDismissed'] = true;
+        await FirebaseFirestore.instance
+            .collection(AppConstants.collectionOrders)
+            .doc(orderId)
+            .update({'isKdsDismissed': true});
       } else {
-        // Use PosService mapping to ensure consistency
-        final os = PosService.mapLegacyStatusToOrder(newStatus);
-        updateData['orderStatus'] = os;
-        updateData['status'] = newStatus; // Keep legacy field in sync for now
-        updateData['timestamps.orderStatus_$os'] = FieldValue.serverTimestamp();
-
-        if (os == 'served') {
-          updateData['hasActiveAddOns'] = false;
-          updateData['servedAt'] = FieldValue.serverTimestamp();
+        // Fetch current status to determine if this is a RECALL
+        final orderSnap = await FirebaseFirestore.instance
+            .collection(AppConstants.collectionOrders)
+            .doc(orderId)
+            .get();
+        final data = orderSnap.data() ?? {};
+        final currentOS = PosService.getOrderStatus(data);
+        
+        // If moving BACK to preparing/pending from ready/served, it's a recall
+        if ((newStatus == AppConstants.statusPreparing || newStatus == AppConstants.statusPending) && 
+            (currentOS == AppConstants.statusPrepared || currentOS == AppConstants.statusServed)) {
+          await context.read<PosService>().recallOrder(orderId, 'Recalled from KDS');
+        } else {
+          await context.read<PosService>().updateOrderStatus(orderId, newStatus);
         }
       }
       
-      await FirebaseFirestore.instance
-          .collection(AppConstants.collectionOrders)
-          .doc(orderId)
-          .update(updateData);
-      
-      debugPrint('KDS: Updated $orderId -> $newStatus (orderStatus: ${updateData['orderStatus']})');
+      debugPrint('KDS: Updated $orderId -> $newStatus');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -987,7 +994,16 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     // Card visual state
     final isCancelled = status == AppConstants.statusCancelled;
     final cardStatus = _cardStatus(status);
-    final isFresh = elapsed < 5 && !hasActiveAddOns && !widget.isDuplicate && !isCancelled;
+    
+    // Improved "New Order" detection (Industry Grade: Recent 'preparing' orders stay blue)
+    final isNew = cardStatus == _KdsCardStatus.toCook && 
+                 (status == AppConstants.statusPending || 
+                  status == AppConstants.statusNeedsAssignment || 
+                  status == 'placed' ||
+                  status == 'ready' ||
+                  (status == AppConstants.statusPreparing && elapsed < 2));
+    
+    final isFresh = elapsed < 5 && !hasActiveAddOns && !widget.isDuplicate && !isCancelled && !isNew;
 
     // Border color
     final Color borderColor;
@@ -995,6 +1011,9 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     if (isCancelled) {
       borderColor = Colors.red;
       borderWidth = 3.0;
+    } else if (isNew) {
+      borderColor = const Color(0xFF2196F3); // Blue — New order
+      borderWidth = 2.5; // Slightly thicker to stand out
     } else if (widget.isDuplicate || hasActiveAddOns) {
       borderColor = const Color(0xFFE91E8C); // Magenta/Pink — add-on
       borderWidth = 2.5;
@@ -1007,6 +1026,8 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     final Color headerBg;
     if (isCancelled) {
       headerBg = Colors.red.shade50;
+    } else if (isNew) {
+      headerBg = const Color(0xFFE3F2FD); // Light blue tint for new
     } else if (widget.isDuplicate || hasActiveAddOns) {
       headerBg = const Color(0xFFFCE4F0); // light pink tint
     } else if (isFresh) {
@@ -1049,14 +1070,34 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       Expanded(
                         child: Text(
                           isCancelled ? '$tablePrefix (#$orderNum) CANCELLED' : '$tablePrefix (#$orderNum)',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w800,
-                            color: Color(0xFF222222),
+                            color: isCancelled ? Colors.red : (isNew ? const Color(0xFF1976D2) : const Color(0xFF222222)),
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      // NEW Order Badge
+                      if (isNew)
+                        Container(
+                          margin: const EdgeInsets.only(right: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2196F3).withOpacity(0.15),
+                            border: Border.all(color: const Color(0xFF2196F3), width: 1.5),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'NEW ORDER',
+                            style: TextStyle(
+                              color: Color(0xFF1976D2),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
                       // Source badge (Talabat / Keta / POS / etc)
                       if (source != null && source.isNotEmpty)
                         Container(
@@ -1362,21 +1403,28 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
   }
 
   Widget _buildActionButton(String status) {
+    // ── INDUSTRY GRADE: Use normalized orderStatus instead of legacy level ──
+    final os = PosService.getOrderStatus(_data);
+
     if (widget.isRecall) {
       // Recalling an order should send it all the way back to the start
       return _actionBtn('RECALL TO NEW ORDER', const Color(0xFFF57C00), AppConstants.statusPending);
     }
-    if (status == AppConstants.statusPending || status == AppConstants.statusNeedsAssignment) {
+
+    if (os == AppConstants.statusPending) {
       // New orders need to be started
       return _actionBtn('START PREPARING', const Color(0xFFF57C00), AppConstants.statusPreparing);
     }
-    if (status == AppConstants.statusPreparing) {
+
+    if (os == AppConstants.statusPreparing) {
       // Preparing orders get marked ready
       return _actionBtn('MARK READY', const Color(0xFF0099CC), AppConstants.statusPrepared);
     }
-    if (status == AppConstants.statusPrepared) {
+
+    if (os == AppConstants.statusPrepared) {
       return _actionBtn('MARK SERVED', const Color(0xFF28A745), AppConstants.statusServed);
     }
+
     if (status == AppConstants.statusCancelled) {
       // Allow dismissing cancelled orders so they don't clutter the screen
       return _actionBtn('DISMISS CANCELLED', Colors.red.shade700, 'dismiss_cancelled');
@@ -1410,9 +1458,10 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
   }
 
   _KdsCardStatus _cardStatus(String status) {
-    if (status == AppConstants.statusCancelled) return _KdsCardStatus.cancelled;
-    if (status == AppConstants.statusServed) return _KdsCardStatus.completed;
-    if (status == AppConstants.statusPrepared) return _KdsCardStatus.ready;
+    final normalized = AppConstants.normalizeStatus(status);
+    if (normalized == AppConstants.statusCancelled) return _KdsCardStatus.cancelled;
+    if (normalized == AppConstants.statusServed) return _KdsCardStatus.completed;
+    if (normalized == AppConstants.statusPrepared) return _KdsCardStatus.ready;
     return _KdsCardStatus.toCook;
   }
 

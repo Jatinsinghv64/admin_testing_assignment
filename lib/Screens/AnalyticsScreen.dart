@@ -2879,21 +2879,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
 
   /// Returns color based on order status
   Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'delivered':
-      case 'paid':
-      case 'collected':
-      case 'served':
+    final s = AppConstants.normalizeStatus(status);
+    switch (s) {
+      case AppConstants.statusDelivered:
+      case AppConstants.statusPaid:
+      case AppConstants.statusCollected:
+      case AppConstants.statusServed:
         return Colors.green;
-      case 'preparing':
+      case AppConstants.statusPreparing:
         return Colors.orange;
-      case 'ready':
+      case AppConstants.statusPrepared:
         return Colors.blue;
-      case 'cancelled':
+      case AppConstants.statusCancelled:
         return Colors.red;
-      case 'refunded':
+      case AppConstants.statusRefunded:
         return Colors.purple;
-      case 'pending':
+      case AppConstants.statusPending:
         return Colors.amber;
       default:
         return Colors.grey;

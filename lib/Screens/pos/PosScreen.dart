@@ -55,27 +55,20 @@ class _PosScreenState extends State<PosScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => PosService(),
-      child: Builder(
-        builder: (context) {
-          return Scaffold(
-            backgroundColor: Colors.grey[100],
-            body: Column(
-              children: [
-                _buildPosHeader(context),
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    switchInCurve: Curves.easeInOut,
-                    switchOutCurve: Curves.easeInOut,
-                    child: _buildCurrentView(context),
-                  ),
-                ),
-              ],
+    return Scaffold(
+      backgroundColor: Colors.grey[100],
+      body: Column(
+        children: [
+          _buildPosHeader(context),
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              switchInCurve: Curves.easeInOut,
+              switchOutCurve: Curves.easeInOut,
+              child: _buildCurrentView(context),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }

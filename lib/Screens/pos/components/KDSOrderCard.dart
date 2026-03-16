@@ -90,11 +90,11 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
   // Status → left border color
   Color _statusColor() {
     final os = PosService.getOrderStatus(_data);
-    if (os == 'cancelled') return Colors.red;
-    if (os == 'placed') return const Color(0xFF2196F3);
-    if (os == 'preparing') return const Color(0xFFF57C00);
-    if (os == 'ready') return const Color(0xFF4CAF50);
-    if (os == 'served') return const Color(0xFF7C4DFF);
+    if (os == AppConstants.statusCancelled) return Colors.red;
+    if (os == AppConstants.statusPending) return const Color(0xFF2196F3);
+    if (os == AppConstants.statusPreparing) return const Color(0xFFF57C00);
+    if (os == AppConstants.statusPrepared) return const Color(0xFF4CAF50);
+    if (os == AppConstants.statusServed) return const Color(0xFF7C4DFF);
     return Colors.grey;
   }
 
@@ -533,19 +533,22 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
     Color? color;
     String? nextStatus;
 
+    // ── INDUSTRY GRADE: Use normalized orderStatus instead of legacy level ──
+    final os = PosService.getOrderStatus(_data);
+
     if (widget.isRecall) {
       label = 'RECALL TO KITCHEN';
       color = Colors.orange;
       nextStatus = AppConstants.statusPreparing;
-    } else if (status == AppConstants.statusPending) {
+    } else if (os == AppConstants.statusPending) {
       label = '▶  START PREPARING';
       color = const Color(0xFF2196F3);
       nextStatus = AppConstants.statusPreparing;
-    } else if (status == AppConstants.statusPreparing) {
+    } else if (os == AppConstants.statusPreparing) {
       label = '✓  MARK READY';
       color = const Color(0xFF4CAF50);
       nextStatus = AppConstants.statusPrepared;
-    } else if (status == AppConstants.statusPrepared) {
+    } else if (os == AppConstants.statusPrepared) {
       label = '🍽  SERVE ORDER';
       color = const Color(0xFF7C4DFF);
       nextStatus = AppConstants.statusServed;
