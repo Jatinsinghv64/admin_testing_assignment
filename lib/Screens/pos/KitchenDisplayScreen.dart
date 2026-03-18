@@ -11,12 +11,14 @@ import 'package:audioplayers/audioplayers.dart';
 import '../../main.dart';
 import '../../constants.dart';
 import '../../Widgets/BranchFilterService.dart';
+import '../../Widgets/CancellationDialog.dart';
 import 'components/kds_constants.dart';
-import 'components/KDSOrderCard.dart';
 import '../../services/pos/pos_service.dart';
 
 // KDS Tab definition
 enum _KdsTab { all, toCook, ready, recall }
+
+const String _kdsRejectPendingAction = '__kds_reject_pending__';
 
 class KitchenDisplayScreen extends StatefulWidget {
   const KitchenDisplayScreen({super.key});
@@ -46,16 +48,15 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
   Stream<QuerySnapshot<Map<String, dynamic>>>? _ordersStream;
   String _lastCacheKey = '';
 
-  // Tracks duplicate table IDs (for pink border)
-  Set<String> _duplicateTableIds = {};
-
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 30),
-      (_) { if (mounted) setState(() {}); },
+      (_) {
+        if (mounted) setState(() {});
+      },
     );
   }
 
@@ -68,12 +69,33 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
   void _updateStream() {
     final userScope = context.read<UserScopeService>();
     final branchFilter = context.read<BranchFilterService>();
+    final selectedBranchId = branchFilter.selectedBranchId;
+    if (selectedBranchId == null ||
+        selectedBranchId == BranchFilterService.allBranchesValue) {
+      _ordersStream = null;
+      _lastCacheKey = '';
+      _processedOrderIds.clear();
+      _alertedOrderIds.clear();
+      _previousOrderCount = -1;
+      return;
+    }
+
     final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    if (branchIds.isEmpty) {
+      _ordersStream = const Stream.empty();
+      _lastCacheKey = '';
+      _processedOrderIds.clear();
+      _alertedOrderIds.clear();
+      _previousOrderCount = -1;
+      return;
+    }
+
     final cacheKey = '${branchIds.join(',')}_$_dateRange';
     if (cacheKey != _lastCacheKey) {
       _lastCacheKey = cacheKey;
       _ordersStream = _buildOrdersStream(branchIds);
       _processedOrderIds.clear();
+      _alertedOrderIds.clear();
       _previousOrderCount = -1;
     }
   }
@@ -82,29 +104,39 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     switch (_dateRange) {
-      case 'yesterday': return today.subtract(const Duration(days: 1));
-      case 'week': return today.subtract(const Duration(days: 7));
-      default: return today;
+      case 'yesterday':
+        return today.subtract(const Duration(days: 1));
+      case 'week':
+        return today.subtract(const Duration(days: 7));
+      default:
+        return today;
     }
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _buildOrdersStream(List<String> branchIds) {
+  Stream<QuerySnapshot<Map<String, dynamic>>> _buildOrdersStream(
+      List<String> branchIds) {
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance
         .collection(AppConstants.collectionOrders)
         .where('status', whereIn: [
       AppConstants.statusPending,
       AppConstants.statusPreparing,
       AppConstants.statusPrepared,
+      AppConstants.statusServed,
+      AppConstants.statusCancelled,
       AppConstants.statusNeedsAssignment,
       'placed',
-      // AppConstants.statusServed, // Exclude terminal states to save Firestore reads
-      // AppConstants.statusPaid,   // Exclude terminal states to save Firestore reads
-    ]).where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(_dateStart));
+    ]).where('timestamp',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(_dateStart));
 
-    if (branchIds.isNotEmpty) {
+    if (branchIds.length == 1) {
+      query = query.where('branchIds', arrayContains: branchIds.first);
+    } else if (branchIds.length <= 10) {
       query = query.where('branchIds', arrayContainsAny: branchIds);
     }
-    return query.orderBy('timestamp', descending: false).limit(1000).snapshots();
+    return query
+        .orderBy('timestamp', descending: false)
+        .limit(1000)
+        .snapshots();
   }
 
   @override
@@ -117,14 +149,14 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
 
   void _playNewOrderSound() async {
     if (!_isAudioEnabled) return;
-    try { await _audioPlayer.play(AssetSource('notification.mp3')); } catch (_) {}
+    try {
+      await _audioPlayer.play(AssetSource('notification.mp3'));
+    } catch (_) {}
   }
 
-  bool get _showBranch =>
-      context.read<BranchFilterService>().selectedBranchId == null;
-
   /// Find table IDs that appear more than once (add-on scenario → pink border)
-  Set<String> _findDuplicateTableIds(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  Set<String> _findDuplicateTableIds(
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
     final seen = <String>{};
     final dups = <String>{};
     for (final doc in docs) {
@@ -136,12 +168,41 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     return dups;
   }
 
+  bool _shouldShowCancelledTicket(Map<String, dynamic> data) {
+    if (data['isKdsDismissed'] == true) return false;
+    final cancelledAt = (data['cancelledAt'] as Timestamp?)?.toDate() ??
+        (data['timestamp'] as Timestamp?)?.toDate();
+    if (cancelledAt == null) return true;
+    return DateTime.now().difference(cancelledAt).inMinutes < 10;
+  }
+
+  void _handleSnapshotEffects(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> allDocs,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> toCookDocs,
+  ) {
+    final currentIds = allDocs.map((doc) => doc.id).toSet();
+    _processedOrderIds.removeWhere((id) => !currentIds.contains(id));
+    _alertedOrderIds.removeWhere((id) => !currentIds.contains(id));
+
+    if (_previousOrderCount >= 0 && allDocs.length > _previousOrderCount) {
+      final newIds = currentIds.difference(_processedOrderIds);
+      if (newIds.isNotEmpty) {
+        _playNewOrderSound();
+      }
+    }
+
+    _processedOrderIds.addAll(currentIds);
+    _previousOrderCount = allDocs.length;
+    _checkDelayedAlerts(toCookDocs);
+  }
+
   @override
   Widget build(BuildContext context) {
     final branchFilter = context.watch<BranchFilterService>();
     final globalBranchId = branchFilter.selectedBranchId;
 
-    if (globalBranchId == null || globalBranchId == BranchFilterService.allBranchesValue) {
+    if (globalBranchId == null ||
+        globalBranchId == BranchFilterService.allBranchesValue) {
       return Scaffold(
         backgroundColor: Colors.grey[100],
         body: Center(
@@ -168,7 +229,8 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                     color: Colors.orange.withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.kitchen, size: 56, color: Colors.orange),
+                  child:
+                      const Icon(Icons.kitchen, size: 56, color: Colors.orange),
                 ),
                 const SizedBox(height: 32),
                 const Text(
@@ -179,24 +241,31 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                 Text(
                   'Kitchen Display operations must be tied to a specific location to display correct orders.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600], fontSize: 16, height: 1.4),
+                  style: TextStyle(
+                      color: Colors.grey[600], fontSize: 16, height: 1.4),
                 ),
                 const SizedBox(height: 32),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   decoration: BoxDecoration(
                     color: Colors.deepPurple.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.deepPurple.withOpacity(0.15)),
+                    border:
+                        Border.all(color: Colors.deepPurple.withOpacity(0.15)),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.arrow_upward, color: Colors.deepPurple[700], size: 28),
+                      Icon(Icons.arrow_upward,
+                          color: Colors.deepPurple[700], size: 28),
                       const SizedBox(width: 16),
                       Expanded(
                         child: Text(
                           'Please select a specific branch from the dropdown in the top App Bar.',
-                          style: TextStyle(color: Colors.deepPurple[800], fontWeight: FontWeight.w600, fontSize: 15),
+                          style: TextStyle(
+                              color: Colors.deepPurple[800],
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15),
                         ),
                       ),
                     ],
@@ -216,48 +285,48 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
           : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: _ordersStream,
               builder: (context, snapshot) {
-                final allDocs = snapshot.data?.docs ?? [];
-
-                // Sound for new orders
-                if (_previousOrderCount >= 0 && allDocs.length > _previousOrderCount) {
-                  final newIds = allDocs.map((d) => d.id).toSet().difference(_processedOrderIds);
-                  if (newIds.isNotEmpty) {
-                    _playNewOrderSound();
-                    _processedOrderIds.addAll(newIds);
-                  }
+                if (snapshot.hasError) {
+                  return _buildStreamError(snapshot.error);
                 }
-                _previousOrderCount = allDocs.length;
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    !snapshot.hasData) {
+                  return const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  );
+                }
 
-                // Compute duplicate table IDs for pink border
-                final dupIds = _findDuplicateTableIds(allDocs);
-                _duplicateTableIds = dupIds;
+                final allDocs = snapshot.data?.docs ?? [];
 
                 // Bucket orders
                 final toCookDocs = allDocs.where((d) {
                   final data = d.data();
                   final os = PosService.getOrderStatus(data);
-                  final isDismissed = data['isKdsDismissed'] == true;
-                  
                   if (os == AppConstants.statusCancelled) {
-                    if (isDismissed) return false;
-                    final ts = (data['cancelledAt'] as Timestamp?)?.toDate() ?? (data['timestamp'] as Timestamp?)?.toDate();
-                    if (ts != null && DateTime.now().difference(ts).inMinutes < 10) return true;
-                    return false;
+                    return _shouldShowCancelledTicket(data);
                   }
-                  if (os == AppConstants.statusPending || os == AppConstants.statusPreparing || data['status'] == AppConstants.statusPending || data['status'] == AppConstants.statusNeedsAssignment) return true;
+                  if (os == AppConstants.statusPending ||
+                      os == AppConstants.statusPreparing ||
+                      data['status'] == AppConstants.statusPending ||
+                      data['status'] == AppConstants.statusNeedsAssignment) {
+                    return true;
+                  }
                   return false;
                 }).toList();
 
                 final readyDocs = allDocs
-                    .where((d) => PosService.getOrderStatus(d.data()) == AppConstants.statusPrepared)
+                    .where((d) =>
+                        PosService.getOrderStatus(d.data()) ==
+                        AppConstants.statusPrepared)
                     .toList();
 
                 final servedDocs = allDocs
-                    .where((d) => PosService.getOrderStatus(d.data()) == AppConstants.statusServed)
+                    .where((d) =>
+                        PosService.getOrderStatus(d.data()) ==
+                        AppConstants.statusServed)
                     .toList();
 
-                // Delayed alert
-                _checkDelayedAlerts(toCookDocs);
+                final duplicateTableIds = _findDuplicateTableIds(allDocs);
+                _handleSnapshotEffects(allDocs, toCookDocs);
 
                 // Which docs to show
                 List<QueryDocumentSnapshot<Map<String, dynamic>>> visibleDocs;
@@ -275,24 +344,22 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                     visibleDocs = allDocs.where((d) {
                       final data = d.data();
                       final os = PosService.getOrderStatus(data);
-                      final isDismissed = data['isKdsDismissed'] == true;
-                      
+
                       if (os == 'served') return false;
                       if (os == 'cancelled') {
-                        if (isDismissed) return false;
-                        final ts = (data['cancelledAt'] as Timestamp?)?.toDate() ?? (data['timestamp'] as Timestamp?)?.toDate();
-                        if (ts != null && DateTime.now().difference(ts).inMinutes < 10) return true;
-                        return false;
+                        return _shouldShowCancelledTicket(data);
                       }
-                      return os != 'completed'; 
+                      return os != 'completed';
                     }).toList();
                     break;
                 }
 
                 // Sort: oldest first (most urgent → top-left)
                 visibleDocs.sort((a, b) {
-                  final ta = (a.data()['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
-                  final tb = (b.data()['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
+                  final ta = (a.data()['timestamp'] as Timestamp?)?.toDate() ??
+                      DateTime.now();
+                  final tb = (b.data()['timestamp'] as Timestamp?)?.toDate() ??
+                      DateTime.now();
                   return ta.compareTo(tb);
                 });
 
@@ -307,37 +374,57 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                       child: _activeTab == _KdsTab.recall
                           ? _buildRecallGrid(servedDocs)
                           : _isListView
-                              ? _buildListView(visibleDocs, _activeTab)
-                              : _buildMainGrid(visibleDocs),
+                              ? _buildListView(
+                                  visibleDocs,
+                                  _activeTab,
+                                  duplicateTableIds,
+                                )
+                              : _buildMainGrid(
+                                  visibleDocs,
+                                  duplicateTableIds,
+                                ),
                     ),
-                    // ── Web Audio Autoplay Fix Banner ──
-                    if (Theme.of(context).platform == TargetPlatform.android || Theme.of(context).platform == TargetPlatform.iOS ? false : true)
-                      GestureDetector(
-                        onTap: () {
-                          _playNewOrderSound(); // Dummy play to unlock audio
-                          setState(() {}); // Re-build to hide
-                        },
-                        child: Container(
-                          width: double.infinity,
-                          color: Colors.amber.shade700,
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.volume_up, color: Colors.white, size: 16),
-                              SizedBox(width: 8),
-                              Text(
-                                'Tap anywhere to enable notification sounds',
-                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
                   ],
                 );
               },
             ),
+    );
+  }
+
+  Widget _buildStreamError(Object? error) {
+    return Center(
+      child: Container(
+        width: 420,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off_rounded,
+                size: 52, color: Colors.redAccent),
+            const SizedBox(height: 16),
+            const Text(
+              'Kitchen Display Lost Sync',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              PosService.displayError(error),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[700], height: 1.4),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () => setState(_updateStream),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry Stream'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -359,15 +446,28 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
           const Icon(Icons.restaurant, size: 20, color: Color(0xFF888888)),
           const SizedBox(width: 8),
           // ── Tabs ──────────────────────────────────────
-          _buildTab(label: 'All', tab: _KdsTab.all, count: totalCount, countColor: null),
-          _buildTab(label: 'To Cook', tab: _KdsTab.toCook, count: toCookCount, countColor: const Color(0xFF888888)),
-          _buildTab(label: 'Ready', tab: _KdsTab.ready, count: readyCount, countColor: const Color(0xFF0099CC)),
+          _buildTab(
+              label: 'All',
+              tab: _KdsTab.all,
+              count: totalCount,
+              countColor: null),
+          _buildTab(
+              label: 'To Cook',
+              tab: _KdsTab.toCook,
+              count: toCookCount,
+              countColor: const Color(0xFF888888)),
+          _buildTab(
+              label: 'Ready',
+              tab: _KdsTab.ready,
+              count: readyCount,
+              countColor: const Color(0xFF0099CC)),
           const Spacer(),
           // ── Recall button ─────────────────────────────
           _buildRecallButton(),
           // ── List / Grid view toggle ───────────────────
           Tooltip(
-            message: _isListView ? 'Switch to Grid View' : 'Switch to List View',
+            message:
+                _isListView ? 'Switch to Grid View' : 'Switch to List View',
             child: InkWell(
               borderRadius: BorderRadius.circular(6),
               onTap: () => setState(() => _isListView = !_isListView),
@@ -383,11 +483,18 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(_isListView ? Icons.grid_view_rounded : Icons.view_column_rounded,
-                        size: 16, color: const Color(0xFF555555)),
+                    Icon(
+                        _isListView
+                            ? Icons.grid_view_rounded
+                            : Icons.view_column_rounded,
+                        size: 16,
+                        color: const Color(0xFF555555)),
                     const SizedBox(width: 5),
                     Text(_isListView ? 'Grid' : 'List',
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF555555), fontWeight: FontWeight.w600)),
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF555555),
+                            fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
@@ -400,7 +507,9 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
             icon: Icon(
               _isAudioEnabled ? Icons.volume_up : Icons.volume_off,
               size: 18,
-              color: _isAudioEnabled ? const Color(0xFF0099CC) : const Color(0xFF888888),
+              color: _isAudioEnabled
+                  ? const Color(0xFF0099CC)
+                  : const Color(0xFF888888),
             ),
             onPressed: () => setState(() => _isAudioEnabled = !_isAudioEnabled),
             tooltip: 'Sound',
@@ -442,7 +551,9 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                color: isActive ? const Color(0xFF222222) : const Color(0xFF666666),
+                color: isActive
+                    ? const Color(0xFF222222)
+                    : const Color(0xFF666666),
               ),
             ),
             if (countColor != null) ...[
@@ -495,7 +606,9 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                color: isActive ? const Color(0xFF222222) : const Color(0xFF666666),
+                color: isActive
+                    ? const Color(0xFF222222)
+                    : const Color(0xFF666666),
               ),
             ),
           ],
@@ -520,7 +633,8 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
           isDense: true,
           style: const TextStyle(fontSize: 12, color: Color(0xFF555555)),
           dropdownColor: Colors.white,
-          icon: const Icon(Icons.keyboard_arrow_down, size: 16, color: Color(0xFF888888)),
+          icon: const Icon(Icons.keyboard_arrow_down,
+              size: 16, color: Color(0xFF888888)),
           items: const [
             DropdownMenuItem(value: 'today', child: Text('Today')),
             DropdownMenuItem(value: 'yesterday', child: Text('Yesterday')),
@@ -553,7 +667,11 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
           child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Close', style: TextStyle(fontSize: 13, color: Color(0xFF555555), fontWeight: FontWeight.w500)),
+              Text('Close',
+                  style: TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF555555),
+                      fontWeight: FontWeight.w500)),
               SizedBox(width: 6),
               Icon(Icons.logout, size: 16, color: Color(0xFF555555)),
             ],
@@ -566,7 +684,10 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
   // ═══════════════════════════════════════════════════════════════
   // MAIN GRID
   // ═══════════════════════════════════════════════════════════════
-  Widget _buildMainGrid(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  Widget _buildMainGrid(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    Set<String> duplicateTableIds,
+  ) {
     if (docs.isEmpty) {
       return Center(
         child: Column(
@@ -575,8 +696,13 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
             const Icon(Icons.restaurant_menu, size: 64, color: Colors.white54),
             const SizedBox(height: 16),
             Text(
-              _activeTab == _KdsTab.all ? 'No active orders' : 'Nothing to show',
-              style: const TextStyle(fontSize: 18, color: Colors.white70, fontWeight: FontWeight.w500),
+              _activeTab == _KdsTab.all
+                  ? 'No active orders'
+                  : 'Nothing to show',
+              style: const TextStyle(
+                  fontSize: 18,
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w500),
             ),
           ],
         ),
@@ -586,8 +712,11 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     return LayoutBuilder(
       builder: (context, constraints) {
         int crossAxisCount = 3;
-        if (constraints.maxWidth > 1400) crossAxisCount = 4;
-        else if (constraints.maxWidth < 700) crossAxisCount = 2;
+        if (constraints.maxWidth > 1400) {
+          crossAxisCount = 4;
+        } else if (constraints.maxWidth < 700) {
+          crossAxisCount = 2;
+        }
 
         return GridView.builder(
           padding: const EdgeInsets.all(12),
@@ -601,13 +730,15 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
           itemBuilder: (context, index) {
             final doc = docs[index];
             final tableId = doc.data()['tableId']?.toString() ?? '';
-            final isDuplicate = tableId.isNotEmpty && _duplicateTableIds.contains(tableId);
+            final isDuplicate =
+                tableId.isNotEmpty && duplicateTableIds.contains(tableId);
             return OdooKdsCard(
               key: ValueKey(doc.id),
               orderDoc: doc,
               isDuplicate: isDuplicate,
               isProcessing: _processingOrders[doc.id] ?? false,
-              onStatusUpdate: (newStatus) => _updateOrderStatus(doc.id, newStatus),
+              onStatusUpdate: (newStatus) =>
+                  _updateOrderStatus(doc.id, newStatus, orderData: doc.data()),
               onTap: () => _showDetailDialog(doc),
             );
           },
@@ -619,42 +750,37 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
   // ═══════════════════════════════════════════════════════════════
   // LIST VIEW — 3-column kanban (New Orders / Preparing / Ready)
   // ═══════════════════════════════════════════════════════════════
-  Widget _buildListView(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs, _KdsTab activeTab) {
-    final now = DateTime.now();
-
+  Widget _buildListView(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    _KdsTab activeTab,
+    Set<String> duplicateTableIds,
+  ) {
     final newOrders = docs.where((d) {
       final data = d.data();
       final os = PosService.getOrderStatus(data);
-      final ts = (data['timestamp'] as Timestamp?)?.toDate() ?? now;
-      final elapsed = now.difference(ts).inMinutes;
       final isDismissed = data['isKdsDismissed'] == true;
-      
-      if (os == AppConstants.statusCancelled) return !isDismissed; 
-      
-      // INDUSTRY GRADE: "New" if unstarted OR if it just arrived as 'preparing' (< 2 min)
-      if (os == AppConstants.statusPending || 
-          data['status'] == AppConstants.statusNeedsAssignment || 
-          data['status'] == AppConstants.statusPending) return true;
-      
-      if (os == AppConstants.statusPreparing && elapsed < 2) return true;
-      
+
+      if (os == AppConstants.statusCancelled) return !isDismissed;
+
+      if (os == AppConstants.statusPending ||
+          data['status'] == AppConstants.statusNeedsAssignment ||
+          data['status'] == AppConstants.statusPending) {
+        return true;
+      }
+
       return false;
     }).toList();
-    
-    // Preparing orders
+
     final preparing = docs.where((d) {
       final data = d.data();
       final os = PosService.getOrderStatus(data);
-      final ts = (data['timestamp'] as Timestamp?)?.toDate() ?? now;
-      final elapsed = now.difference(ts).inMinutes;
-
-      // Only show in Preparing column if it's older than 2 minutes (otherwise it's in New)
-      return os == AppConstants.statusPreparing && elapsed >= 2;
+      return os == AppConstants.statusPreparing;
     }).toList();
-    
-    final ready = docs.where((d) => PosService.getOrderStatus(d.data()) == AppConstants.statusPrepared).toList();
-    final completed = docs.where((d) => PosService.getOrderStatus(d.data()) == AppConstants.statusServed).toList();
 
+    final ready = docs
+        .where((d) =>
+            PosService.getOrderStatus(d.data()) == AppConstants.statusPrepared)
+        .toList();
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Row(
@@ -662,13 +788,16 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
         children: [
           // If "Ready" tab is active, only show the Ready column
           if (activeTab == _KdsTab.all || activeTab == _KdsTab.toCook) ...[
-            _listColumn('New Orders', newOrders, const Color(0xFF2196F3), Icons.pending_actions),
+            _listColumn('New Orders', newOrders, const Color(0xFF2196F3),
+                Icons.pending_actions, duplicateTableIds),
             const SizedBox(width: 12),
-            _listColumn('Preparing', preparing, const Color(0xFFF57C00), Icons.local_fire_department),
+            _listColumn('Preparing', preparing, const Color(0xFFF57C00),
+                Icons.local_fire_department, duplicateTableIds),
           ],
           if (activeTab == _KdsTab.all) const SizedBox(width: 12),
           if (activeTab == _KdsTab.all || activeTab == _KdsTab.ready)
-            _listColumn('Ready to Serve', ready, const Color(0xFF4CAF50), Icons.check_circle_outline),
+            _listColumn('Ready to Serve', ready, const Color(0xFF4CAF50),
+                Icons.check_circle_outline, duplicateTableIds),
         ],
       ),
     );
@@ -679,6 +808,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
     Color color,
     IconData icon,
+    Set<String> duplicateTableIds,
   ) {
     return Expanded(
       child: Column(
@@ -696,13 +826,21 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                 Icon(icon, size: 18, color: color),
                 const SizedBox(width: 8),
                 Text(title,
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: color)),
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: color)),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                      color: color, borderRadius: BorderRadius.circular(12)),
                   child: Text(docs.length.toString(),
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13)),
                 ),
               ],
             ),
@@ -718,7 +856,8 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                     itemBuilder: (context, index) {
                       final doc = docs[index];
                       final tableId = doc.data()['tableId']?.toString() ?? '';
-                      final isDup = tableId.isNotEmpty && _duplicateTableIds.contains(tableId);
+                      final isDup = tableId.isNotEmpty &&
+                          duplicateTableIds.contains(tableId);
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: OdooKdsCard(
@@ -726,8 +865,10 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                           orderDoc: doc,
                           isDuplicate: isDup,
                           isProcessing: _processingOrders[doc.id] ?? false,
-                          isGrid: false, // Fix RenderFlex: let the card shrink-wrap its items
-                          onStatusUpdate: (s) => _updateOrderStatus(doc.id, s),
+                          isGrid:
+                              false, // Fix RenderFlex: let the card shrink-wrap its items
+                          onStatusUpdate: (s) => _updateOrderStatus(doc.id, s,
+                              orderData: doc.data()),
                           onTap: () => _showDetailDialog(doc),
                         ),
                       );
@@ -742,7 +883,8 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
   // ═══════════════════════════════════════════════════════════════
   // RECALL GRID (read-only)
   // ═══════════════════════════════════════════════════════════════
-  Widget _buildRecallGrid(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  Widget _buildRecallGrid(
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
     if (docs.isEmpty) {
       return const Center(
         child: Column(
@@ -750,7 +892,8 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
           children: [
             Icon(Icons.history, size: 64, color: Colors.white54),
             SizedBox(height: 16),
-            Text('No completed orders to recall', style: TextStyle(fontSize: 18, color: Colors.white70)),
+            Text('No completed orders to recall',
+                style: TextStyle(fontSize: 18, color: Colors.white70)),
           ],
         ),
       );
@@ -765,7 +908,8 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
             children: [
               const Icon(Icons.info_outline, size: 16, color: Colors.white70),
               const SizedBox(width: 8),
-              Text('${docs.length} served order${docs.length == 1 ? '' : 's'} — tap RECALL TO COOK to send back',
+              Text(
+                  '${docs.length} served order${docs.length == 1 ? '' : 's'} — tap RECALL TO COOK to send back',
                   style: const TextStyle(fontSize: 13, color: Colors.white70)),
             ],
           ),
@@ -781,7 +925,6 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                 crossAxisSpacing: 10,
                 mainAxisSpacing: 10,
                 childAspectRatio: 1.0, // Square tickets
-
               ),
               itemCount: docs.length,
               itemBuilder: (context, index) {
@@ -791,7 +934,9 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                   orderDoc: doc,
                   isDuplicate: false,
                   isProcessing: _processingOrders[doc.id] ?? false,
-                  onStatusUpdate: (newStatus) => _updateOrderStatus(doc.id, newStatus),
+                  onStatusUpdate: (newStatus) => _updateOrderStatus(
+                      doc.id, newStatus,
+                      orderData: doc.data()),
                   onTap: () => _showDetailDialog(doc),
                   isRecall: true,
                 );
@@ -824,16 +969,18 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
-                  child: KDSOrderCard(
+                  child: OdooKdsCard(
                     key: ValueKey('detail_${doc.id}'),
                     orderDoc: doc,
-                    isDark: false,
+                    isDuplicate: false,
                     isProcessing: _processingOrders[doc.id] ?? false,
                     onStatusUpdate: (newStatus) {
-                      _updateOrderStatus(doc.id, newStatus);
+                      _updateOrderStatus(doc.id, newStatus,
+                          orderData: doc.data());
                       Navigator.of(ctx).pop();
                     },
-                    showBranchName: _showBranch,
+                    onTap: () {},
+                    isGrid: false,
                   ),
                 ),
               ),
@@ -844,12 +991,14 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     );
   }
 
-  void _checkDelayedAlerts(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  void _checkDelayedAlerts(
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
     for (final doc in docs) {
       final ts = doc.data()['timestamp'] as Timestamp?;
       if (ts == null) continue;
       final elapsed = DateTime.now().difference(ts.toDate()).inMinutes;
-      if (elapsed >= KDSConfig.delayedAlertMinutes && !_alertedOrderIds.contains(doc.id)) {
+      if (elapsed >= KDSConfig.delayedAlertMinutes &&
+          !_alertedOrderIds.contains(doc.id)) {
         _alertedOrderIds.add(doc.id);
         _playNewOrderSound();
         break;
@@ -857,47 +1006,106 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     }
   }
 
-  Future<void> _updateOrderStatus(String orderId, String newStatus) async {
+  Future<String?> _promptKitchenCancellationReason() {
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => const CancellationReasonDialog(
+        title: 'Cancel Order?',
+        confirmText: 'Cancel Order',
+        cancelText: 'Keep Order',
+        reasons: CancellationReasons.orderReasons,
+      ),
+    );
+  }
+
+  Future<void> _updateOrderStatus(
+    String orderId,
+    String newStatus, {
+    Map<String, dynamic>? orderData,
+  }) async {
     if (_processingOrders[orderId] == true) return;
     setState(() => _processingOrders[orderId] = true);
     try {
+      final posService = context.read<PosService>();
+      final userScope = context.read<UserScopeService>();
+      String successMessage;
       if (newStatus == 'dismiss_cancelled') {
         await FirebaseFirestore.instance
             .collection(AppConstants.collectionOrders)
             .doc(orderId)
             .update({'isKdsDismissed': true});
+        successMessage = 'Cancelled ticket dismissed';
       } else {
-        // Fetch current status to determine if this is a RECALL
-        final orderSnap = await FirebaseFirestore.instance
-            .collection(AppConstants.collectionOrders)
-            .doc(orderId)
-            .get();
-        final data = orderSnap.data() ?? {};
+        final data = orderData != null
+            ? Map<String, dynamic>.from(orderData)
+            : (await FirebaseFirestore.instance
+                        .collection(AppConstants.collectionOrders)
+                        .doc(orderId)
+                        .get())
+                    .data() ??
+                <String, dynamic>{};
+        if (data.isEmpty) {
+          throw Exception('Order not found');
+        }
         final currentOS = PosService.getOrderStatus(data);
-        
-        // If moving BACK to preparing/pending from ready/served, it's a recall
-        if ((newStatus == AppConstants.statusPreparing || newStatus == AppConstants.statusPending) && 
-            (currentOS == AppConstants.statusPrepared || currentOS == AppConstants.statusServed)) {
-          await context.read<PosService>().recallOrder(orderId, 'Recalled from KDS');
+
+        if (newStatus == _kdsRejectPendingAction) {
+          final reason = await _promptKitchenCancellationReason();
+          if (!mounted) return;
+          if (reason == null || reason.trim().isEmpty) return;
+          final branchIds = (data['branchIds'] as List<dynamic>? ?? [])
+              .map((id) => id.toString())
+              .toList();
+          await posService.rejectKitchenPendingOrder(
+            orderId: orderId,
+            reason: reason,
+            userScope: userScope,
+            tableId: data['tableId']?.toString(),
+            branchIds: branchIds,
+          );
+          successMessage = 'Order cancelled';
+        } else if (newStatus == AppConstants.statusPreparing &&
+            PosService.requiresKitchenDecision(data)) {
+          await posService.acceptKitchenPendingOrder(
+            orderId: orderId,
+            userScope: userScope,
+          );
+          successMessage = 'Order -> PREPARING';
+        } else if ((newStatus == AppConstants.statusPreparing ||
+                newStatus == AppConstants.statusPending) &&
+            (currentOS == AppConstants.statusPrepared ||
+                currentOS == AppConstants.statusServed)) {
+          await posService.recallOrder(orderId, 'Recalled from KDS');
+          successMessage = 'Order recalled to kitchen';
         } else {
-          await context.read<PosService>().updateOrderStatus(orderId, newStatus);
+          await posService.updateOrderStatus(
+            orderId,
+            newStatus,
+            currentData: data,
+          );
+          successMessage = 'Order -> ${newStatus.toUpperCase()}';
         }
       }
-      
+
       debugPrint('KDS: Updated $orderId -> $newStatus');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Order → ${newStatus.toUpperCase()}'),
-          backgroundColor: Colors.green.shade700,
+          content: Text(successMessage),
+          backgroundColor: newStatus == _kdsRejectPendingAction
+              ? Colors.red.shade700
+              : Colors.green.shade700,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 1),
         ));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(PosService.displayError(e)),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+        ));
       }
     } finally {
       if (mounted) setState(() => _processingOrders.remove(orderId));
@@ -912,7 +1120,7 @@ enum _KdsCardStatus { toCook, ready, completed, cancelled }
 
 class OdooKdsCard extends StatefulWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> orderDoc;
-  final bool isDuplicate;        // Pink border for same-table add-on
+  final bool isDuplicate; // Pink border for same-table add-on
   final bool isProcessing;
   final bool isRecall;
   final bool isGrid;
@@ -972,17 +1180,17 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
 
   Future<void> _bumpItem(int index) async {
     final bool wasBumped = _bumpedItems.contains(index);
-    
+
     // Optimistic UI update
     setState(() {
       wasBumped ? _bumpedItems.remove(index) : _bumpedItems.add(index);
     });
-    
+
     try {
       // Industry Grade: Atomic array operations
       await widget.orderDoc.reference.update({
-        'completedItems': wasBumped 
-            ? FieldValue.arrayRemove([index]) 
+        'completedItems': wasBumped
+            ? FieldValue.arrayRemove([index])
             : FieldValue.arrayUnion([index])
       });
     } catch (e) {
@@ -997,12 +1205,13 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
 
   @override
   Widget build(BuildContext context) {
-    final status = _data['status']?.toString() ?? 'pending';
+    final rawStatus = _data['status']?.toString() ?? 'pending';
+    final stage = PosService.getOrderStatus(_data);
     final items = (_data['items'] ?? []) as List<dynamic>;
     final cancelledItems = (_data['cancelledItems'] ?? []) as List<dynamic>;
     final timestamp = _data['timestamp'] as Timestamp?;
     final servedAt = _data['servedAt'] as Timestamp?;
-    
+
     int elapsed;
     if (widget.isRecall && servedAt != null) {
       elapsed = DateTime.now().difference(servedAt.toDate()).inMinutes;
@@ -1017,29 +1226,38 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     final tableName = _data['tableName']?.toString() ?? '';
     final tablePrefix = tableName.isNotEmpty ? tableName : 'Order';
     // Display name: prefer displayName > name split, never show email
-    final rawCreatedBy = _data['createdBy']?.toString() ?? _data['staffName']?.toString() ?? '';
+    final rawCreatedBy =
+        _data['createdBy']?.toString() ?? _data['staffName']?.toString() ?? '';
     final createdBy = _cleanName(rawCreatedBy);
-    final guestCount = (_data['guestCount'] as int?) ?? (_data['numberOfGuests'] as int?) ?? 1;
+    final guestCount =
+        (_data['guestCount'] as int?) ?? (_data['numberOfGuests'] as int?) ?? 1;
     // Order type + source
-    final orderType = (_data['Order_type'] ?? _data['orderType'] ?? '').toString();
+    final orderType =
+        (_data['Order_type'] ?? _data['orderType'] ?? '').toString();
     final source = _data['source']?.toString();
     final hasActiveAddOns = _data['hasActiveAddOns'] == true;
     final addOnRound = (_data['addOnRound'] as int?) ?? 0;
-    final previousItemCount = (_data['previousItemCount'] as int?) ?? items.length;
+    final previousItemCount =
+        (_data['previousItemCount'] as int?) ?? items.length;
 
     // Card visual state
-    final isCancelled = status == AppConstants.statusCancelled;
-    final cardStatus = _cardStatus(status);
-    
-    // Improved "New Order" detection (Industry Grade: Recent 'preparing' orders stay blue)
-    final isNew = cardStatus == _KdsCardStatus.toCook && 
-                 (status == AppConstants.statusPending || 
-                  status == AppConstants.statusNeedsAssignment || 
-                  status == 'placed' ||
-                  status == 'ready' ||
-                  (status == AppConstants.statusPreparing && elapsed < 2));
-    
-    final isFresh = elapsed < 5 && !hasActiveAddOns && !widget.isDuplicate && !isCancelled && !isNew;
+    final isCancelled = stage == AppConstants.statusCancelled;
+    final cardStatus = _cardStatus(stage);
+    final awaitingChefDecision = PosService.requiresKitchenDecision(_data);
+    final decisionSecondsRemaining =
+        PosService.getKitchenDecisionSecondsRemaining(_data);
+
+    final isNew = cardStatus == _KdsCardStatus.toCook &&
+        (stage == AppConstants.statusPending ||
+            rawStatus == AppConstants.statusNeedsAssignment ||
+            rawStatus == 'placed' ||
+            rawStatus == 'ready');
+
+    final isFresh = elapsed < 5 &&
+        !hasActiveAddOns &&
+        !widget.isDuplicate &&
+        !isCancelled &&
+        !isNew;
 
     // Border color
     final Color borderColor;
@@ -1079,7 +1297,10 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: borderColor, width: borderWidth),
-          boxShadow: const [BoxShadow(color: Color(0x18000000), blurRadius: 4, offset: Offset(0, 2))],
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x18000000), blurRadius: 4, offset: Offset(0, 2))
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1093,7 +1314,9 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                   topLeft: Radius.circular(7),
                   topRight: Radius.circular(7),
                 ),
-                border: Border(bottom: BorderSide(color: borderColor.withOpacity(0.4), width: 0.5)),
+                border: Border(
+                    bottom: BorderSide(
+                        color: borderColor.withOpacity(0.4), width: 0.5)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1105,11 +1328,17 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       // Table + order number (bold)
                       Expanded(
                         child: Text(
-                          isCancelled ? '$tablePrefix (#$orderNum) CANCELLED' : '$tablePrefix (#$orderNum)',
+                          isCancelled
+                              ? '$tablePrefix (#$orderNum) CANCELLED'
+                              : '$tablePrefix (#$orderNum)',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w800,
-                            color: isCancelled ? Colors.red : (isNew ? const Color(0xFF1976D2) : const Color(0xFF222222)),
+                            color: isCancelled
+                                ? Colors.red
+                                : (isNew
+                                    ? const Color(0xFF1976D2)
+                                    : const Color(0xFF222222)),
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1118,10 +1347,12 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       if (isNew)
                         Container(
                           margin: const EdgeInsets.only(right: 6),
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: const Color(0xFF2196F3).withOpacity(0.15),
-                            border: Border.all(color: const Color(0xFF2196F3), width: 1.5),
+                            border: Border.all(
+                                color: const Color(0xFF2196F3), width: 1.5),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: const Text(
@@ -1138,10 +1369,14 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       if (source != null && source.isNotEmpty)
                         Container(
                           margin: const EdgeInsets.only(left: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: KDSConfig.getSourceColor(source).withOpacity(0.12),
-                            border: Border.all(color: KDSConfig.getSourceColor(source), width: 1),
+                            color: KDSConfig.getSourceColor(source)
+                                .withOpacity(0.12),
+                            border: Border.all(
+                                color: KDSConfig.getSourceColor(source),
+                                width: 1),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -1158,9 +1393,14 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.group_outlined, size: 14, color: Color(0xFF888888)),
+                          const Icon(Icons.group_outlined,
+                              size: 14, color: Color(0xFF888888)),
                           const SizedBox(width: 2),
-                          Text('$guestCount', style: const TextStyle(fontSize: 12, color: Color(0xFF666666), fontWeight: FontWeight.w600)),
+                          Text('$guestCount',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF666666),
+                                  fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ],
@@ -1169,19 +1409,24 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                   // Row 2: Staff name + order type
                   Row(
                     children: [
-                      const Icon(Icons.person_outline, size: 12, color: Color(0xFF999999)),
+                      const Icon(Icons.person_outline,
+                          size: 12, color: Color(0xFF999999)),
                       const SizedBox(width: 3),
                       Expanded(
                         child: Text(
                           createdBy,
-                          style: const TextStyle(fontSize: 11, color: Color(0xFF777777)),
+                          style: const TextStyle(
+                              fontSize: 11, color: Color(0xFF777777)),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       if (orderType.isNotEmpty)
                         Text(
                           _orderTypeLabel(orderType),
-                          style: const TextStyle(fontSize: 10, color: Color(0xFF999999), fontWeight: FontWeight.w500),
+                          style: const TextStyle(
+                              fontSize: 10,
+                              color: Color(0xFF999999),
+                              fontWeight: FontWeight.w500),
                         ),
                     ],
                   ),
@@ -1196,10 +1441,15 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                 children: [
                   // Status badge + add-on badge
                   _buildStatusBadge(cardStatus),
+                  if (awaitingChefDecision) ...[
+                    const SizedBox(width: 6),
+                    _buildChefDecisionBadge(decisionSecondsRemaining),
+                  ],
                   if (hasActiveAddOns && addOnRound > 0) ...[
                     const SizedBox(width: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: const Color(0xFFE91E8C).withOpacity(0.12),
                         border: Border.all(color: const Color(0xFFE91E8C)),
@@ -1207,7 +1457,10 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       ),
                       child: Text(
                         '+R$addOnRound',
-                        style: const TextStyle(fontSize: 10, color: Color(0xFFE91E8C), fontWeight: FontWeight.w800),
+                        style: const TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFFE91E8C),
+                            fontWeight: FontWeight.w800),
                       ),
                     ),
                   ],
@@ -1223,15 +1476,17 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
             // ─── ITEMS LIST ──────────────────────────────────────────
             if (widget.isGrid)
               Expanded(
-                child: _buildItemsList(items, cancelledItems, hasActiveAddOns, previousItemCount, status),
+                child: _buildItemsList(items, cancelledItems, hasActiveAddOns,
+                    previousItemCount, stage),
               )
             else
-              _buildItemsList(items, cancelledItems, hasActiveAddOns, previousItemCount, status),
+              _buildItemsList(items, cancelledItems, hasActiveAddOns,
+                  previousItemCount, stage),
 
             // ─── ACTION BUTTON ───────────────────────────────────────
             GestureDetector(
               onTap: () {}, // Prevent tap from reaching card's detail tap
-              child: _buildActionButton(status),
+              child: _buildActionButton(),
             ),
           ],
         ),
@@ -1239,13 +1494,15 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     );
   }
 
-  Widget _buildItemsList(List<dynamic> items, List<dynamic> cancelledItems, bool hasActiveAddOns, int previousItemCount, String status) {
+  Widget _buildItemsList(List<dynamic> items, List<dynamic> cancelledItems,
+      bool hasActiveAddOns, int previousItemCount, String status) {
     final isCancelled = status == AppConstants.statusCancelled;
-    final isOrderServed = status == AppConstants.statusServed || status == AppConstants.statusPrepared;
-    
+    final isOrderServed = status == AppConstants.statusServed ||
+        status == AppConstants.statusPrepared;
+
     // Combine active and cancelled items for display
     final allItems = [...items, ...cancelledItems];
-    
+
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       shrinkWrap: !widget.isGrid,
@@ -1256,14 +1513,18 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
         final name = item['name']?.toString() ?? 'Item';
         final qty = (item['quantity'] ?? 1).toString();
         final bool isItemCancelled = item['isCancelled'] == true;
-        
+
         final isBumped = _bumpedItems.contains(idx);
-        final isCurrentAddOn = !isItemCancelled && hasActiveAddOns && idx >= previousItemCount;
-        final isOldItem = !isItemCancelled && hasActiveAddOns && idx < previousItemCount;
-        final isCut = isBumped || isOldItem || isOrderServed || isItemCancelled;
+        final isCurrentAddOn =
+            !isItemCancelled && hasActiveAddOns && idx >= previousItemCount;
+        final isOldItem =
+            !isItemCancelled && hasActiveAddOns && idx < previousItemCount;
+        final isCut = isBumped || isOrderServed || isItemCancelled;
+        final canBumpItem =
+            !isItemCancelled && !isCancelled && !isOrderServed;
 
         return GestureDetector(
-          onTap: () => _bumpItem(idx),
+          onTap: canBumpItem ? () => _bumpItem(idx) : null,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Row(
@@ -1277,7 +1538,9 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: isCut ? const Color(0xFFBBBBBB) : const Color(0xFF444444),
+                      color: isCut
+                          ? const Color(0xFFBBBBBB)
+                          : const Color(0xFF444444),
                     ),
                   ),
                 ),
@@ -1290,7 +1553,9 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                         isItemCancelled ? '$name (CANCELLED)' : name,
                         style: TextStyle(
                           fontSize: 16,
-                          fontWeight: isCurrentAddOn ? FontWeight.w700 : FontWeight.w500,
+                          fontWeight: isCurrentAddOn
+                              ? FontWeight.w700
+                              : FontWeight.w500,
                           color: (isCancelled || isItemCancelled)
                               ? Colors.red.shade400
                               : isCut
@@ -1298,11 +1563,14 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                                   : isCurrentAddOn
                                       ? const Color(0xFFE91E8C)
                                       : const Color(0xFF333333),
-                          decoration: (isCut || isCancelled || isItemCancelled) ? TextDecoration.lineThrough : null,
+                          decoration: (isCut || isCancelled || isItemCancelled)
+                              ? TextDecoration.lineThrough
+                              : null,
                         ),
                       ),
                       // ── Kitchen Notes ──
-                      if (item['notes'] != null && item['notes'].toString().isNotEmpty)
+                      if (item['notes'] != null &&
+                          item['notes'].toString().isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: Text(
@@ -1315,7 +1583,8 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                           ),
                         ),
                       // ── Add-ons Display ──
-                      if (item['addons'] != null && (item['addons'] as List).isNotEmpty)
+                      if (item['addons'] != null &&
+                          (item['addons'] as List).isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 4, left: 4),
                           child: Column(
@@ -1356,19 +1625,25 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                 // Bumped checkmark
                 if (isBumped) ...[
                   const SizedBox(width: 4),
-                  const Icon(Icons.check_circle, size: 16, color: Color(0xFF4CAF50)),
+                  const Icon(Icons.check_circle,
+                      size: 16, color: Color(0xFF4CAF50)),
                 ],
                 // NEW badge for add-on items
                 if (isCurrentAddOn && !isBumped)
                   Container(
                     margin: const EdgeInsets.only(left: 4, top: 2),
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
                       color: const Color(0xFFE91E8C).withOpacity(0.1),
                       border: Border.all(color: const Color(0xFFE91E8C)),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: const Text('NEW', style: TextStyle(fontSize: 9, color: Color(0xFFE91E8C), fontWeight: FontWeight.w800)),
+                    child: const Text('NEW',
+                        style: TextStyle(
+                            fontSize: 9,
+                            color: Color(0xFFE91E8C),
+                            fontWeight: FontWeight.w800)),
                   ),
               ],
             ),
@@ -1401,8 +1676,13 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-      child: Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF444444), fontWeight: FontWeight.w500)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+      child: Text(label,
+          style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF444444),
+              fontWeight: FontWeight.w500)),
     );
   }
 
@@ -1411,19 +1691,25 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
       // Red urgent pill
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-        decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(
+            color: Colors.red, borderRadius: BorderRadius.circular(12)),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.schedule, size: 12, color: Colors.white),
             const SizedBox(width: 4),
-            Text("$elapsed'", style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
+            Text("$elapsed'",
+                style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold)),
           ],
         ),
       );
     } else {
       // Normal clock icon + text
-      final Color iconColor = elapsed >= 5 ? const Color(0xFFF57C00) : const Color(0xFF888888);
+      final Color iconColor =
+          elapsed >= 5 ? const Color(0xFFF57C00) : const Color(0xFF888888);
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1431,44 +1717,115 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
           const SizedBox(width: 4),
           Text(
             "$elapsed'",
-            style: TextStyle(fontSize: 13, color: iconColor, fontWeight: FontWeight.w500),
+            style: TextStyle(
+                fontSize: 13, color: iconColor, fontWeight: FontWeight.w500),
           ),
         ],
       );
     }
   }
 
-  Widget _buildActionButton(String status) {
-    // ── INDUSTRY GRADE: Use normalized orderStatus instead of legacy level ──
-    final os = PosService.getOrderStatus(_data);
-
-    if (widget.isRecall) {
-      // Recalling an order should send it all the way back to the start
-      return _actionBtn('RECALL TO NEW ORDER', const Color(0xFFF57C00), AppConstants.statusPending);
-    }
-
-    if (os == AppConstants.statusPending) {
-      // New orders need to be started
-      return _actionBtn('START PREPARING', const Color(0xFFF57C00), AppConstants.statusPreparing);
-    }
-
-    if (os == AppConstants.statusPreparing) {
-      // Preparing orders get marked ready
-      return _actionBtn('MARK READY', const Color(0xFF0099CC), AppConstants.statusPrepared);
-    }
-
-    if (os == AppConstants.statusPrepared) {
-      return _actionBtn('MARK SERVED', const Color(0xFF28A745), AppConstants.statusServed);
-    }
-
-    if (status == AppConstants.statusCancelled) {
-      // Allow dismissing cancelled orders so they don't clutter the screen
-      return _actionBtn('DISMISS CANCELLED', Colors.red.shade700, 'dismiss_cancelled');
-    }
-    return const SizedBox.shrink();
+  Widget _buildChefDecisionBadge(int? secondsRemaining) {
+    final label = secondsRemaining == null
+        ? 'AWAITING CHEF'
+        : 'AUTO IN ${secondsRemaining.clamp(0, 999)}s';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2196F3).withOpacity(0.12),
+        border: Border.all(color: const Color(0xFF2196F3)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 10,
+          color: Color(0xFF1976D2),
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
   }
 
-  Widget _actionBtn(String label, Color color, String nextStatus) {
+  Widget _buildActionButton() {
+    if (!widget.isRecall && PosService.requiresKitchenDecision(_data)) {
+      return _buildPendingDecisionActions();
+    }
+
+    final action = PosService.getKdsPrimaryAction(
+      _data,
+      isRecall: widget.isRecall,
+    );
+    if (action == null) {
+      return const SizedBox.shrink();
+    }
+
+    final actionState = action['state'] ?? 'primary';
+    final isDisabled = actionState == 'disabled';
+    Color color;
+    switch (actionState) {
+      case 'danger':
+        color = Colors.red.shade700;
+        break;
+      case 'warning':
+        color = const Color(0xFFF57C00);
+        break;
+      case 'success':
+        color = const Color(0xFF28A745);
+        break;
+      case 'disabled':
+        color = const Color(0xFF9E9E9E);
+        break;
+      default:
+        color = const Color(0xFF0099CC);
+        break;
+    }
+
+    return _actionBtn(
+      action['label'] ?? '',
+      color,
+      action['nextStatus'] ?? '',
+      enabled: !isDisabled,
+    );
+  }
+
+  Widget _buildPendingDecisionActions() {
+    return Container(
+      decoration: const BoxDecoration(
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(7),
+          bottomRight: Radius.circular(7),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _decisionBtn(
+              label: 'Reject',
+              icon: Icons.close_rounded,
+              color: Colors.red.shade700,
+              action: _kdsRejectPendingAction,
+            ),
+          ),
+          Expanded(
+            child: _decisionBtn(
+              label: 'Accept',
+              icon: Icons.check_rounded,
+              color: const Color(0xFF2E7D32),
+              action: AppConstants.statusPreparing,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _actionBtn(
+    String label,
+    Color color,
+    String nextStatus, {
+    bool enabled = true,
+  }) {
     return Material(
       color: color,
       borderRadius: const BorderRadius.only(
@@ -1480,24 +1837,85 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
           bottomLeft: Radius.circular(7),
           bottomRight: Radius.circular(7),
         ),
-        onTap: widget.isProcessing ? null : () => widget.onStatusUpdate(nextStatus),
+        onTap: (!enabled || widget.isProcessing)
+            ? null
+            : () => widget.onStatusUpdate(nextStatus),
         child: Container(
           width: double.infinity,
           height: 38,
           alignment: Alignment.center,
           child: widget.isProcessing
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-              : Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13, letterSpacing: 0.5)),
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2))
+              : Text(label,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      letterSpacing: 0.5)),
         ),
       ),
     );
   }
 
-  _KdsCardStatus _cardStatus(String status) {
-    final normalized = AppConstants.normalizeStatus(status);
-    if (normalized == AppConstants.statusCancelled) return _KdsCardStatus.cancelled;
-    if (normalized == AppConstants.statusServed) return _KdsCardStatus.completed;
-    if (normalized == AppConstants.statusPrepared) return _KdsCardStatus.ready;
+  Widget _decisionBtn({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required String action,
+  }) {
+    return Material(
+      color: color,
+      borderRadius: const BorderRadius.only(
+        bottomLeft: Radius.circular(7),
+        bottomRight: Radius.circular(7),
+      ),
+      child: InkWell(
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(7),
+          bottomRight: Radius.circular(7),
+        ),
+        onTap: widget.isProcessing ? null : () => widget.onStatusUpdate(action),
+        child: SizedBox(
+          height: 42,
+          child: Center(
+            child: widget.isProcessing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(icon, size: 18, color: Colors.white),
+                      const SizedBox(width: 6),
+                      Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  _KdsCardStatus _cardStatus(String stage) {
+    if (stage == 'cancelled') return _KdsCardStatus.cancelled;
+    if (stage == AppConstants.statusServed || stage == 'completed') {
+      return _KdsCardStatus.completed;
+    }
+    if (stage == AppConstants.statusPrepared) return _KdsCardStatus.ready;
     return _KdsCardStatus.toCook;
   }
 
@@ -1509,9 +1927,11 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
       raw = raw.split('@').first.replaceAll(RegExp(r'[._]'), ' ').trim();
     }
     // Capitalize each word
-    final parts = raw.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    final parts =
+        raw.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.isEmpty) return 'Staff';
-    final first = parts[0][0].toUpperCase() + parts[0].substring(1).toLowerCase();
+    final first =
+        parts[0][0].toUpperCase() + parts[0].substring(1).toLowerCase();
     if (parts.length >= 2) {
       return '$first ${parts[1][0].toUpperCase()}.';
     }

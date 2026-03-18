@@ -50,7 +50,7 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
     super.didUpdateWidget(oldWidget);
     // Always update data to catch Firestore real-time changes
     _data = widget.orderDoc.data();
-    
+
     // Only reset crossed items state if we are tracking a completely different order
     if (widget.orderDoc.id != oldWidget.orderDoc.id) {
       _loadCompletedItems();
@@ -95,6 +95,7 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
     if (os == AppConstants.statusPreparing) return const Color(0xFFF57C00);
     if (os == AppConstants.statusPrepared) return const Color(0xFF4CAF50);
     if (os == AppConstants.statusServed) return const Color(0xFF7C4DFF);
+    if (os == 'completed') return Colors.grey;
     return Colors.grey;
   }
 
@@ -113,13 +114,15 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
     final orderNum = _data['dailyOrderNumber']?.toString() ?? '?';
     final customerName = _data['customerName']?.toString() ?? 'Guest';
     final tableName = _data['tableName']?.toString();
-    final orderType = (_data['Order_type'] ?? _data['orderType'] ?? 'delivery').toString();
+    final orderType =
+        (_data['Order_type'] ?? _data['orderType'] ?? 'delivery').toString();
     final source = _data['source']?.toString();
     final sourceLabel = KDSConfig.getSourceLabel(source);
 
     // Add-on tracking
     final addOnRound = (_data['addOnRound'] as int?) ?? 0;
-    final previousItemCount = (_data['previousItemCount'] as int?) ?? items.length;
+    final previousItemCount =
+        (_data['previousItemCount'] as int?) ?? items.length;
     final hasActiveAddOns = _data['hasActiveAddOns'] == true;
 
     final branchIds = _data['branchIds'] as List<dynamic>?;
@@ -136,7 +139,11 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
         color: bg,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isLate ? Colors.red : (widget.isDark ? const Color(0xFF333355) : Colors.grey.shade300),
+          color: isLate
+              ? Colors.red
+              : (widget.isDark
+                  ? const Color(0xFF333355)
+                  : Colors.grey.shade300),
           width: isLate ? 2 : 1,
         ),
         boxShadow: [
@@ -170,14 +177,17 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                 children: [
                   // ─── HEADER ────────────────────────
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
                       color: widget.isDark
                           ? Colors.white.withOpacity(0.03)
                           : Colors.grey.shade50,
                       border: Border(
                         bottom: BorderSide(
-                          color: widget.isDark ? Colors.white10 : Colors.grey.shade200,
+                          color: widget.isDark
+                              ? Colors.white10
+                              : Colors.grey.shade200,
                         ),
                       ),
                     ),
@@ -203,7 +213,9 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w600,
-                                  color: widget.isDark ? Colors.white : Colors.black87,
+                                  color: widget.isDark
+                                      ? Colors.white
+                                      : Colors.black87,
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -213,18 +225,27 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                     orderType.toUpperCase(),
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: widget.isDark ? Colors.white38 : Colors.grey,
+                                      color: widget.isDark
+                                          ? Colors.white38
+                                          : Colors.grey,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
-                                  if (widget.showBranchName && branchName != null) ...[
-                                    Text(' · ', style: TextStyle(color: widget.isDark ? Colors.white24 : Colors.grey)),
+                                  if (widget.showBranchName &&
+                                      branchName != null) ...[
+                                    Text(' · ',
+                                        style: TextStyle(
+                                            color: widget.isDark
+                                                ? Colors.white24
+                                                : Colors.grey)),
                                     Flexible(
                                       child: Text(
                                         branchName,
                                         style: TextStyle(
                                           fontSize: 11,
-                                          color: widget.isDark ? Colors.white24 : Colors.grey,
+                                          color: widget.isDark
+                                              ? Colors.white24
+                                              : Colors.grey,
                                         ),
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -239,10 +260,12 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                         if (hasActiveAddOns && addOnRound > 0)
                           Container(
                             margin: const EdgeInsets.only(right: 6),
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 3),
                             decoration: BoxDecoration(
                               color: Colors.orange.withOpacity(0.15),
-                              border: Border.all(color: Colors.orange, width: 1.5),
+                              border:
+                                  Border.all(color: Colors.orange, width: 1.5),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -257,9 +280,11 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                           ),
                         // Source badge
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: KDSConfig.getSourceColor(source).withOpacity(0.12),
+                            color: KDSConfig.getSourceColor(source)
+                                .withOpacity(0.12),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
@@ -275,7 +300,8 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                         // ── DUAL STATUS: PAID BADGE ──
                         if (PosService.getPaymentStatus(_data) == 'paid')
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
                               color: Colors.green.withOpacity(0.12),
                               borderRadius: BorderRadius.circular(4),
@@ -290,10 +316,12 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                               ),
                             ),
                           ),
-                        if (PosService.getPaymentStatus(_data) == 'paid') const SizedBox(width: 8),
+                        if (PosService.getPaymentStatus(_data) == 'paid')
+                          const SizedBox(width: 8),
                         // Timer badge
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: KDSConfig.getTimerColor(elapsed),
                             borderRadius: BorderRadius.circular(4),
@@ -301,7 +329,8 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.timer_outlined, size: 12, color: Colors.white),
+                              const Icon(Icons.timer_outlined,
+                                  size: 12, color: Colors.white),
                               const SizedBox(width: 3),
                               Text(
                                 '${elapsed}m',
@@ -320,41 +349,59 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
 
                   // ─── ITEMS ─────────────────────────
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     child: Column(
-                      children: List.generate(items.length + cancelledItems.length, (idx) {
-                        final bool isItemFromCancelledList = idx >= items.length;
-                        final item = isItemFromCancelledList 
-                            ? cancelledItems[idx - items.length] as Map<String, dynamic>
+                      children: List.generate(
+                          items.length + cancelledItems.length, (idx) {
+                        final bool isItemFromCancelledList =
+                            idx >= items.length;
+                        final item = isItemFromCancelledList
+                            ? cancelledItems[idx - items.length]
+                                as Map<String, dynamic>
                             : items[idx] as Map<String, dynamic>;
-                        
+
                         final name = item['name']?.toString() ?? 'Unknown';
                         final qty = (item['quantity'] ?? 1);
                         final notes = item['notes']?.toString() ?? '';
                         final isItemCancelled = item['isCancelled'] == true;
-                        
-                        final isCrossed = !isItemFromCancelledList && _crossedItems.contains(idx);
+
+                        final isCrossed = !isItemFromCancelledList &&
+                            _crossedItems.contains(idx);
                         // Determine if this is a NEW add-on for the CURRENT round
-                        final bool isCurrentAddOn = !isItemCancelled && hasActiveAddOns && idx >= previousItemCount;
- 
+                        final bool isCurrentAddOn = !isItemCancelled &&
+                            hasActiveAddOns &&
+                            idx >= previousItemCount;
+
                         // Determine if this is an OLD item in a re-opened order
-                        final bool isOldServedItem = !isItemCancelled && hasActiveAddOns && idx < previousItemCount;
- 
+                        final bool isOldServedItem = !isItemCancelled &&
+                            hasActiveAddOns &&
+                            idx < previousItemCount;
+
                         // Visual state
                         final bool showGrey = isOldServedItem || isCrossed;
-                        final bool showStrikethrough = isOldServedItem || isCrossed || isItemCancelled || isCancelled;
-                        final bool isActuallyCancelled = isItemCancelled || isCancelled;
+                        final bool showStrikethrough = isOldServedItem ||
+                            isCrossed ||
+                            isItemCancelled ||
+                            isCancelled;
+                        final bool isActuallyCancelled =
+                            isItemCancelled || isCancelled;
 
                         return InkWell(
-                          onTap: isItemFromCancelledList ? null : () => _toggleItemCrossed(idx),
+                          onTap: isItemFromCancelledList
+                              ? null
+                              : () => _toggleItemCrossed(idx),
                           child: Container(
                             margin: const EdgeInsets.symmetric(vertical: 2),
-                            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 4, horizontal: 4),
                             decoration: isCurrentAddOn
                                 ? BoxDecoration(
-                                    color: Colors.orange.withOpacity(widget.isDark ? 0.08 : 0.05),
+                                    color: Colors.orange.withOpacity(
+                                        widget.isDark ? 0.08 : 0.05),
                                     borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                                    border: Border.all(
+                                        color: Colors.orange.withOpacity(0.3)),
                                   )
                                 : null,
                             child: Row(
@@ -367,17 +414,29 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                   alignment: Alignment.center,
                                   decoration: BoxDecoration(
                                     color: (showGrey || isActuallyCancelled)
-                                        ? (isActuallyCancelled ? Colors.red.withOpacity(0.1) : Colors.green.withOpacity(0.15))
+                                        ? (isActuallyCancelled
+                                            ? Colors.red.withOpacity(0.1)
+                                            : Colors.green.withOpacity(0.15))
                                         : isCurrentAddOn
                                             ? Colors.orange.withOpacity(0.15)
-                                            : (widget.isDark ? Colors.white.withOpacity(0.06) : Colors.grey.shade100),
+                                            : (widget.isDark
+                                                ? Colors.white.withOpacity(0.06)
+                                                : Colors.grey.shade100),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: (showGrey || isActuallyCancelled)
                                       ? Icon(
-                                          isActuallyCancelled ? Icons.close : (isOldServedItem ? Icons.done_all : Icons.check),
+                                          isActuallyCancelled
+                                              ? Icons.close
+                                              : (isOldServedItem
+                                                  ? Icons.done_all
+                                                  : Icons.check),
                                           size: 16,
-                                          color: isActuallyCancelled ? Colors.red : (isOldServedItem ? Colors.grey : Colors.green),
+                                          color: isActuallyCancelled
+                                              ? Colors.red
+                                              : (isOldServedItem
+                                                  ? Colors.grey
+                                                  : Colors.green),
                                         )
                                       : Text(
                                           '$qty',
@@ -388,7 +447,9 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                                 ? Colors.red
                                                 : isCurrentAddOn
                                                     ? Colors.orange
-                                                    : (widget.isDark ? Colors.white : Colors.black87),
+                                                    : (widget.isDark
+                                                        ? Colors.white
+                                                        : Colors.black87),
                                           ),
                                         ),
                                 ),
@@ -396,42 +457,61 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                 // Item name + notes
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Row(
                                         children: [
                                           Expanded(
                                             child: Text(
-                                              isActuallyCancelled ? '$name (CANCELLED)' : name,
+                                              isActuallyCancelled
+                                                  ? '$name (CANCELLED)'
+                                                  : name,
                                               style: TextStyle(
-                                                fontSize: isCurrentAddOn ? 15 : 14,
+                                                fontSize:
+                                                    isCurrentAddOn ? 15 : 14,
                                                 fontWeight: isCurrentAddOn
                                                     ? FontWeight.w700
                                                     : FontWeight.w500,
                                                 color: isActuallyCancelled
                                                     ? Colors.red.shade400
                                                     : showGrey
-                                                        ? (widget.isDark ? Colors.white30 : Colors.grey)
+                                                        ? (widget.isDark
+                                                            ? Colors.white30
+                                                            : Colors.grey)
                                                         : isCurrentAddOn
                                                             ? Colors.orange
-                                                            : (widget.isDark ? Colors.white : Colors.black87),
-                                                decoration: showStrikethrough ? TextDecoration.lineThrough : null,
+                                                            : (widget.isDark
+                                                                ? Colors.white
+                                                                : Colors
+                                                                    .black87),
+                                                decoration: showStrikethrough
+                                                    ? TextDecoration.lineThrough
+                                                    : null,
                                               ),
                                             ),
                                           ),
                                           // Old served item badge
                                           if (isOldServedItem)
                                             Container(
-                                              margin: const EdgeInsets.only(left: 6),
-                                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                              margin: const EdgeInsets.only(
+                                                  left: 6),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 4,
+                                                      vertical: 2),
                                               decoration: BoxDecoration(
-                                                color: Colors.grey.withOpacity(0.15),
-                                                borderRadius: BorderRadius.circular(4),
+                                                color: Colors.grey
+                                                    .withOpacity(0.15),
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
                                               ),
                                               child: Text(
                                                 'DONE',
                                                 style: TextStyle(
-                                                  color: widget.isDark ? Colors.white30 : Colors.grey,
+                                                  color: widget.isDark
+                                                      ? Colors.white30
+                                                      : Colors.grey,
                                                   fontSize: 9,
                                                   fontWeight: FontWeight.bold,
                                                 ),
@@ -440,12 +520,20 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                           // New add-on badge
                                           if (isCurrentAddOn)
                                             Container(
-                                              margin: const EdgeInsets.only(left: 6),
-                                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                              margin: const EdgeInsets.only(
+                                                  left: 6),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 5,
+                                                      vertical: 2),
                                               decoration: BoxDecoration(
-                                                color: Colors.orange.withOpacity(0.15),
-                                                border: Border.all(color: Colors.orange, width: 1),
-                                                borderRadius: BorderRadius.circular(4),
+                                                color: Colors.orange
+                                                    .withOpacity(0.15),
+                                                border: Border.all(
+                                                    color: Colors.orange,
+                                                    width: 1),
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
                                               ),
                                               child: const Text(
                                                 'NEW',
@@ -460,7 +548,8 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                       ),
                                       if (notes.isNotEmpty)
                                         Padding(
-                                          padding: const EdgeInsets.only(top: 2),
+                                          padding:
+                                              const EdgeInsets.only(top: 2),
                                           child: Text(
                                             '⚠ $notes',
                                             style: const TextStyle(
@@ -471,32 +560,44 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                           ),
                                         ),
                                       // ── Add-ons Display ──
-                                      if (item['addons'] != null && (item['addons'] as List).isNotEmpty)
+                                      if (item['addons'] != null &&
+                                          (item['addons'] as List).isNotEmpty)
                                         Padding(
-                                          padding: const EdgeInsets.only(top: 4, left: 4),
+                                          padding: const EdgeInsets.only(
+                                              top: 4, left: 4),
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: (item['addons'] as List).map((addon) {
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: (item['addons'] as List)
+                                                .map((addon) {
                                               return Padding(
-                                                padding: const EdgeInsets.only(bottom: 2),
+                                                padding: const EdgeInsets.only(
+                                                    bottom: 2),
                                                 child: Row(
                                                   children: [
                                                     Container(
                                                       width: 3,
                                                       height: 3,
                                                       decoration: BoxDecoration(
-                                                        color: widget.isDark ? Colors.white70 : Colors.black54,
+                                                        color: widget.isDark
+                                                            ? Colors.white70
+                                                            : Colors.black54,
                                                         shape: BoxShape.circle,
                                                       ),
                                                     ),
                                                     const SizedBox(width: 6),
                                                     Expanded(
                                                       child: Text(
-                                                        addon['name']?.toString() ?? '',
+                                                        addon['name']
+                                                                ?.toString() ??
+                                                            '',
                                                         style: TextStyle(
                                                           fontSize: 12,
-                                                          fontWeight: FontWeight.w600,
-                                                          color: widget.isDark ? Colors.white70 : Colors.black87,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          color: widget.isDark
+                                                              ? Colors.white70
+                                                              : Colors.black87,
                                                         ),
                                                       ),
                                                     ),
@@ -529,37 +630,33 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
   }
 
   Widget _buildAction(String status) {
-    String? label;
-    Color? color;
-    String? nextStatus;
-
-    // ── INDUSTRY GRADE: Use normalized orderStatus instead of legacy level ──
-    final os = PosService.getOrderStatus(_data);
-
-    if (widget.isRecall) {
-      label = 'RECALL TO KITCHEN';
-      color = Colors.orange;
-      nextStatus = AppConstants.statusPreparing;
-    } else if (os == AppConstants.statusPending) {
-      label = '▶  START PREPARING';
-      color = const Color(0xFF2196F3);
-      nextStatus = AppConstants.statusPreparing;
-    } else if (os == AppConstants.statusPreparing) {
-      label = '✓  MARK READY';
-      color = const Color(0xFF4CAF50);
-      nextStatus = AppConstants.statusPrepared;
-    } else if (os == AppConstants.statusPrepared) {
-      label = '🍽  SERVE ORDER';
-      color = const Color(0xFF7C4DFF);
-      nextStatus = AppConstants.statusServed;
-    } else if (status == AppConstants.statusCancelled) {
-      label = '🗑  DISMISS CANCELLED';
-      color = Colors.red.shade700;
-      nextStatus = 'dismiss_cancelled';
+    final action = PosService.getKdsPrimaryAction(
+      _data,
+      isRecall: widget.isRecall,
+    );
+    if (action == null) {
+      return const SizedBox.shrink();
     }
 
-    if (label == null || color == null || nextStatus == null) {
-      return const SizedBox.shrink();
+    final actionState = action['state'] ?? 'primary';
+    final isDisabled = actionState == 'disabled';
+    Color color;
+    switch (actionState) {
+      case 'danger':
+        color = Colors.red.shade700;
+        break;
+      case 'warning':
+        color = Colors.orange;
+        break;
+      case 'success':
+        color = const Color(0xFF4CAF50);
+        break;
+      case 'disabled':
+        color = Colors.grey.shade500;
+        break;
+      default:
+        color = const Color(0xFF2196F3);
+        break;
     }
 
     return Material(
@@ -568,7 +665,9 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
         bottomRight: Radius.circular(7),
       ),
       child: InkWell(
-        onTap: widget.isProcessing ? null : () => widget.onStatusUpdate(nextStatus!),
+        onTap: (widget.isProcessing || isDisabled)
+            ? null
+            : () => widget.onStatusUpdate(action['nextStatus']!),
         borderRadius: const BorderRadius.only(
           bottomRight: Radius.circular(7),
         ),
@@ -580,10 +679,11 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
               ? const SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2),
                 )
               : Text(
-                  label,
+                  action['label'] ?? '',
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,

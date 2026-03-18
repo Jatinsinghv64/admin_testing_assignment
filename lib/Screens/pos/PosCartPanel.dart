@@ -10,7 +10,7 @@ import '../../services/pos/pos_service.dart';
 import '../../services/pos/pos_models.dart';
 import '../../Widgets/PrintingService.dart';
 import 'TableOrdersDialog.dart';
-import 'PosPaymentDialog.dart';
+import 'pos_payment_dialog.dart';
 
 class PosCartPanel extends StatefulWidget {
   final VoidCallback onOrderSubmit;
@@ -78,7 +78,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
               color: Colors.white.withOpacity(0.7),
               child: Center(
                 child: CircularProgressIndicator(
-                  color: widget.isSubmittingOrder ? Colors.deepPurple : Colors.red,
+                  color:
+                      widget.isSubmittingOrder ? Colors.deepPurple : Colors.red,
                 ),
               ),
             ),
@@ -154,17 +155,23 @@ class _PosCartPanelState extends State<PosCartPanel> {
                 // Cancel Order button for append mode
                 TextButton.icon(
                   onPressed: () => _confirmCancelOngoingOrder(context, pos),
-                  icon: const Icon(Icons.cancel_outlined, size: 14, color: Colors.red),
+                  icon: const Icon(Icons.cancel_outlined,
+                      size: 14, color: Colors.red),
                   label: const Text(
                     'Cancel Order',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.red),
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red),
                   ),
                   style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     backgroundColor: Colors.red.withOpacity(0.1),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6)),
                   ),
                 ),
               ],
@@ -205,7 +212,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
                 onTap: () => _showClearCartConfirmation(context, pos),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.red.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(8),
@@ -213,7 +221,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.delete_sweep, size: 14, color: Colors.red[400]),
+                      Icon(Icons.delete_sweep,
+                          size: 14, color: Colors.red[400]),
                       const SizedBox(width: 4),
                       Text(
                         'Clear',
@@ -271,7 +280,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
             ),
-            child: const Text('Clear All', style: TextStyle(color: Colors.white)),
+            child:
+                const Text('Clear All', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -389,11 +399,13 @@ class _PosCartPanelState extends State<PosCartPanel> {
       padding: const EdgeInsets.symmetric(vertical: 0),
       children: [
         if (pos.isAppendMode) ...[
-          _buildSectionHeader('Ongoing Order', Icons.hourglass_top_rounded, Colors.amber[800]!),
+          _buildSectionHeader(
+              'Ongoing Order', Icons.hourglass_top_rounded, Colors.amber[800]!),
           ...pos.ongoingOrders.map((doc) {
             final data = doc.data() as Map<String, dynamic>;
             final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
-            final orderStatus = data['status']?.toString() ?? AppConstants.statusPending;
+            final orderStatus =
+                data['status']?.toString() ?? AppConstants.statusPending;
             return Column(
               children: items.asMap().entries.map((entry) {
                 return _OngoingOrderItemTile(
@@ -409,7 +421,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
           const Divider(height: 24, indent: 16, endIndent: 16),
         ],
         if (!pos.isEmpty) ...[
-          _buildSectionHeader('In Cart (New Items)', Icons.shopping_cart_outlined, Colors.deepPurple),
+          _buildSectionHeader('In Cart (New Items)',
+              Icons.shopping_cart_outlined, Colors.deepPurple),
           _buildCartItemsList(context, pos),
         ],
       ],
@@ -475,8 +488,9 @@ class _PosCartPanelState extends State<PosCartPanel> {
       child: Column(
         children: [
           if (!pos.isEmpty) _buildSummaryRow('Subtotal', pos.subtotal),
-          if (pos.isAppendMode) 
-            _buildSummaryRow('Ongoing Total', pos.ongoingTotal, color: Colors.amber[900]),
+          if (pos.isAppendMode)
+            _buildSummaryRow('Ongoing Total', pos.ongoingTotal,
+                color: Colors.amber[900]),
           if (!pos.isEmpty && pos.orderDiscount > 0)
             _buildSummaryRow(
               'Discount (${pos.orderDiscount.toStringAsFixed(0)}%)',
@@ -539,7 +553,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
   }
 
   Widget _buildActionButtons(BuildContext context, PosService pos) {
-    final needsTable = pos.orderType == PosOrderType.dineIn && pos.selectedTableId == null;
+    final needsTable =
+        pos.orderType == PosOrderType.dineIn && pos.selectedTableId == null;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -569,12 +584,16 @@ class _PosCartPanelState extends State<PosCartPanel> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded, size: 16, color: Colors.orange[700]),
+                  Icon(Icons.warning_amber_rounded,
+                      size: 16, color: Colors.orange[700]),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Select a table before placing a dine-in order',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.orange[800]),
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.orange[800]),
                     ),
                   ),
                 ],
@@ -592,17 +611,18 @@ class _PosCartPanelState extends State<PosCartPanel> {
                         : needsTable
                             ? () => _showTableSelector(context, pos)
                             : widget.onOrderSubmit,
-                    icon: widget.isSubmittingOrder 
+                    icon: widget.isSubmittingOrder
                         ? const SizedBox(
-                            width: 20, 
-                            height: 20, 
+                            width: 20,
+                            height: 20,
                             child: CircularProgressIndicator(
-                              strokeWidth: 2, 
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white)
-                            )
-                          )
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white)))
                         : Icon(
-                            needsTable ? Icons.table_bar : Icons.restaurant_menu,
+                            needsTable
+                                ? Icons.table_bar
+                                : Icons.restaurant_menu,
                             size: 20,
                           ),
                     label: Text(
@@ -619,7 +639,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
                       ),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: needsTable ? Colors.orange : Colors.deepPurple,
+                      backgroundColor:
+                          needsTable ? Colors.orange : Colors.deepPurple,
                       foregroundColor: Colors.white,
                       disabledBackgroundColor: Colors.grey[300],
                       disabledForegroundColor: Colors.grey[600],
@@ -637,7 +658,10 @@ class _PosCartPanelState extends State<PosCartPanel> {
                 child: SizedBox(
                   height: 52,
                   child: ElevatedButton.icon(
-                    onPressed: (needsTable || (pos.isEmpty && !pos.isAppendMode)) ? null : widget.onPaymentTap,
+                    onPressed:
+                        (needsTable || (pos.isEmpty && !pos.isAppendMode))
+                            ? null
+                            : widget.onPaymentTap,
                     icon: const Icon(Icons.payments_rounded, size: 20),
                     label: const Text(
                       'Payment',
@@ -668,7 +692,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
 
   void _showCustomerDialog(BuildContext context, PosService pos) {
     final nameController = TextEditingController(text: pos.customerName);
-    final phoneController = TextEditingController(text: pos.customerPhone ?? '');
+    final phoneController =
+        TextEditingController(text: pos.customerPhone ?? '');
 
     showDialog(
       context: context,
@@ -724,9 +749,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
                 nameController.text.isEmpty
                     ? 'Walk-in Customer'
                     : nameController.text,
-                phone: phoneController.text.isEmpty
-                    ? null
-                    : phoneController.text,
+                phone:
+                    phoneController.text.isEmpty ? null : phoneController.text,
               );
               Navigator.pop(ctx);
             },
@@ -749,41 +773,45 @@ class _PosCartPanelState extends State<PosCartPanel> {
       builder: (dialogContext) => ChangeNotifierProvider.value(
         value: pos,
         child: _FloorPlanDialog(
-        onSelect: (tableId, tableName) {
-          pos.loadTableContext(tableId, tableName, branchIds: [activeBranchId]);
-          Navigator.pop(dialogContext);
-        },
-        onOccupiedTableTap: (tableId, tableName) {
-          // Close the floor plan dialog first
-          Navigator.pop(dialogContext);
-          // Open the Table Orders Dialog
-          showDialog(
-            context: context,
-            builder: (_) => ChangeNotifierProvider.value(
-              value: pos,
-              child: TableOrdersDialog(
-                tableId: tableId,
-                tableName: tableName,
-                branchIds: [activeBranchId],
-                onAddItems: () {
-                },
+          onSelect: (tableId, tableName) {
+            pos.loadTableContext(tableId, tableName,
+                branchIds: [activeBranchId]);
+            Navigator.pop(dialogContext);
+          },
+          onOccupiedTableTap: (tableId, tableName) {
+            // Close the floor plan dialog first
+            Navigator.pop(dialogContext);
+            // Open the Table Orders Dialog
+            showDialog(
+              context: context,
+              builder: (_) => ChangeNotifierProvider.value(
+                value: pos,
+                child: TableOrdersDialog(
+                  tableId: tableId,
+                  tableName: tableName,
+                  branchIds: [activeBranchId],
+                  onAddItems: () {},
+                ),
               ),
-            ),
-          );
-        },
-      ),
+            );
+          },
+        ),
       ),
     );
   }
 
-  Future<void> _confirmCancelOngoingOrder(BuildContext context, PosService pos) async {
+  Future<void> _confirmCancelOngoingOrder(
+      BuildContext context, PosService pos) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Cancel Order?'),
-        content: const Text('Are you sure you want to cancel this entire order? This will restore ingredient stock.'),
+        content: const Text(
+            'Are you sure you want to cancel this entire order? This will restore ingredient stock.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep Order')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep Order')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -798,9 +826,10 @@ class _PosCartPanelState extends State<PosCartPanel> {
       for (final doc in pos.ongoingOrders) {
         final data = doc.data() as Map<String, dynamic>;
         final status = data['status']?.toString() ?? '';
-        if (status == AppConstants.statusPrepared || status == AppConstants.statusServed) {
+        if (status == AppConstants.statusPrepared ||
+            status == AppConstants.statusServed) {
           _showRestrictedActionDialog(
-            context, 
+            context,
             "Cannot cancel because part of this order is already ${status.toUpperCase()}.",
           );
           return;
@@ -822,13 +851,17 @@ class _PosCartPanelState extends State<PosCartPanel> {
         pos.clearCart();
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Order cancelled successfully'), backgroundColor: Colors.green),
+            const SnackBar(
+                content: Text('Order cancelled successfully'),
+                backgroundColor: Colors.green),
           );
         }
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to cancel order: $e'), backgroundColor: Colors.red),
+            SnackBar(
+                content: Text('Failed to cancel order: $e'),
+                backgroundColor: Colors.red),
           );
         }
       } finally {
@@ -837,7 +870,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
     }
   }
 
-  static void _showRestrictedActionDialog(BuildContext context, String message) {
+  static void _showRestrictedActionDialog(
+      BuildContext context, String message) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -865,7 +899,8 @@ class _PosCartPanelState extends State<PosCartPanel> {
             onPressed: () => Navigator.pop(ctx),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.deepPurple,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
             child: const Text('OK', style: TextStyle(color: Colors.white)),
           ),
@@ -979,7 +1014,8 @@ class _OngoingOrderItemTile extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (item['notes'] != null && item['notes'].toString().isNotEmpty)
+                if (item['notes'] != null &&
+                    item['notes'].toString().isNotEmpty)
                   Text(
                     item['notes'].toString(),
                     style: TextStyle(
@@ -1003,7 +1039,8 @@ class _OngoingOrderItemTile extends StatelessWidget {
           ),
           IconButton(
             onPressed: () => _confirmRemoveOngoingItem(context, pos, userScope),
-            icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
+            icon: const Icon(Icons.delete_outline,
+                size: 16, color: Colors.redAccent),
             tooltip: 'Remove Item',
             constraints: const BoxConstraints(),
             padding: const EdgeInsets.all(4),
@@ -1013,14 +1050,18 @@ class _OngoingOrderItemTile extends StatelessWidget {
     );
   }
 
-  Future<void> _confirmRemoveOngoingItem(BuildContext context, PosService pos, UserScopeService userScope) async {
+  Future<void> _confirmRemoveOngoingItem(
+      BuildContext context, PosService pos, UserScopeService userScope) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Remove Item?'),
-        content: const Text('Are you sure you want to remove this item from the order?'),
+        content: const Text(
+            'Are you sure you want to remove this item from the order?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep Item')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep Item')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -1032,9 +1073,10 @@ class _OngoingOrderItemTile extends StatelessWidget {
 
     if (confirmed == true) {
       // Local status check to avoid masked exception issues on Web
-      if (orderStatus == AppConstants.statusPrepared || orderStatus == AppConstants.statusServed) {
+      if (orderStatus == AppConstants.statusPrepared ||
+          orderStatus == AppConstants.statusServed) {
         _PosCartPanelState._showRestrictedActionDialog(
-          context, 
+          context,
           "Cannot remove items from an order that is already ${orderStatus.toUpperCase()}.",
         );
         return;
@@ -1050,13 +1092,17 @@ class _OngoingOrderItemTile extends StatelessWidget {
         );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Item removed successfully'), backgroundColor: Colors.green),
+            const SnackBar(
+                content: Text('Item removed successfully'),
+                backgroundColor: Colors.green),
           );
         }
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to remove item: $e'), backgroundColor: Colors.red),
+            SnackBar(
+                content: Text('Failed to remove item: $e'),
+                backgroundColor: Colors.red),
           );
         }
       } finally {
@@ -1164,7 +1210,8 @@ class _CartItemTile extends StatelessWidget {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            Icon(Icons.notes, size: 12, color: Colors.orange[700]),
+                            Icon(Icons.notes,
+                                size: 12, color: Colors.orange[700]),
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(
@@ -1446,10 +1493,9 @@ class _FloorPlanDialogState extends State<_FloorPlanDialog> {
 
                       final branchData =
                           snapshot.data!.data() as Map<String, dynamic>?;
-                      final tables =
-                          (branchData?['Tables'] ?? branchData?['tables'])
-                                  as Map<String, dynamic>? ??
-                              {};
+                      final tables = (branchData?['Tables'] ??
+                              branchData?['tables']) as Map<String, dynamic>? ??
+                          {};
 
                       if (tables.isEmpty) {
                         return Center(
@@ -1470,8 +1516,7 @@ class _FloorPlanDialogState extends State<_FloorPlanDialog> {
                       final tableEntries = tables.entries.toList()
                         ..sort((a, b) => (a.value['name'] ?? a.key)
                             .toString()
-                            .compareTo(
-                                (b.value['name'] ?? b.key).toString()));
+                            .compareTo((b.value['name'] ?? b.key).toString()));
 
                       // Extract unique zones/floors
                       final zones = <String>{'All'};
@@ -1479,8 +1524,7 @@ class _FloorPlanDialogState extends State<_FloorPlanDialog> {
                         final zone =
                             (entry.value as Map<String, dynamic>)['zone']
                                     ?.toString() ??
-                                (entry.value
-                                        as Map<String, dynamic>)['floor']
+                                (entry.value as Map<String, dynamic>)['floor']
                                     ?.toString() ??
                                 '';
                         if (zone.isNotEmpty) zones.add(zone);
@@ -1490,8 +1534,7 @@ class _FloorPlanDialogState extends State<_FloorPlanDialog> {
                       final filtered = _selectedFloor == 'All'
                           ? tableEntries
                           : tableEntries.where((e) {
-                              final data =
-                                  e.value as Map<String, dynamic>;
+                              final data = e.value as Map<String, dynamic>;
                               final zone = data['zone']?.toString() ??
                                   data['floor']?.toString() ??
                                   '';
@@ -1507,11 +1550,9 @@ class _FloorPlanDialogState extends State<_FloorPlanDialog> {
                               child: ListView(
                                 scrollDirection: Axis.horizontal,
                                 children: zones.map((zone) {
-                                  final isSelected =
-                                      _selectedFloor == zone;
+                                  final isSelected = _selectedFloor == zone;
                                   return Padding(
-                                    padding:
-                                        const EdgeInsets.only(right: 8),
+                                    padding: const EdgeInsets.only(right: 8),
                                     child: FilterChip(
                                       showCheckmark: false,
                                       label: Text(zone),
@@ -1526,19 +1567,17 @@ class _FloorPlanDialogState extends State<_FloorPlanDialog> {
                                             : FontWeight.w500,
                                         fontSize: 12,
                                       ),
-                                      onSelected: (_) => setState(
-                                          () => _selectedFloor = zone),
+                                      onSelected: (_) =>
+                                          setState(() => _selectedFloor = zone),
                                       shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(20),
+                                        borderRadius: BorderRadius.circular(20),
                                       ),
                                     ),
                                   );
                                 }).toList(),
                               ),
                             ),
-                          if (zones.length > 1)
-                            const SizedBox(height: 12),
+                          if (zones.length > 1) const SizedBox(height: 12),
                           // Tables grid
                           Expanded(
                             child: GridView.builder(
@@ -1590,8 +1629,7 @@ class _FloorPlanDialogState extends State<_FloorPlanDialog> {
           ),
         ),
         const SizedBox(width: 4),
-        Text(label,
-            style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
       ],
     );
   }
@@ -1623,12 +1661,11 @@ class _FloorPlanDialogState extends State<_FloorPlanDialog> {
           .where('branchIds', arrayContains: branchId)
           .where('Order_type', isEqualTo: 'dine_in')
           .where('status', whereIn: [
-            AppConstants.statusPending,
-            AppConstants.statusPreparing,
-            AppConstants.statusPrepared,
-            AppConstants.statusServed,
-          ])
-          .snapshots();
+        AppConstants.statusPending,
+        AppConstants.statusPreparing,
+        AppConstants.statusPrepared,
+        AppConstants.statusServed,
+      ]).snapshots();
     } catch (e) {
       return null;
     }
@@ -1662,7 +1699,8 @@ class _FloorPlanTable extends StatelessWidget {
     final staticStatus =
         (tableData['status'] ?? 'available').toString().toLowerCase();
     final isReserved = staticStatus == 'reserved';
-    final isAvailable = !isOccupiedByOrder && !isReserved && staticStatus != 'occupied';
+    final isAvailable =
+        !isOccupiedByOrder && !isReserved && staticStatus != 'occupied';
 
     // Color coding
     Color borderColor;
@@ -1703,8 +1741,7 @@ class _FloorPlanTable extends StatelessWidget {
             duration: const Duration(milliseconds: 200),
             decoration: BoxDecoration(
               color: bgColor,
-              borderRadius:
-                  BorderRadius.circular(isRound ? 100 : 16),
+              borderRadius: BorderRadius.circular(isRound ? 100 : 16),
               border: Border.all(color: borderColor, width: 2),
               boxShadow: isAvailable
                   ? [
@@ -1714,7 +1751,7 @@ class _FloorPlanTable extends StatelessWidget {
                         offset: const Offset(0, 2),
                       )
                     ]
-                : null,
+                  : null,
             ),
             child: Stack(
               children: [
@@ -1729,10 +1766,10 @@ class _FloorPlanTable extends StatelessWidget {
                         icon: const Icon(Icons.payment, size: 16),
                         color: Colors.green[700],
                         padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                        constraints:
+                            const BoxConstraints(minWidth: 24, minHeight: 24),
                         tooltip: 'Pay Now',
                         onPressed: () async {
-                          final userScope = context.read<UserScopeService>();
                           double existingTableTotal = 0.0;
                           List<QueryDocumentSnapshot> existingOrders = [];
 
@@ -1740,7 +1777,8 @@ class _FloorPlanTable extends StatelessWidget {
                             context: context,
                             barrierDismissible: false,
                             builder: (_) => const Center(
-                              child: CircularProgressIndicator(color: Colors.deepPurple),
+                              child: CircularProgressIndicator(
+                                  color: Colors.deepPurple),
                             ),
                           );
 
@@ -1748,29 +1786,43 @@ class _FloorPlanTable extends StatelessWidget {
                             final pos = context.read<PosService>();
                             final snapshot = await FirebaseFirestore.instance
                                 .collection(AppConstants.collectionOrders)
-                                .where('branchIds', arrayContains: pos.activeBranchId ?? '')
+                                .where('branchIds',
+                                    arrayContains: pos.activeBranchId ?? '')
                                 .where('tableId', isEqualTo: tableId)
                                 .where('Order_type', isEqualTo: 'dine_in')
                                 .where('status', whereIn: [
-                                  AppConstants.statusPending,
-                                  AppConstants.statusPreparing,
-                                  AppConstants.statusPrepared,
-                                  AppConstants.statusServed,
-                                ])
-                                .get();
+                              AppConstants.statusPending,
+                              AppConstants.statusPreparing,
+                              AppConstants.statusPrepared,
+                              AppConstants.statusServed,
+                            ]).get();
 
                             existingOrders = snapshot.docs;
                             for (final doc in existingOrders) {
                               final data = doc.data() as Map<String, dynamic>;
-                              existingTableTotal += (data['totalAmount'] ?? 0).toDouble();
+                              existingTableTotal +=
+                                  PosService.getOutstandingAmount(data);
                             }
                           } catch (e) {
-                            debugPrint('Error fetching orders for quick pay: $e');
+                            debugPrint(
+                                'Error fetching orders for quick pay: $e');
                           } finally {
-                            if (context.mounted) Navigator.pop(context); // Close loading
+                            if (context.mounted)
+                              Navigator.pop(context); // Close loading
                           }
 
-                          if (existingOrders.isEmpty || !context.mounted) return;
+                          if (existingOrders.isEmpty || !context.mounted)
+                            return;
+                          if (existingTableTotal <= 0.001) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                    'All active orders on this table are already prepaid.'),
+                                backgroundColor: Colors.orange,
+                              ),
+                            );
+                            return;
+                          }
 
                           // Close Floor Plan Dialog before opening Payment Dialog
                           Navigator.pop(context);
@@ -1782,7 +1834,9 @@ class _FloorPlanTable extends StatelessWidget {
                               value: context.read<PosService>(),
                               child: PosPaymentDialog(
                                 totalAmount: 0.0,
-                                branchIds: [existingOrders.first.get('branchIds')[0] ?? ''],
+                                branchIds: [
+                                  existingOrders.first.get('branchIds')[0] ?? ''
+                                ],
                                 existingTableTotal: existingTableTotal,
                                 existingOrders: existingOrders,
                                 returnPaymentOnly: false,
@@ -1793,31 +1847,43 @@ class _FloorPlanTable extends StatelessWidget {
                                       context: context,
                                       barrierDismissible: false,
                                       builder: (promptCtx) => AlertDialog(
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(20)),
                                         title: Row(
                                           children: [
-                                            Icon(Icons.check_circle, color: Colors.green[600]),
+                                            Icon(Icons.check_circle,
+                                                color: Colors.green[600]),
                                             const SizedBox(width: 10),
                                             const Text('Payment Successful'),
                                           ],
                                         ),
-                                        content: const Text('Do you want to print the receipt?'),
+                                        content: const Text(
+                                            'Do you want to print the receipt?'),
                                         actions: [
                                           TextButton(
-                                            onPressed: () => Navigator.pop(promptCtx),
+                                            onPressed: () =>
+                                                Navigator.pop(promptCtx),
                                             child: const Text('No'),
                                           ),
                                           ElevatedButton.icon(
                                             onPressed: () {
                                               Navigator.pop(promptCtx);
-                                              PrintingService.printReceipt(context, existingOrders.first);
+                                              PrintingService.printReceipt(
+                                                  context,
+                                                  existingOrders.first);
                                             },
-                                            icon: const Icon(Icons.print, size: 18),
+                                            icon: const Icon(Icons.print,
+                                                size: 18),
                                             label: const Text('Print Receipt'),
                                             style: ElevatedButton.styleFrom(
-                                              backgroundColor: Colors.deepPurple,
+                                              backgroundColor:
+                                                  Colors.deepPurple,
                                               foregroundColor: Colors.white,
-                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          10)),
                                             ),
                                           ),
                                         ],
@@ -1842,15 +1908,16 @@ class _FloorPlanTable extends StatelessWidget {
                         icon: const Icon(Icons.print, size: 16),
                         color: Colors.blue[700],
                         padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                        constraints:
+                            const BoxConstraints(minWidth: 24, minHeight: 24),
                         tooltip: 'Print Invoice',
                         onPressed: () async {
-                          final userScope = context.read<UserScopeService>();
                           try {
                             final pos = context.read<PosService>();
                             final snapshot = await FirebaseFirestore.instance
                                 .collection(AppConstants.collectionOrders)
-                                .where('branchIds', arrayContains: pos.activeBranchId ?? '')
+                                .where('branchIds',
+                                    arrayContains: pos.activeBranchId ?? '')
                                 .where('tableId', isEqualTo: tableId)
                                 .where('Order_type', isEqualTo: 'dine_in')
                                 .where('status', whereIn: [
@@ -1861,12 +1928,15 @@ class _FloorPlanTable extends StatelessWidget {
                                 ])
                                 .limit(1)
                                 .get();
-                            
+
                             if (snapshot.docs.isNotEmpty && context.mounted) {
-                              PrintingService.printReceipt(context, snapshot.docs.first);
+                              PrintingService.printReceipt(
+                                  context, snapshot.docs.first);
                             } else if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('No active orders found to print.')),
+                                const SnackBar(
+                                    content: Text(
+                                        'No active orders found to print.')),
                               );
                             }
                           } catch (e) {
@@ -1885,72 +1955,70 @@ class _FloorPlanTable extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                // Table icon
-                Icon(
-                  isRound
-                      ? Icons.circle_outlined
-                      : Icons.table_bar,
-                  color: borderColor,
-                  size: 30,
-                ),
-                const SizedBox(height: 6),
-                // Table name
-                Text(
-                  tableName,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: textColor,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                // Seat count
-                if (seats != null) ...[
-                  const SizedBox(height: 2),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.person, size: 12, color: textColor),
-                      const SizedBox(width: 2),
+                      // Table icon
+                      Icon(
+                        isRound ? Icons.circle_outlined : Icons.table_bar,
+                        color: borderColor,
+                        size: 30,
+                      ),
+                      const SizedBox(height: 6),
+                      // Table name
                       Text(
-                        '$seats',
-                        style: TextStyle(fontSize: 11, color: textColor),
+                        tableName,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: textColor,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      // Seat count
+                      if (seats != null) ...[
+                        const SizedBox(height: 2),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.person, size: 12, color: textColor),
+                            const SizedBox(width: 2),
+                            Text(
+                              '$seats',
+                              style: TextStyle(fontSize: 11, color: textColor),
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 2),
+                      // Status label
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: borderColor.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          isAvailable
+                              ? 'Available'
+                              : isReserved
+                                  ? 'Reserved'
+                                  : 'Occupied',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w600,
+                            color: textColor,
+                          ),
+                        ),
                       ),
                     ],
-                  ),
-                ],
-                const SizedBox(height: 2),
-                // Status label
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: borderColor.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    isAvailable
-                        ? 'Available'
-                        : isReserved
-                            ? 'Reserved'
-                            : 'Occupied',
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w600,
-                      color: textColor,
-                    ),
                   ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
       ),
-    ),
-  ),
-),
-);
+    );
   }
 }

@@ -3,6 +3,7 @@
 // Includes POS ↔ Delivery toggle in the header bar
 
 import 'dart:async';
+import 'dart:collection';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -14,7 +15,7 @@ import '../../services/pos/pos_models.dart';
 import '../../Widgets/PrintingService.dart';
 import 'PosProductTile.dart';
 import 'PosCartPanel.dart';
-import 'PosPaymentDialog.dart';
+import 'pos_payment_dialog.dart';
 import 'DeliveryOrdersPanel.dart';
 import 'DineInFloorPlanPanel.dart';
 import 'components/VariantSelectionDialog.dart';
@@ -34,6 +35,14 @@ class _PosScreenState extends State<PosScreen> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
   bool _isSubmittingOrder = false;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+      _kitchenCancellationSubscription;
+  final Queue<_KitchenCancellationAlert> _kitchenCancellationQueue =
+      Queue<_KitchenCancellationAlert>();
+  final Set<String> _shownKitchenCancellationAlertIds = <String>{};
+  String? _kitchenCancellationBranchId;
+  bool _isKitchenCancellationWatcherPrimed = false;
+  bool _isKitchenCancellationDialogOpen = false;
 
   // ── POS ↔ Delivery ↔ Dine In Toggle ──
   PosViewMode _viewMode = PosViewMode.pos;
@@ -48,6 +57,7 @@ class _PosScreenState extends State<PosScreen> {
 
   @override
   void dispose() {
+    _kitchenCancellationSubscription?.cancel();
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -55,6 +65,14 @@ class _PosScreenState extends State<PosScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final selectedBranchId =
+        context.watch<BranchFilterService>().selectedBranchId;
+    final watcherBranchId = selectedBranchId != null &&
+            selectedBranchId != BranchFilterService.allBranchesValue
+        ? selectedBranchId
+        : null;
+    _scheduleKitchenCancellationWatcher(watcherBranchId);
+
     return Scaffold(
       backgroundColor: Colors.grey[100],
       body: Column(
@@ -73,6 +91,126 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
+  void _scheduleKitchenCancellationWatcher(String? activeBranchId) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _configureKitchenCancellationWatcher(activeBranchId);
+    });
+  }
+
+  void _configureKitchenCancellationWatcher(String? activeBranchId) {
+    final alreadyConfigured = _kitchenCancellationBranchId == activeBranchId &&
+        (activeBranchId == null || _kitchenCancellationSubscription != null);
+    if (alreadyConfigured) return;
+
+    _kitchenCancellationSubscription?.cancel();
+    _kitchenCancellationSubscription = null;
+    _kitchenCancellationBranchId = activeBranchId;
+    _isKitchenCancellationWatcherPrimed = false;
+    _shownKitchenCancellationAlertIds.clear();
+    _kitchenCancellationQueue.clear();
+
+    if (activeBranchId == null || activeBranchId.isEmpty) {
+      return;
+    }
+
+    _kitchenCancellationSubscription = FirebaseFirestore.instance
+        .collection(AppConstants.collectionOrders)
+        .where('branchIds', arrayContains: activeBranchId)
+        .where('source', isEqualTo: 'pos')
+        .orderBy('cancelledAt', descending: true)
+        .limit(20)
+        .snapshots()
+        .listen(
+      _handleKitchenCancellationSnapshot,
+      onError: (error) {
+        debugPrint('⚠️ POS: Kitchen cancellation watcher failed: $error');
+      },
+    );
+  }
+
+  void _handleKitchenCancellationSnapshot(
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+  ) {
+    final matchingDocs = snapshot.docs.where((doc) {
+      final data = doc.data();
+      return PosService.isKitchenRejected(data) &&
+          data['status'] == AppConstants.statusCancelled &&
+          data['cancelledAt'] is Timestamp;
+    }).toList();
+
+    if (!_isKitchenCancellationWatcherPrimed) {
+      _shownKitchenCancellationAlertIds
+          .addAll(matchingDocs.map((doc) => doc.id));
+      _isKitchenCancellationWatcherPrimed = true;
+      return;
+    }
+
+    for (final doc in matchingDocs) {
+      if (_shownKitchenCancellationAlertIds.contains(doc.id)) continue;
+      _shownKitchenCancellationAlertIds.add(doc.id);
+      _kitchenCancellationQueue.add(
+        _KitchenCancellationAlert.fromOrder(doc.id, doc.data()),
+      );
+    }
+
+    _processKitchenCancellationAlerts();
+  }
+
+  void _processKitchenCancellationAlerts() {
+    if (!mounted ||
+        _isKitchenCancellationDialogOpen ||
+        _kitchenCancellationQueue.isEmpty) {
+      return;
+    }
+
+    final alert = _kitchenCancellationQueue.removeFirst();
+    _isKitchenCancellationDialogOpen = true;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            Icon(Icons.cancel_outlined, color: Colors.red[700]),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Order Cancelled in Kitchen')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              alert.orderLabel,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Reason: ${alert.reason}',
+              style: TextStyle(color: Colors.grey[800], height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red[700],
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Acknowledge'),
+          ),
+        ],
+      ),
+    ).whenComplete(() {
+      _isKitchenCancellationDialogOpen = false;
+      _processKitchenCancellationAlerts();
+    });
+  }
+
   Widget _buildCurrentView(BuildContext context) {
     switch (_viewMode) {
       case PosViewMode.delivery:
@@ -88,7 +226,6 @@ class _PosScreenState extends State<PosScreen> {
           },
         );
       case PosViewMode.pos:
-      default:
         return _buildPosBody(context);
     }
   }
@@ -100,7 +237,8 @@ class _PosScreenState extends State<PosScreen> {
     final effectiveBranchIds =
         branchFilter.getFilterBranchIds(userScope.branchIds);
 
-    bool categoryBranchChanged = _lastCategoryBranchIds.length != effectiveBranchIds.length;
+    bool categoryBranchChanged =
+        _lastCategoryBranchIds.length != effectiveBranchIds.length;
     if (!categoryBranchChanged) {
       for (int i = 0; i < effectiveBranchIds.length; i++) {
         if (_lastCategoryBranchIds[i] != effectiveBranchIds[i]) {
@@ -124,44 +262,50 @@ class _PosScreenState extends State<PosScreen> {
     }
 
     return StreamBuilder<QuerySnapshot>(
-      stream: _categoryStream ?? const Stream.empty(),
-      builder: (context, catSnapshot) {
-        final categories = catSnapshot.data?.docs ?? [];
-        final Map<String, String> categoryMap = {
-          for (var doc in categories)
-            doc.id: (doc.data() as Map<String, dynamic>)['name']?.toString() ?? 'Category'
-        };
+        stream: _categoryStream ?? const Stream.empty(),
+        builder: (context, catSnapshot) {
+          final categories = catSnapshot.data?.docs ?? [];
+          final Map<String, String> categoryMap = {
+            for (var doc in categories)
+              doc.id:
+                  (doc.data() as Map<String, dynamic>)['name']?.toString() ??
+                      'Category'
+          };
 
-        return _buildBranchCheckWrapper(context, userScope, branchFilter, (activeBranchId) {
-          return Row(
-            key: const ValueKey('pos'),
-            children: [
-              // ── Left: Products Panel (65%) ──
-              Expanded(
-                flex: 65,
-                child: Row(
-                  children: [
-                    _buildCategorySidebar(context, categories, activeBranchId),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: _buildProductGrid(context, categoryMap, activeBranchId)),
-                  ],
+          return _buildBranchCheckWrapper(context, userScope, branchFilter,
+              (activeBranchId) {
+            return Row(
+              key: const ValueKey('pos'),
+              children: [
+                // ── Left: Products Panel (65%) ──
+                Expanded(
+                  flex: 65,
+                  child: Row(
+                    children: [
+                      _buildCategorySidebar(
+                          context, categories, activeBranchId),
+                      const VerticalDivider(width: 1),
+                      Expanded(
+                          child: _buildProductGrid(
+                              context, categoryMap, activeBranchId)),
+                    ],
+                  ),
                 ),
-              ),
-              // ── Right: Cart Panel (35%) ──
-              const VerticalDivider(width: 1),
-              Expanded(
-                flex: 35,
-                child: PosCartPanel(
-                  onOrderSubmit: () => _submitOrder(context, activeBranchId),
-                  onPaymentTap: () => _openPaymentDialog(context, activeBranchId),
-                  isSubmittingOrder: _isSubmittingOrder,
+                // ── Right: Cart Panel (35%) ──
+                const VerticalDivider(width: 1),
+                Expanded(
+                  flex: 35,
+                  child: PosCartPanel(
+                    onOrderSubmit: () => _submitOrder(context, activeBranchId),
+                    onPaymentTap: () =>
+                        _openPaymentDialog(context, activeBranchId),
+                    isSubmittingOrder: _isSubmittingOrder,
+                  ),
                 ),
-              ),
-            ],
-          );
+              ],
+            );
+          });
         });
-      }
-    );
   }
 
   // ── Branch Enforcement Wrapper ──────────────────────────────
@@ -172,11 +316,12 @@ class _PosScreenState extends State<PosScreen> {
     Widget Function(String activeBranchId) builder,
   ) {
     final pos = context.watch<PosService>();
-    
+
     final globalBranchId = branchFilter.selectedBranchId;
 
     // 1. If global filter is a SINGLE branch, sync and allow POS
-    if (globalBranchId != null && globalBranchId != BranchFilterService.allBranchesValue) {
+    if (globalBranchId != null &&
+        globalBranchId != BranchFilterService.allBranchesValue) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (pos.activeBranchId != globalBranchId) {
           pos.setActiveBranch(globalBranchId);
@@ -212,7 +357,8 @@ class _PosScreenState extends State<PosScreen> {
                   color: Colors.orange.withOpacity(0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.storefront, size: 56, color: Colors.orange),
+                child: const Icon(Icons.storefront,
+                    size: 56, color: Colors.orange),
               ),
               const SizedBox(height: 32),
               const Text(
@@ -223,24 +369,31 @@ class _PosScreenState extends State<PosScreen> {
               Text(
                 'Point of Sale operations must be tied to a specific location for accurate inventory and reporting.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[600], fontSize: 16, height: 1.4),
+                style: TextStyle(
+                    color: Colors.grey[600], fontSize: 16, height: 1.4),
               ),
               const SizedBox(height: 32),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 decoration: BoxDecoration(
                   color: Colors.deepPurple.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.deepPurple.withOpacity(0.15)),
+                  border:
+                      Border.all(color: Colors.deepPurple.withOpacity(0.15)),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.arrow_upward, color: Colors.deepPurple[700], size: 28),
+                    Icon(Icons.arrow_upward,
+                        color: Colors.deepPurple[700], size: 28),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Text(
                         'Please select a specific branch from the dropdown in the top App Bar.',
-                        style: TextStyle(color: Colors.deepPurple[800], fontWeight: FontWeight.w600, fontSize: 15),
+                        style: TextStyle(
+                            color: Colors.deepPurple[800],
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15),
                       ),
                     ),
                   ],
@@ -314,8 +467,8 @@ class _PosScreenState extends State<PosScreen> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                        color: Colors.deepPurple, width: 1.5),
+                    borderSide:
+                        const BorderSide(color: Colors.deepPurple, width: 1.5),
                   ),
                 ),
               ),
@@ -410,22 +563,37 @@ class _PosScreenState extends State<PosScreen> {
   Color _getCategoryColor(String? name) {
     if (name == null) return Colors.deepPurple;
     final normalized = name.toLowerCase();
-    if (normalized.contains('drink') || normalized.contains('beverage') || normalized.contains('juice') || normalized.contains('water')) {
+    if (normalized.contains('drink') ||
+        normalized.contains('beverage') ||
+        normalized.contains('juice') ||
+        normalized.contains('water')) {
       return Colors.red[400]!;
     }
-    if (normalized.contains('dessert') || normalized.contains('sweet') || normalized.contains('cake') || normalized.contains('ice cream')) {
+    if (normalized.contains('dessert') ||
+        normalized.contains('sweet') ||
+        normalized.contains('cake') ||
+        normalized.contains('ice cream')) {
       return Colors.amber[600]!;
     }
-    if (normalized.contains('starter') || normalized.contains('appetizer') || normalized.contains('snack')) {
+    if (normalized.contains('starter') ||
+        normalized.contains('appetizer') ||
+        normalized.contains('snack')) {
       return Colors.teal[400]!;
     }
-    if (normalized.contains('main') || normalized.contains('food') || normalized.contains('dish') || normalized.contains('dinner')) {
+    if (normalized.contains('main') ||
+        normalized.contains('food') ||
+        normalized.contains('dish') ||
+        normalized.contains('dinner')) {
       return Colors.blue[600]!;
     }
-    if (normalized.contains('burger') || normalized.contains('pizza') || normalized.contains('fast food')) {
+    if (normalized.contains('burger') ||
+        normalized.contains('pizza') ||
+        normalized.contains('fast food')) {
       return Colors.orange[700]!;
     }
-    if (normalized.contains('vegan') || normalized.contains('salad') || normalized.contains('healthy')) {
+    if (normalized.contains('vegan') ||
+        normalized.contains('salad') ||
+        normalized.contains('healthy')) {
       return Colors.green[600]!;
     }
     // Deterministic fallback based on name hash
@@ -440,15 +608,16 @@ class _PosScreenState extends State<PosScreen> {
     return colList[hash % colList.length];
   }
 
-  Widget _buildCategorySidebar(
-      BuildContext context, List<QueryDocumentSnapshot> categories, String activeBranchId) {
+  Widget _buildCategorySidebar(BuildContext context,
+      List<QueryDocumentSnapshot> categories, String activeBranchId) {
     return Container(
       width: 130,
       color: Colors.white,
       child: Column(
         children: [
           // "All" category
-          _buildCategoryItem(null, 'All Items', Icons.apps_rounded, Colors.deepPurple),
+          _buildCategoryItem(
+              null, 'All Items', Icons.apps_rounded, Colors.deepPurple),
           const Divider(height: 1),
           // Categories passed from parent
           Expanded(
@@ -481,7 +650,8 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
-  Widget _buildCategoryItem(String? id, String name, IconData icon, Color color) {
+  Widget _buildCategoryItem(
+      String? id, String name, IconData icon, Color color) {
     final isSelected = _selectedCategoryId == id;
     return Material(
       color: Colors.transparent,
@@ -493,9 +663,8 @@ class _PosScreenState extends State<PosScreen> {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           decoration: BoxDecoration(
-            color: isSelected
-                ? color.withOpacity(0.15)
-                : color.withOpacity(0.02),
+            color:
+                isSelected ? color.withOpacity(0.15) : color.withOpacity(0.02),
             border: Border(
               left: BorderSide(
                 color: isSelected ? color : Colors.transparent,
@@ -537,20 +706,22 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   // ── Product Grid ──────────────────────────────────────────
-  Widget _buildProductGrid(
-      BuildContext context, Map<String, String> categoryMap, String activeBranchId) {
-      
-    if (_lastProductBranchId != activeBranchId || _lastCategoryId != _selectedCategoryId || _productStream == null) {
+  Widget _buildProductGrid(BuildContext context,
+      Map<String, String> categoryMap, String activeBranchId) {
+    if (_lastProductBranchId != activeBranchId ||
+        _lastCategoryId != _selectedCategoryId ||
+        _productStream == null) {
       _lastProductBranchId = activeBranchId;
       _lastCategoryId = _selectedCategoryId;
-      
-      Query query = FirebaseFirestore.instance.collection(AppConstants.collectionMenuItems);
+
+      Query query = FirebaseFirestore.instance
+          .collection(AppConstants.collectionMenuItems);
       query = query.where('branchIds', arrayContainsAny: [activeBranchId]);
-      
+
       if (_selectedCategoryId != null) {
         query = query.where('categoryId', isEqualTo: _selectedCategoryId);
       }
-      
+
       _productStream = query.snapshots();
     }
 
@@ -648,7 +819,8 @@ class _PosScreenState extends State<PosScreen> {
             final isAvailable = data['isAvailable'] ?? true;
 
             final catId = data['categoryId']?.toString();
-            final catName = categoryMap[catId] ?? data['categoryName']?.toString();
+            final catName =
+                categoryMap[catId] ?? data['categoryName']?.toString();
             final chinColor = _getCategoryColor(catName);
 
             return PosProductTile(
@@ -714,11 +886,10 @@ class _PosScreenState extends State<PosScreen> {
     });
 
     try {
-
-      final orderId = await pos.submitOrder(
+      await pos.submitOrder(
         userScope: userScope,
         branchIds: [activeBranchId],
-        initialStatus: AppConstants.statusPreparing,
+        initialStatus: AppConstants.statusPending,
       );
 
       if (mounted) {
@@ -734,10 +905,11 @@ class _PosScreenState extends State<PosScreen> {
         // _printReceipt(orderId);
       }
     } catch (e) {
-      if (mounted) {
+      final errorMessage = PosService.displayError(e);
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to submit order: $e'),
+            content: Text('Failed to submit order: $errorMessage'),
             backgroundColor: Colors.red,
           ),
         );
@@ -751,15 +923,16 @@ class _PosScreenState extends State<PosScreen> {
     }
   }
 
-  Future<void> _openPaymentDialog(BuildContext context, String activeBranchId) async {
+  Future<void> _openPaymentDialog(
+      BuildContext context, String activeBranchId) async {
     final pos = context.read<PosService>();
-    final userScope = context.read<UserScopeService>();
 
     if (pos.orderType == PosOrderType.dineIn && pos.selectedTableId == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Please select a table for dine-in orders before payment.'),
+            content: Text(
+                'Please select a table for dine-in orders before payment.'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -770,6 +943,19 @@ class _PosScreenState extends State<PosScreen> {
     // Use centralized state from PosService
     double existingTableTotal = pos.ongoingTotal;
     List<DocumentSnapshot> existingOrders = pos.ongoingOrders;
+
+    if ((pos.total + existingTableTotal) <= 0.001) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'No outstanding balance. Active table orders are already prepaid.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
 
     if (!context.mounted) return;
 
@@ -798,7 +984,8 @@ class _PosScreenState extends State<PosScreen> {
                 context: context,
                 barrierDismissible: false,
                 builder: (promptCtx) => AlertDialog(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20)),
                   title: Row(
                     children: [
                       Icon(Icons.check_circle, color: Colors.green[600]),
@@ -822,7 +1009,8 @@ class _PosScreenState extends State<PosScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.deepPurple,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
                       ),
                     ),
                   ],
@@ -848,5 +1036,48 @@ class _PosScreenState extends State<PosScreen> {
     } catch (e) {
       debugPrint('⚠️ Error fetching order for receipt: $e');
     }
+  }
+}
+
+class _KitchenCancellationAlert {
+  final String orderId;
+  final String orderLabel;
+  final String reason;
+
+  const _KitchenCancellationAlert({
+    required this.orderId,
+    required this.orderLabel,
+    required this.reason,
+  });
+
+  factory _KitchenCancellationAlert.fromOrder(
+    String orderId,
+    Map<String, dynamic> data,
+  ) {
+    final dailyNumber = data['dailyOrderNumber']?.toString();
+    final tableName = data['tableName']?.toString();
+    final customerName = data['customerName']?.toString();
+    final reason =
+        (data['cancellationReason']?.toString().trim().isNotEmpty ?? false)
+            ? data['cancellationReason'].toString().trim()
+            : 'No reason provided';
+
+    final labelBuffer = StringBuffer(
+      dailyNumber != null && dailyNumber.isNotEmpty
+          ? 'Order #$dailyNumber'
+          : 'Order ${orderId.substring(0, orderId.length < 6 ? orderId.length : 6).toUpperCase()}',
+    );
+
+    if (tableName != null && tableName.isNotEmpty) {
+      labelBuffer.write(' · $tableName');
+    } else if (customerName != null && customerName.isNotEmpty) {
+      labelBuffer.write(' · $customerName');
+    }
+
+    return _KitchenCancellationAlert(
+      orderId: orderId,
+      orderLabel: labelBuffer.toString(),
+      reason: reason,
+    );
   }
 }

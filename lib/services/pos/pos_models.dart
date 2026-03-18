@@ -57,8 +57,7 @@ class PosCartItem {
       if (notes.isNotEmpty) 'notes': notes,
       if (discountPercent > 0) 'discountPercent': discountPercent,
       if (imageUrl != null) 'imageUrl': imageUrl,
-      if (addons.isNotEmpty)
-        'addons': addons.map((a) => a.toMap()).toList(),
+      if (addons.isNotEmpty) 'addons': addons.map((a) => a.toMap()).toList(),
       if (isAddOn) 'isAddOn': true,
     };
   }
@@ -99,23 +98,44 @@ class PosAddon {
 /// Payment record
 class PosPayment {
   final String method; // 'cash', 'card', 'online'
-  final double amount;
+  final String? label;
+  final double amount; // Tendered amount
   final double change;
+  final double appliedAmount; // Amount actually applied to the order total
+  final List<PosPayment> splits;
   final DateTime timestamp;
 
   PosPayment({
     required this.method,
+    this.label,
     required this.amount,
     this.change = 0,
+    double? appliedAmount,
+    List<PosPayment> splits = const [],
     DateTime? timestamp,
-  }) : timestamp = timestamp ?? DateTime.now();
+  })  : appliedAmount = _roundMoney(
+          appliedAmount ?? ((amount - change) < 0 ? 0 : (amount - change)),
+        ),
+        splits = List<PosPayment>.unmodifiable(splits),
+        timestamp = timestamp ?? DateTime.now();
+
+  bool get isSplit => splits.isNotEmpty;
+
+  double get remainingFromTendered => _roundMoney(amount - change);
 
   Map<String, dynamic> toMap() => {
         'method': method,
-        'amount': amount,
-        'change': change,
+        if (label != null && label!.isNotEmpty) 'label': label,
+        'amount': _roundMoney(amount),
+        'change': _roundMoney(change),
+        'appliedAmount': _roundMoney(appliedAmount),
         'timestamp': Timestamp.fromDate(timestamp),
+        if (splits.isNotEmpty)
+          'payments': splits.map((payment) => payment.toMap()).toList(),
       };
+
+  static double _roundMoney(double value) =>
+      double.parse(value.toStringAsFixed(2));
 }
 
 /// Order types for POS (Delivery is handled separately via Delivery Orders panel)
@@ -155,7 +175,8 @@ extension PosOrderTypeExtension on PosOrderType {
   /// Safely parse a string into a PosOrderType. Falls back to [takeaway].
   static PosOrderType fromString(String? value) {
     if (value == null || value.isEmpty) return PosOrderType.takeaway;
-    final cleaned = value.toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
+    final cleaned =
+        value.toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
     if (cleaned == 'dine_in' || cleaned == 'dinein') return PosOrderType.dineIn;
     return PosOrderType.takeaway;
   }

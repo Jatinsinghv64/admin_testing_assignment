@@ -10,7 +10,7 @@ import '../../constants.dart';
 import '../../services/pos/pos_service.dart';
 import '../../services/pos/pos_models.dart';
 import '../../Widgets/PrintingService.dart';
-import 'PosPaymentDialog.dart';
+import 'pos_payment_dialog.dart';
 
 class TableOrdersDialog extends StatelessWidget {
   final String tableId;
@@ -64,7 +64,8 @@ class TableOrdersDialog extends StatelessWidget {
               color: Colors.deepPurple.withOpacity(0.12),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.table_bar, color: Colors.deepPurple, size: 24),
+            child:
+                const Icon(Icons.table_bar, color: Colors.deepPurple, size: 24),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -83,7 +84,8 @@ class TableOrdersDialog extends StatelessWidget {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
                         color: Colors.red.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(6),
@@ -156,7 +158,8 @@ class TableOrdersDialog extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Padding(
             padding: EdgeInsets.all(40),
-            child: Center(child: CircularProgressIndicator(color: Colors.deepPurple)),
+            child: Center(
+                child: CircularProgressIndicator(color: Colors.deepPurple)),
           );
         }
 
@@ -181,7 +184,8 @@ class TableOrdersDialog extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.check_circle_outline, size: 48, color: Colors.green[300]),
+                  Icon(Icons.check_circle_outline,
+                      size: 48, color: Colors.green[300]),
                   const SizedBox(height: 12),
                   Text(
                     'No active orders',
@@ -198,13 +202,22 @@ class TableOrdersDialog extends StatelessWidget {
           );
         }
 
-        // Calculate grand total
-        double grandTotal = 0;
+        double outstandingTotal = 0;
+        bool allServedAndPaid = orders.isNotEmpty;
+        final payableOrders = <DocumentSnapshot>[];
         for (final doc in orders) {
           final data = doc.data() as Map<String, dynamic>;
-          grandTotal += (data['totalAmount'] ?? 0).toDouble();
+          final outstanding = PosService.getOutstandingAmount(data);
+          outstandingTotal += outstanding;
+          if (outstanding > 0.001) {
+            payableOrders.add(doc);
+          }
+          if (PosService.getOrderStatus(data) != AppConstants.statusServed ||
+              PosService.getPaymentStatus(data) != 'paid') {
+            allServedAndPaid = false;
+          }
         }
-        grandTotal = double.parse(grandTotal.toStringAsFixed(2));
+        outstandingTotal = double.parse(outstandingTotal.toStringAsFixed(2));
 
         return Column(
           mainAxisSize: MainAxisSize.min,
@@ -230,9 +243,13 @@ class TableOrdersDialog extends StatelessWidget {
                 },
               ),
             ),
-            // Pay All footer (only if >1 order)
-            if (orders.length > 1)
-              _buildPayAllFooter(context, orders, grandTotal),
+            _buildPayAllFooter(
+              context,
+              orders,
+              payableOrders,
+              outstandingTotal,
+              allServedAndPaid,
+            ),
           ],
         );
       },
@@ -243,7 +260,9 @@ class TableOrdersDialog extends StatelessWidget {
   Widget _buildPayAllFooter(
     BuildContext context,
     List<DocumentSnapshot> orders,
-    double grandTotal,
+    List<DocumentSnapshot> payableOrders,
+    double outstandingTotal,
+    bool allServedAndPaid,
   ) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -262,89 +281,125 @@ class TableOrdersDialog extends StatelessWidget {
                 style: TextStyle(fontSize: 12, color: Colors.grey[500]),
               ),
               Text(
-                '${AppConstants.currencySymbol}${grandTotal.toStringAsFixed(2)}',
+                '${AppConstants.currencySymbol}${outstandingTotal.toStringAsFixed(2)}',
                 style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                   color: Colors.black87,
                 ),
               ),
+              Text(
+                outstandingTotal > 0.001
+                    ? 'Outstanding balance'
+                    : 'No payment due',
+                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+              ),
             ],
           ),
           const Spacer(),
-        // Print Button
-        if (orders.isNotEmpty)
+          // Print Button
+          if (orders.isNotEmpty)
+            SizedBox(
+              height: 46,
+              child: OutlinedButton.icon(
+                onPressed: () =>
+                    PrintingService.printReceipt(context, orders.first),
+                icon: const Icon(Icons.print, size: 20),
+                label: const Text('Print',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.deepPurple,
+                  side: const BorderSide(color: Colors.deepPurple),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                ),
+              ),
+            ),
+          if (payableOrders.isNotEmpty) ...[
+            const SizedBox(width: 12),
+            SizedBox(
+              height: 46,
+              child: ElevatedButton.icon(
+                onPressed: () =>
+                    _payAllOrders(context, payableOrders, outstandingTotal),
+                icon: const Icon(Icons.payments, size: 20),
+                label: const Text(
+                  'Collect Payment',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green[600],
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(width: 12),
+          // Complete Order & Free Table Button
           SizedBox(
             height: 46,
-            child: OutlinedButton.icon(
-              onPressed: () => PrintingService.printReceipt(context, orders.first),
-              icon: const Icon(Icons.print, size: 20),
-              label: const Text('Print', style: TextStyle(fontWeight: FontWeight.bold)),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.deepPurple,
-                side: const BorderSide(color: Colors.deepPurple),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ElevatedButton.icon(
+              onPressed: !allServedAndPaid
+                  ? null
+                  : () async {
+                      final pos = context.read<PosService>();
+
+                      // This method handles the dual-check internally
+                      final success = await pos.completeOrderWithDualCheck(
+                        tableId: tableId,
+                        branchIds: branchIds,
+                      );
+
+                      if (!success && context.mounted) {
+                        _showCompletionErrorDialog(context);
+                      } else if (context.mounted) {
+                        Navigator.pop(context); // Close dialog on success
+                      }
+                    },
+              icon: const Icon(Icons.check_circle, size: 20),
+              label: const Text(
+                'Complete & Free Table',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
               ),
             ),
           ),
-        const SizedBox(width: 12),
-        // Complete Order & Free Table Button
-        SizedBox(
-          height: 46,
-          child: ElevatedButton.icon(
-            onPressed: () async {
-              final pos = context.read<PosService>();
-              
-              // This method handles the dual-check internally
-              final success = await pos.completeOrderWithDualCheck(
-                tableId: tableId,
-                branchIds: branchIds,
-              );
-              
-              if (!success && context.mounted) {
-                _showCompletionErrorDialog(context);
-              } else if (context.mounted) {
-                Navigator.pop(context); // Close dialog on success
-              }
-            },
-            icon: const Icon(Icons.check_circle, size: 20),
-            label: const Text(
-              'Complete & Free Table',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.deepPurple,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-void _showCompletionErrorDialog(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Cannot Complete Order'),
-      content: const Text(
-        'A table can only be freed when ALL orders are both SERVED and PAID.\n\n'
-        'Please ensure kitchen has served all items and payment is collected.',
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: const Text('OK'),
+    );
+  }
+
+  void _showCompletionErrorDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cannot Complete Order'),
+        content: const Text(
+          'A table can only be freed when ALL orders are both SERVED and PAID.\n\n'
+          'Please ensure kitchen has served all items and payment is collected.',
         ),
-      ],
-    ),
-  );
-}
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _payAllOrders(
     BuildContext context,
     List<DocumentSnapshot> orders,
@@ -370,7 +425,7 @@ void _showCompletionErrorDialog(BuildContext context) {
 
     try {
       final userScope = context.read<UserScopeService>();
-      
+
       await posService.submitOrderWithPayment(
         userScope: userScope,
         branchIds: branchIds,
@@ -380,14 +435,15 @@ void _showCompletionErrorDialog(BuildContext context) {
 
       if (context.mounted) {
         Navigator.pop(context); // close table orders dialog
-        
+
         // Success feedback already shown by PosPaymentDialog via Snackbars
       }
     } catch (e) {
+      final errorMessage = PosService.displayError(e);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Payment failed: $e'),
+            content: Text('Payment failed: $errorMessage'),
             backgroundColor: Colors.red,
           ),
         );
@@ -421,11 +477,10 @@ class _TableOrderCard extends StatefulWidget {
 }
 
 class _TableOrderCardState extends State<_TableOrderCard> {
-  bool _isPaying = false;
   bool _isDeleting = false;
 
-  String get _status =>
-      AppConstants.normalizeStatus(widget.data['status']?.toString() ?? AppConstants.statusPending);
+  String get _status => AppConstants.normalizeStatus(
+      widget.data['status']?.toString() ?? AppConstants.statusPending);
 
   @override
   Widget build(BuildContext context) {
@@ -481,7 +536,6 @@ class _TableOrderCardState extends State<_TableOrderCard> {
   }
 
   Widget _buildCardHeader(String orderNumber, dynamic timestamp) {
-    final statusText = AppConstants.getStatusDisplayText(_status);
     Color statusColor;
     switch (_status) {
       case AppConstants.statusPending:
@@ -529,7 +583,8 @@ class _TableOrderCardState extends State<_TableOrderCard> {
           // Cancel Order button
           IconButton(
             onPressed: () => _confirmCancelOrder(context),
-            icon: const Icon(Icons.cancel_outlined, color: Colors.redAccent, size: 20),
+            icon: const Icon(Icons.cancel_outlined,
+                color: Colors.redAccent, size: 20),
             tooltip: 'Cancel Order',
             constraints: const BoxConstraints(),
             padding: EdgeInsets.zero,
@@ -586,7 +641,8 @@ class _TableOrderCardState extends State<_TableOrderCard> {
     if (items.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Text('No items', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        child: Text('No items',
+            style: TextStyle(color: Colors.grey, fontSize: 12)),
       );
     }
 
@@ -625,7 +681,8 @@ class _TableOrderCardState extends State<_TableOrderCard> {
                 Expanded(
                   child: Text(
                     name,
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w500),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -640,8 +697,10 @@ class _TableOrderCardState extends State<_TableOrderCard> {
                 ),
                 const SizedBox(width: 4),
                 IconButton(
-                  onPressed: () => _confirmRemoveItem(context, items.indexOf(item)),
-                  icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
+                  onPressed: () =>
+                      _confirmRemoveItem(context, items.indexOf(item)),
+                  icon: const Icon(Icons.delete_outline,
+                      size: 16, color: Colors.redAccent),
                   tooltip: 'Remove Item',
                   constraints: const BoxConstraints(),
                   padding: const EdgeInsets.all(4),
@@ -703,13 +762,15 @@ class _TableOrderCardState extends State<_TableOrderCard> {
       ),
       child: Text(
         isPaid ? 'PAID' : 'UNPAID',
-        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: color),
+        style:
+            TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: color),
       ),
     );
   }
 
   Widget _buildCardFooter(BuildContext context, double totalAmount) {
-    final normalized = AppConstants.normalizeStatus(widget.data['status']?.toString() ?? '');
+    final normalized =
+        AppConstants.normalizeStatus(widget.data['status']?.toString() ?? '');
     final statusColors = {
       AppConstants.statusPending: Colors.orange,
       AppConstants.statusPreparing: Colors.blue,
@@ -759,72 +820,17 @@ class _TableOrderCardState extends State<_TableOrderCard> {
     );
   }
 
-  Future<void> _paySingleOrder(BuildContext context, double totalAmount) async {
-    if (_isPaying) return;
-
-    final posService = context.read<PosService>();
-
-    final result = await showDialog<PosPayment>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => ChangeNotifierProvider.value(
-        value: posService,
-        child: PosPaymentDialog(
-          totalAmount: totalAmount,
-          branchIds: widget.branchIds,
-          onPaymentComplete: (_) {},
-          returnPaymentOnly: true,
-        ),
-      ),
-    );
-
-    if (result == null) return; // cancelled
-
-    setState(() => _isPaying = true);
-
-    try {
-      final userScope = context.read<UserScopeService>();
-      await posService.completePayment(
-        orderId: widget.orderId,
-        payment: result,
-        userScope: userScope,
-        tableId: widget.tableId,
-        branchIds: widget.branchIds,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Order #${OrderNumberHelper.getDisplayNumber(widget.data, orderId: widget.orderId)} paid',
-            ),
-            backgroundColor: Colors.green[600],
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Payment failed: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isPaying = false);
-    }
-  }
-
   Future<void> _confirmCancelOrder(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Cancel Order?'),
-        content: const Text('Are you sure you want to cancel this entire order? This will restore ingredient stock.'),
+        content: const Text(
+            'Are you sure you want to cancel this entire order? This will restore ingredient stock.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep Order')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep Order')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -836,9 +842,10 @@ class _TableOrderCardState extends State<_TableOrderCard> {
 
     if (confirmed == true && mounted) {
       // Local status check to avoid masked exception issues on Web
-      if (_status == AppConstants.statusPrepared || _status == AppConstants.statusServed) {
+      if (_status == AppConstants.statusPrepared ||
+          _status == AppConstants.statusServed) {
         _showRestrictedActionDialog(
-          context, 
+          context,
           "Cannot cancel an order that is already ${_status.toUpperCase()}.",
         );
         return;
@@ -856,13 +863,17 @@ class _TableOrderCardState extends State<_TableOrderCard> {
         );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Order cancelled successfully'), backgroundColor: Colors.green),
+            const SnackBar(
+                content: Text('Order cancelled successfully'),
+                backgroundColor: Colors.green),
           );
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to cancel order: $e'), backgroundColor: Colors.red),
+            SnackBar(
+                content: Text('Failed to cancel order: $e'),
+                backgroundColor: Colors.red),
           );
         }
       } finally {
@@ -876,9 +887,12 @@ class _TableOrderCardState extends State<_TableOrderCard> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Remove Item?'),
-        content: const Text('Are you sure you want to remove this item from the order?'),
+        content: const Text(
+            'Are you sure you want to remove this item from the order?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep Item')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep Item')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -890,9 +904,10 @@ class _TableOrderCardState extends State<_TableOrderCard> {
 
     if (confirmed == true && mounted) {
       // Local status check to avoid masked exception issues on Web
-      if (_status == AppConstants.statusPrepared || _status == AppConstants.statusServed) {
+      if (_status == AppConstants.statusPrepared ||
+          _status == AppConstants.statusServed) {
         _showRestrictedActionDialog(
-          context, 
+          context,
           "Cannot remove items from an order that is already ${_status.toUpperCase()}.",
         );
         return;
@@ -910,13 +925,17 @@ class _TableOrderCardState extends State<_TableOrderCard> {
         );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Item removed successfully'), backgroundColor: Colors.green),
+            const SnackBar(
+                content: Text('Item removed successfully'),
+                backgroundColor: Colors.green),
           );
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to remove item: $e'), backgroundColor: Colors.red),
+            SnackBar(
+                content: Text('Failed to remove item: $e'),
+                backgroundColor: Colors.red),
           );
         }
       } finally {
@@ -953,7 +972,8 @@ class _TableOrderCardState extends State<_TableOrderCard> {
             onPressed: () => Navigator.pop(ctx),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.deepPurple,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
             child: const Text('OK', style: TextStyle(color: Colors.white)),
           ),

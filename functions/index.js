@@ -22,6 +22,8 @@ const GCP_LOCATION = process.env.FUNCTION_REGION || 'us-central1';
 const QUEUE_NAME = process.env.ASSIGNMENT_QUEUE_NAME || 'assignment-timeout-queue';
 const ASSIGNMENT_TIMEOUT_SECONDS = parseInt(process.env.ASSIGNMENT_TIMEOUT_SECONDS, 10) || 120;
 const TASK_HANDLER_URL = process.env.TASK_HANDLER_URL || `https://${GCP_LOCATION}-${GCP_PROJECT_ID}.cloudfunctions.net/processAssignmentTask`;
+const KITCHEN_RESPONSE_TIMEOUT_SECONDS = parseInt(process.env.KITCHEN_RESPONSE_TIMEOUT_SECONDS, 10) || 30;
+const KITCHEN_TASK_HANDLER_URL = process.env.KITCHEN_TASK_HANDLER_URL || `https://${GCP_LOCATION}-${GCP_PROJECT_ID}.cloudfunctions.net/processKitchenResponseTask`;
 const SERVICE_ACCOUNT_EMAIL = process.env.SERVICE_ACCOUNT_EMAIL || `${GCP_PROJECT_ID}@appspot.gserviceaccount.com`;
 
 // --- RIDER ASSIGNMENT LIMITS (Production Safeguards) ---
@@ -103,6 +105,84 @@ function isTerminalStatus(status) {
         'pickedup',
         STATUS.PICKED_UP
     ].includes(normalized);
+}
+
+function getKitchenAutoAcceptDeadline(data) {
+    const rawDeadline = data?.autoAcceptDeadline || data?.kitchenResponseDeadline;
+    if (!rawDeadline) return null;
+
+    try {
+        if (typeof rawDeadline.toDate === 'function') {
+            return rawDeadline.toDate();
+        }
+    } catch (error) {
+        logger.warn('Failed to convert kitchen auto-accept deadline via toDate()', error);
+    }
+
+    if (rawDeadline instanceof Date) {
+        return rawDeadline;
+    }
+
+    if (typeof rawDeadline === 'string') {
+        const parsed = new Date(rawDeadline);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    return null;
+}
+
+function resolveKitchenAutoAcceptDelaySeconds(data) {
+    const deadline = getKitchenAutoAcceptDeadline(data);
+    if (!deadline) return KITCHEN_RESPONSE_TIMEOUT_SECONDS;
+    const seconds = Math.ceil((deadline.getTime() - Date.now()) / 1000);
+    return seconds > 0 ? seconds : 0;
+}
+
+function validateTaskAuth(req, res, handlerName) {
+    const authHeader = req.headers.authorization || '';
+
+    if (!authHeader.startsWith('Bearer ')) {
+        if (process.env.FUNCTIONS_EMULATOR === 'true') {
+            logger.warn(`⚠️ [DEV] ${handlerName} called without auth in emulator`);
+            return true;
+        }
+
+        logger.error(`🔒 SECURITY: Unauthorized access attempt to ${handlerName}`, {
+            ip: req.ip || req.headers['x-forwarded-for'],
+            userAgent: req.headers['user-agent'],
+        });
+        res.status(401).json({
+            error: 'Unauthorized',
+            message: 'Authentication required'
+        });
+        return false;
+    }
+
+    const token = authHeader.substring(7);
+    if (token.split('.').length !== 3) {
+        logger.error(`🔒 SECURITY: Invalid token format for ${handlerName}`);
+        res.status(401).json({
+            error: 'Unauthorized',
+            message: 'Invalid authentication token format'
+        });
+        return false;
+    }
+
+    logger.log(`✅ ${handlerName} request authenticated via OIDC token`);
+    return true;
+}
+
+async function scheduleKitchenResponseTimeoutTask(orderId, data) {
+    const status = normalizeStatus(data?.status);
+    const source = (data?.source || '').toString().toLowerCase();
+
+    if (source !== 'pos' || status !== STATUS.PENDING) {
+        return false;
+    }
+
+    const delaySeconds = resolveKitchenAutoAcceptDelaySeconds(data);
+    await createKitchenResponseTask(orderId, delaySeconds);
+    return true;
 }
 
 /**
@@ -699,6 +779,151 @@ exports.autoManageRestaurantStatus = onSchedule("every 1 minutes", async (event)
         logger.error("🔥 Error in autoManageRestaurantStatus:", error);
     }
 });
+
+exports.scheduleKitchenResponseTimeout = onDocumentCreated(
+    { document: "Orders/{orderId}", region: GCP_LOCATION },
+    async (event) => {
+        const data = event.data?.data();
+        const orderId = event.params.orderId;
+
+        try {
+            const scheduled = await scheduleKitchenResponseTimeoutTask(orderId, data);
+            if (scheduled) {
+                logger.log(`[${orderId}] Scheduled kitchen response timeout on create`);
+            }
+        } catch (error) {
+            logger.error(`[${orderId}] Failed to schedule kitchen response timeout on create`, error);
+        }
+
+        return null;
+    }
+);
+
+exports.rescheduleKitchenResponseTimeout = onDocumentUpdated(
+    { document: "Orders/{orderId}", region: GCP_LOCATION },
+    async (event) => {
+        const beforeData = event.data.before.data();
+        const afterData = event.data.after.data();
+        const orderId = event.params.orderId;
+
+        const beforeStatus = normalizeStatus(beforeData.status);
+        const afterStatus = normalizeStatus(afterData.status);
+        if (beforeStatus === STATUS.PENDING || afterStatus !== STATUS.PENDING) {
+            return null;
+        }
+
+        try {
+            const scheduled = await scheduleKitchenResponseTimeoutTask(orderId, afterData);
+            if (scheduled) {
+                logger.log(`[${orderId}] Rescheduled kitchen response timeout after entering pending`);
+            }
+        } catch (error) {
+            logger.error(`[${orderId}] Failed to reschedule kitchen response timeout`, error);
+        }
+
+        return null;
+    }
+);
+
+exports.processKitchenResponseTask = onRequest({ region: GCP_LOCATION }, async (req, res) => {
+    const validationErrors = [];
+    if (!req.body?.orderId || typeof req.body.orderId !== 'string') {
+        validationErrors.push('orderId is required and must be a string');
+    } else if (req.body.orderId.length > 128 || !/^[A-Za-z0-9_-]+$/.test(req.body.orderId)) {
+        validationErrors.push('orderId contains invalid characters or is too long');
+    }
+
+    const unexpectedFields = Object.keys(req.body || {}).filter((key) => key !== 'orderId');
+    if (unexpectedFields.length > 0) {
+        validationErrors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!validateTaskAuth(req, res, 'processKitchenResponseTask')) {
+        return;
+    }
+
+    if (validationErrors.length > 0) {
+        logger.error('Kitchen task input validation failed:', validationErrors);
+        return res.status(400).json({
+            error: 'Bad Request',
+            message: 'Input validation failed',
+            details: process.env.FUNCTIONS_EMULATOR === 'true' ? validationErrors : undefined,
+        });
+    }
+
+    const sanitizedOrderId = req.body.orderId.replace(/[^A-Za-z0-9_-]/g, '');
+
+    try {
+        const orderRef = db.collection('Orders').doc(sanitizedOrderId);
+        const result = await db.runTransaction(async (transaction) => {
+            const orderDoc = await transaction.get(orderRef);
+
+            if (!orderDoc.exists) {
+                return { outcome: 'missing' };
+            }
+
+            const orderData = orderDoc.data();
+            const source = (orderData.source || '').toString().toLowerCase();
+            const status = normalizeStatus(orderData.status);
+
+            if (source !== 'pos') {
+                return { outcome: 'skipped_source', source };
+            }
+
+            if (status !== STATUS.PENDING) {
+                return { outcome: 'already_handled', status };
+            }
+
+            const deadline = getKitchenAutoAcceptDeadline(orderData);
+            if (deadline && deadline.getTime() > Date.now() + 1000) {
+                return {
+                    outcome: 'not_due',
+                    delaySeconds: Math.ceil((deadline.getTime() - Date.now()) / 1000),
+                };
+            }
+
+            transaction.update(orderRef, {
+                status: STATUS.PREPARING,
+                orderStatus: STATUS.PREPARING,
+                preparingAt: FieldValue.serverTimestamp(),
+                acceptedAt: FieldValue.serverTimestamp(),
+                acceptedBy: 'Auto-Accept System',
+                autoAcceptedAt: FieldValue.serverTimestamp(),
+                isAutoAccepted: true,
+                kitchenDecisionStatus: 'auto_accepted',
+                kitchenDecisionAt: FieldValue.serverTimestamp(),
+                kitchenDecisionBy: 'Auto-Accept System',
+                lastUpdated: FieldValue.serverTimestamp(),
+                'timestamps.preparing': FieldValue.serverTimestamp(),
+                _cloudFunctionUpdate: true,
+            });
+
+            return { outcome: 'auto_accepted' };
+        });
+
+        if (result.outcome === 'not_due') {
+            const delaySeconds = Math.max(result.delaySeconds || 0, 1);
+            await createKitchenResponseTask(sanitizedOrderId, delaySeconds);
+            logger.log(`[${sanitizedOrderId}] Kitchen task fired early; rescheduled for ${delaySeconds}s`);
+            return res.status(200).json({ message: 'Not due yet - rescheduled' });
+        }
+
+        if (result.outcome === 'auto_accepted') {
+            logger.log(`[${sanitizedOrderId}] Auto-accepted pending POS order after kitchen timeout`);
+            return res.status(200).json({ message: 'Order auto-accepted' });
+        }
+
+        logger.log(`[${sanitizedOrderId}] Kitchen timeout task finished with outcome: ${result.outcome}`);
+        return res.status(200).json({ message: result.outcome });
+    } catch (error) {
+        logger.error(`🔥 CRITICAL ERROR in processKitchenResponseTask for order ${sanitizedOrderId}:`, error);
+        return res.status(200).json({
+            error: 'Internal Error Handled',
+            message: 'Kitchen timeout processing failed safely.'
+        });
+    }
+});
+
 exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, res) => {
     // ===============================================================
     // SECURITY: Input Validation Schema
@@ -1507,6 +1732,31 @@ async function createAssignmentTask(orderId, riderId, delayInSeconds) {
         logger.log(`[${orderId}] Created timeout task for rider ${riderId}, delay: ${delayInSeconds}s`);
     } catch (err) {
         logger.error(`[${orderId}] Failed to create assignment task:`, err);
+        throw err;
+    }
+}
+
+async function createKitchenResponseTask(orderId, delayInSeconds) {
+    try {
+        const client = new CloudTasksClient();
+        const queuePath = client.queuePath(GCP_PROJECT_ID, GCP_LOCATION, QUEUE_NAME);
+        const task = {
+            httpRequest: {
+                httpMethod: 'POST',
+                url: KITCHEN_TASK_HANDLER_URL,
+                headers: { 'Content-Type': 'application/json' },
+                body: Buffer.from(JSON.stringify({ orderId })).toString('base64'),
+                oidcToken: {
+                    serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
+                    audience: KITCHEN_TASK_HANDLER_URL,
+                },
+            },
+            scheduleTime: { seconds: Math.floor(Date.now() / 1000) + delayInSeconds },
+        };
+        await client.createTask({ parent: queuePath, task });
+        logger.log(`[${orderId}] Created kitchen response timeout task, delay: ${delayInSeconds}s`);
+    } catch (err) {
+        logger.error(`[${orderId}] Failed to create kitchen response task:`, err);
         throw err;
     }
 }

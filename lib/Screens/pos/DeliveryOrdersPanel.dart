@@ -340,7 +340,7 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
               crossAxisCount: 3,
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
-              childAspectRatio: 0.9, // Slightly taller for better fit
+              childAspectRatio: 0.8, // Increased height to prevent overflow
             ),
             itemCount: orders.length,
             itemBuilder: (context, index) {

@@ -121,6 +121,13 @@ service cloud.firestore {
       // Only staff can create/delete orders, must pass validation
       allow create: if isStaff() && isValidOrderData();
       allow delete: if isStaff();
+
+      // POS inventory operations are written as immutable audit docs
+      match /inventoryOperations/{operationId} {
+        allow read: if isAuthenticated() && (isStaff() || isRider());
+        allow create: if isStaff();
+        allow update, delete: if false;
+      }
     }
 
     // =====================
@@ -182,6 +189,13 @@ service cloud.firestore {
         isSuperAdmin() ||
         hasAccessToBranch(branchId)
       );
+    }
+
+    // =====================
+    // COUNTERS
+    // =====================
+    match /Counters/{counterId} {
+      allow read, write: if isStaff();
     }
 
     // =====================

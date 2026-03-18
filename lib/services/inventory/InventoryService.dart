@@ -262,7 +262,7 @@ class InventoryService {
     required String recordedBy,
   }) async {
     try {
-      await _db.runTransaction((transaction) async {
+      await _db.runTransaction<void>((transaction) async {
         await performDeductionInTransaction(
           transaction: transaction,
           orderId: orderId,
@@ -292,13 +292,13 @@ class InventoryService {
     // Guard: already deducted
     if (orderData['inventoryDeducted'] == true) return;
 
-    final rawItems = (orderData['items'] ?? orderData['orderItems'] ?? [])
-        as List<dynamic>;
+    final rawData = orderData['items'] ?? orderData['orderItems'] ?? [];
+    final rawItems = List<dynamic>.from(rawData is Iterable ? rawData : []);
     
     if (rawItems.isNotEmpty) {
       await deductItemsInTransaction(
         transaction: transaction,
-        items: rawItems.cast<Map<String, dynamic>>(),
+        items: rawItems.map((e) => Map<String, dynamic>.from(e as Map)).toList(),
         branchIds: branchIds.isNotEmpty ? branchIds : List<String>.from(orderData['branchIds'] ?? []),
         orderId: orderId,
         recordedBy: recordedBy,
@@ -340,7 +340,7 @@ class InventoryService {
     required String recordedBy,
   }) async {
     try {
-      await _db.runTransaction((transaction) async {
+      await _db.runTransaction<void>((transaction) async {
         final orderRef = _db.collection(AppConstants.collectionOrders).doc(orderId);
         final orderSnap = await transaction.get(orderRef);
         
@@ -351,13 +351,13 @@ class InventoryService {
         if (orderData['inventoryDeducted'] != true) return;
         if (orderData['inventoryRestored'] == true) return;
 
-        final rawItems = (orderData['items'] ?? orderData['orderItems'] ?? [])
-            as List<dynamic>;
+        final rawData = orderData['items'] ?? orderData['orderItems'] ?? [];
+        final rawItems = List<dynamic>.from(rawData is Iterable ? rawData : []);
         
         if (rawItems.isNotEmpty) {
           await restoreItemsInTransaction(
             transaction: transaction,
-            items: rawItems.cast<Map<String, dynamic>>(),
+            items: rawItems.map((e) => Map<String, dynamic>.from(e as Map)).toList(),
             branchIds: branchIds.isNotEmpty ? branchIds : List<String>.from(orderData['branchIds'] ?? []),
             orderId: orderId,
             recordedBy: recordedBy,
@@ -422,7 +422,7 @@ class InventoryService {
     final List<Function()> pendingWrites = [];
 
     for (int itemIndex = 0; itemIndex < items.length; itemIndex++) {
-      final item = items[itemIndex];
+      final item = items[itemIndex] as Map<String, dynamic>;
       final menuItemId = (item['menuItemId'] ?? item['itemId'] ?? item['productId'] ?? '').toString();
       final int itemQuantity = (item['quantity'] as num?)?.toInt() ?? 1;
       if (menuItemId.isEmpty || itemQuantity <= 0) continue;
@@ -431,8 +431,9 @@ class InventoryService {
       final menuSnap = await transaction.get(menuRef);
       if (!menuSnap.exists) continue;
 
-      final recipeId = (menuSnap.data()?['recipeId'] ?? '').toString();
-      DocumentSnapshot? recipeSnap;
+      final menuData = menuSnap.data() as Map<String, dynamic>?;
+      final recipeId = (menuData?['recipeId'] ?? '').toString();
+      DocumentSnapshot<Map<String, dynamic>>? recipeSnap;
 
       if (recipeId.isNotEmpty) {
         final recipeRef = _db.collection(AppConstants.collectionRecipes).doc(recipeId);
@@ -440,13 +441,14 @@ class InventoryService {
       }
 
       if (recipeSnap == null || !recipeSnap.exists) {
-        // Fallback: If no direct recipeId, we skip. 
-        // We removed the .get() query here because it violates transaction rules on Web.
         continue;
       }
 
-      final recipeData = recipeSnap?.data() as Map<String, dynamic>? ?? {};
-      final recipeIngredients = List<Map<String, dynamic>>.from(recipeData['ingredients'] ?? []);
+      final recipeData = recipeSnap.data()!;
+      final recipeIngredientsRaw = recipeData['ingredients'] ?? [];
+      final recipeIngredients = List<dynamic>.from(recipeIngredientsRaw is Iterable ? recipeIngredientsRaw : [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
       if (recipeIngredients.isEmpty) continue;
 
       for (final ri in recipeIngredients) {

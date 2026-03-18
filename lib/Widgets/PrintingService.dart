@@ -50,20 +50,14 @@ class PrintingService {
       }
     }
 
-    // 2. Load Regular Font (for English text - more complete glyph set)
+    // 2. Load Regular Font (for English text)
+    // Note: Roboto-Regular.ttf is not in assets, we use Google Fonts fallback.
     if (_cachedRegularFont == null) {
       try {
-        final fontData =
-            await rootBundle.load("assets/fonts/Roboto-Regular.ttf");
-        _cachedRegularFont = pw.Font.ttf(fontData);
-        debugPrint("✅ Regular font loaded successfully");
-      } catch (e) {
-        try {
-          _cachedRegularFont = await PdfGoogleFonts.robotoRegular();
-          debugPrint("✅ Fallback Regular font (Google Fonts) loaded");
-        } catch (e2) {
-          debugPrint("⚠️ Roboto font not found, will use default");
-        }
+        _cachedRegularFont = await PdfGoogleFonts.robotoRegular();
+        debugPrint("✅ Regular font (Google Fonts) loaded");
+      } catch (e2) {
+        debugPrint("⚠️ Roboto font failed: $e2");
       }
     }
 
@@ -119,7 +113,8 @@ class PrintingService {
 
       // Logo Image Provider
       final pw.ImageProvider? logoImage = _cachedLogo != null
-          ? pw.MemoryImage(_cachedLogo!.buffer.asUint8List())
+          ? pw.MemoryImage(_cachedLogo!.buffer.asUint8List(
+              _cachedLogo!.offsetInBytes, _cachedLogo!.lengthInBytes))
           : null;
 
       await Printing.layoutPdf(onLayout: (PdfPageFormat format) async {

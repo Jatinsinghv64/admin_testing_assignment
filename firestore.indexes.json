@@ -23,6 +23,24 @@
                     "arrayConfig": "CONTAINS"
                 },
                 {
+                    "fieldPath": "source",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "cancelledAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
                     "fieldPath": "status",
                     "order": "ASCENDING"
                 }

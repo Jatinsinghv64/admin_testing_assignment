@@ -139,11 +139,12 @@ class IngredientService {
 
     double actualDelta = delta;
 
-    await _db.runTransaction((tx) async {
+    await _db.runTransaction<void>((tx) async {
       final snap = await tx.get(docRef);
       if (!snap.exists) throw Exception('Ingredient not found');
 
-      final current = (snap.data()!['currentStock'] as num?)?.toDouble() ?? 0.0;
+      final ingData = snap.data() as Map<String, dynamic>;
+      final current = (ingData['currentStock'] as num?)?.toDouble() ?? 0.0;
       final desired = current + delta;
 
       // Clamp: never go below 0

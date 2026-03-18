@@ -238,8 +238,9 @@ class AppConstants {
 
   /// Check if payment method is cash-based (requires collection)
   static bool isCashPayment(String? paymentMethod) {
-    if (paymentMethod == null || paymentMethod.isEmpty)
+    if (paymentMethod == null || paymentMethod.isEmpty) {
       return true; // Default to cash
+    }
     final p = paymentMethod.toLowerCase();
     return p == 'cash' || p == 'cod' || p == 'cash_on_delivery';
   }
@@ -274,6 +275,8 @@ class AppConstants {
         return 'GOOGLE PAY';
       case 'wallet':
         return 'WALLET';
+      case 'split':
+        return 'SPLIT BILL';
       default:
         return paymentMethod.toUpperCase();
     }

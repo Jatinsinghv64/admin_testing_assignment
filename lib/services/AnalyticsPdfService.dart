@@ -37,7 +37,8 @@ class AnalyticsPdfService {
     Uint8List? logoBytes;
     try {
       final logoData = await rootBundle.load('assets/mitranlogo.jpg');
-      logoBytes = logoData.buffer.asUint8List();
+      logoBytes = logoData.buffer
+          .asUint8List(logoData.offsetInBytes, logoData.lengthInBytes);
     } catch (e) {
       // Logo not found, continue without it
     }
