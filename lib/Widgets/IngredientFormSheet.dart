@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -317,6 +318,7 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
                     child: TextFormField(
                       controller: _costCtr,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                       decoration: InputDecoration(
                         labelText: 'Cost/Unit *',
                         prefixIcon: const Icon(Icons.attach_money),
@@ -330,6 +332,7 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
                     child: TextFormField(
                       controller: _stockCtr,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                       decoration: InputDecoration(
                         labelText: widget.existing == null ? 'Initial Stock' : 'Current Stock',
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -342,6 +345,7 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
                     child: TextFormField(
                       controller: _minThresholdCtr,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                       decoration: InputDecoration(
                         labelText: 'Min Alert',
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),

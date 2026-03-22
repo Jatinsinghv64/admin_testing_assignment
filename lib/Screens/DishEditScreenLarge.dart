@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -82,6 +83,7 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
   double _liveRecipeCost = 0.0;
   List<IngredientModel> _allIngredients = [];
   bool _loadingIngredients = true;
+  final Map<int, TextEditingController> _ingredientQtyControllers = {};
 
   bool get _isEdit => widget.doc != null;
 
@@ -208,28 +210,9 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
     _linkedRecipeId = data['recipeId'] as String?;
 
     // Fetch all recipes async for the picker
-    FirebaseFirestore.instance
-        .collection('recipes')
-        .where('isActive', isEqualTo: true)
-        .orderBy('name')
-        .get()
-        .then((snap) {
-      if (!mounted) return;
-      final recipes = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
-      setState(() {
-        _allRecipes = recipes;
-        _loadingRecipes = false;
-        // Auto-fill from existing linked recipe
-        if (_linkedRecipeId != null) {
-          _applyRecipeLink(
-              recipes.firstWhere((r) => r['id'] == _linkedRecipeId,
-                  orElse: () => {}),
-              currentPrice: double.tryParse(_priceController.text) ?? 0.0);
-        }
-      });
-    }).catchError((_) {
-      if (mounted) setState(() => _loadingRecipes = false);
-    });
+    // NOTE: We avoid .orderBy('name') to prevent needing a composite Firestore index.
+    // Sort client-side instead.
+    _fetchAllRecipes();
 
     if (_linkedRecipeId != null) {
       _loadLinkedRecipeDetails(_linkedRecipeId!);
@@ -252,6 +235,34 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
         _recalcLiveRecipeCost();
       }
     });
+  }
+
+  Future<void> _fetchAllRecipes() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('recipes')
+          .where('isActive', isEqualTo: true)
+          .get();
+      if (!mounted) return;
+      final recipes = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+      // Sort client-side by name to avoid needing a composite Firestore index
+      recipes.sort((a, b) => (a['name']?.toString() ?? '').toLowerCase()
+          .compareTo((b['name']?.toString() ?? '').toLowerCase()));
+      setState(() {
+        _allRecipes = recipes;
+        _loadingRecipes = false;
+        // Auto-fill from existing linked recipe
+        if (_linkedRecipeId != null) {
+          _applyRecipeLink(
+              recipes.firstWhere((r) => r['id'] == _linkedRecipeId,
+                  orElse: () => {}),
+              currentPrice: double.tryParse(_priceController.text) ?? 0.0);
+        }
+      });
+    } catch (e) {
+      debugPrint('Error fetching recipes for picker: $e');
+      if (mounted) setState(() => _loadingRecipes = false);
+    }
   }
 
   Future<void> _loadLinkedRecipeDetails(String recipeId) async {
@@ -315,6 +326,9 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
     _sortOrderController.dispose();
     _discountedPriceController.dispose();
     _caloriesController.dispose();
+    for (var controller in _ingredientQtyControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -1885,8 +1899,21 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
   }
 
   Widget _buildIngredientRow(int idx, RecipeIngredientLine line) {
-    final qtyCtrl = TextEditingController(text: line.quantity > 0 ? line.quantity.toString() : '');
-    qtyCtrl.selection = TextSelection.fromPosition(TextPosition(offset: qtyCtrl.text.length));
+    // Get or create stable controller for this row
+    final qtyCtrl = _ingredientQtyControllers.putIfAbsent(idx, () {
+      final ctrl = TextEditingController(
+          text: line.quantity > 0 ? line.quantity.toString() : '');
+      return ctrl;
+    });
+
+    // Update text if it's different but not if user is actively typing a dot
+    final currentText = qtyCtrl.text;
+    final modelValue = line.quantity;
+    final parsedValue = double.tryParse(currentText) ?? 0.0;
+
+    if (modelValue != parsedValue && !currentText.endsWith('.')) {
+      qtyCtrl.text = modelValue > 0 ? modelValue.toString() : '';
+    }
 
     final selectedIngredient = _allIngredients.where((i) => i.id == line.ingredientId).firstOrNull;
 
@@ -1944,6 +1971,9 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
             child: TextFormField(
               controller: qtyCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+              ],
               style: const TextStyle(fontSize: 13),
               decoration: InputDecoration(
                 labelText: 'Qty',
@@ -1952,7 +1982,7 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
                 isDense: true,
               ),
               onChanged: (v) {
-                final qty = double.tryParse(v) ?? 0;
+                final qty = double.tryParse(v) ?? 0.0;
                 setState(() {
                   _ingredientLines[idx] = line.copyWith(quantity: qty);
                   _recalcLiveRecipeCost();
@@ -2032,17 +2062,58 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
 
   Future<void> _showRecipePickerDialog() async {
     String localSearch = '';
+    bool localLoading = _loadingRecipes;
+
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          title: const Text('Link Recipe', style: TextStyle(fontWeight: FontWeight.bold)),
+          title: Row(
+            children: [
+              const Expanded(
+                child: Text('Link Recipe', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              // Refresh button
+              IconButton(
+                icon: const Icon(Icons.refresh, size: 20),
+                tooltip: 'Refresh recipes',
+                onPressed: () async {
+                  setLocal(() => localLoading = true);
+                  await _fetchAllRecipes();
+                  if (ctx.mounted) setLocal(() => localLoading = false);
+                },
+              ),
+            ],
+          ),
           content: SizedBox(
             width: 400,
-            height: 400,
+            height: 450,
             child: Column(
               children: [
+                // Create New Recipe button
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(ctx); // close picker first
+                      await _createNewRecipeInline();
+                    },
+                    icon: const Icon(Icons.add_circle_outline, size: 18),
+                    label: const Text('Create New Recipe'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.deepPurple,
+                      side: const BorderSide(color: Colors.deepPurple),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+                // Search
                 TextField(
                   decoration: InputDecoration(
                     hintText: 'Search recipes...',
@@ -2061,30 +2132,58 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
                   ),
                   onChanged: (v) => setLocal(() => localSearch = v.toLowerCase()),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 Expanded(
-                  child: Builder(builder: (_) {
+                  child: localLoading
+                      ? const Center(child: CircularProgressIndicator(color: Colors.deepPurple))
+                      : Builder(builder: (_) {
                     final filtered = _allRecipes.where((r) {
                       final name = r['name']?.toString().toLowerCase() ?? '';
                       return localSearch.isEmpty || name.contains(localSearch);
                     }).toList();
                     if (filtered.isEmpty) {
-                      return const Center(
-                          child: Text('No recipes found', style: TextStyle(color: Colors.grey)));
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.menu_book_outlined, size: 40, color: Colors.grey.shade300),
+                            const SizedBox(height: 12),
+                            Text(
+                              _allRecipes.isEmpty
+                                  ? 'No recipes found.\nCreate one using the button above.'
+                                  : 'No matching recipes.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.grey.shade500),
+                            ),
+                          ],
+                        ),
+                      );
                     }
                     return ListView.builder(
                       itemCount: filtered.length,
                       itemBuilder: (_, i) {
                         final recipe = filtered[i];
                         final isSelected = recipe['id'] == _linkedRecipeId;
+                        final ingCount = (recipe['ingredients'] as List?)?.length ?? 0;
                         return ListTile(
                           dense: true,
+                          leading: Container(
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? Colors.deepPurple.withOpacity(0.1)
+                                  : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(Icons.menu_book, size: 18,
+                                color: isSelected ? Colors.deepPurple : Colors.grey),
+                          ),
                           title: Text(recipe['name'] ?? '',
                               style: TextStyle(
                                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                   color: isSelected ? Colors.deepPurple : Colors.black87)),
                           subtitle: Text(
-                            'Cost: QAR ${((recipe['totalCost'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
+                            '$ingCount ingredients · QAR ${((recipe['totalCost'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
                             style: const TextStyle(fontSize: 12, color: Colors.grey),
                           ),
                           trailing: isSelected
@@ -2093,6 +2192,10 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
                           onTap: () {
                             _applyRecipeLink(recipe,
                                 currentPrice: double.tryParse(_priceController.text) ?? 0.0);
+                            // Also load the full recipe details (ingredients/instructions)
+                            if (recipe['id'] != null) {
+                              _loadLinkedRecipeDetails(recipe['id'] as String);
+                            }
                             Navigator.pop(ctx);
                           },
                         );
@@ -2114,6 +2217,65 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
     );
   }
 
+  /// Creates a new recipe inline from DishEditScreen, auto-naming it
+  /// after the current dish and auto-linking it.
+  Future<void> _createNewRecipeInline() async {
+    final userScope = context.read<UserScopeService>();
+    final branchIds = userScope.branchIds;
+    final dishName = _nameController.text.trim();
+    final newRecipeId = FirebaseFirestore.instance.collection('recipes').doc().id;
+
+    final newRecipe = RecipeModel(
+      id: newRecipeId,
+      branchIds: branchIds,
+      name: dishName.isNotEmpty ? '$dishName Recipe' : 'New Recipe',
+      description: '',
+      ingredients: [],
+      totalCost: 0,
+      instructions: [''],
+      prepTimeMinutes: _preparationTime,
+      yield_: '',
+      servingSize: '',
+      difficultyLevel: 'medium',
+      categoryTags: [],
+      allergenTags: [],
+      photoUrls: [],
+      linkedMenuItemId: widget.doc?.id,
+      linkedMenuItemName: dishName,
+      isActive: true,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+
+    try {
+      await _recipeService.addRecipe(newRecipe);
+      if (!mounted) return;
+      setState(() {
+        _linkedRecipeId = newRecipeId;
+        _linkedRecipeName = newRecipe.name;
+        _ingredientLines = [];
+        _instructions = [''];
+        _liveRecipeCost = 0;
+        _foodCostPct = 0;
+      });
+      // Refresh recipes list so new recipe appears in picker
+      await _fetchAllRecipes();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('"${newRecipe.name}" created and linked! Add ingredients below.'),
+          backgroundColor: Colors.green,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error creating recipe: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
+
   Widget _buildRightInfoSidebar() {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -2124,6 +2286,8 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildCostSummaryCard(),
+          const SizedBox(height: 20),
           _buildAllergenProfileCard(),
           const SizedBox(height: 20),
           _buildInventoryForecastCard(),
@@ -2131,6 +2295,108 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
           _buildWeeklySalesCard(),
         ],
       ),
+    );
+  }
+
+  Widget _buildCostSummaryCard() {
+    final sellingPrice = double.tryParse(_priceController.text) ?? 0.0;
+    final dishCost = _liveRecipeCost;
+    final margin = sellingPrice > 0 ? ((sellingPrice - dishCost) / sellingPrice) * 100 : 0.0;
+    final foodCostPct = sellingPrice > 0 && dishCost > 0 ? (dishCost / sellingPrice) * 100 : 0.0;
+    final hasRecipe = _ingredientLines.isNotEmpty;
+
+    Color marginColor;
+    String marginLabel;
+    IconData marginIcon;
+    if (margin >= 60) {
+      marginColor = Colors.green;
+      marginLabel = 'Healthy';
+      marginIcon = Icons.trending_up_rounded;
+    } else if (margin >= 40) {
+      marginColor = Colors.orange;
+      marginLabel = 'Moderate';
+      marginIcon = Icons.trending_flat_rounded;
+    } else {
+      marginColor = Colors.red;
+      marginLabel = margin > 0 ? 'Low' : 'N/A';
+      marginIcon = margin > 0 ? Icons.trending_down_rounded : Icons.remove_rounded;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _rSurface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _rBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.account_balance_wallet_outlined, color: _rPrimary, size: 18),
+              const SizedBox(width: 8),
+              const Text('Cost Analysis', style: TextStyle(color: _rTextMain, fontSize: 14, fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (!hasRecipe)
+            const Text('Add recipe ingredients to see cost analysis.',
+                style: TextStyle(color: _rTextSubtle, fontSize: 12))
+          else ...[
+            // Selling Price
+            _costRow('Selling Price', 'QAR ${sellingPrice.toStringAsFixed(2)}', Colors.blue),
+            const SizedBox(height: 10),
+            // Dish Cost
+            _costRow('Total Dish Cost', 'QAR ${dishCost.toStringAsFixed(2)}', Colors.deepOrange),
+            const SizedBox(height: 10),
+            // Food Cost %
+            _costRow('Food Cost', '${foodCostPct.toStringAsFixed(1)}%', Colors.amber.shade700),
+            const SizedBox(height: 14),
+            // Margin Banner
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: marginColor.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: marginColor.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(marginIcon, color: marginColor, size: 20),
+                  const SizedBox(width: 10),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Profit Margin', style: TextStyle(color: marginColor, fontSize: 11, fontWeight: FontWeight.w500)),
+                      Text('${margin.toStringAsFixed(1)}%', style: TextStyle(color: marginColor, fontSize: 20, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: marginColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(marginLabel, style: TextStyle(color: marginColor, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _costRow(String label, String value, Color color) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(color: _rTextSubtle, fontSize: 12)),
+        Text(value, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.bold)),
+      ],
     );
   }
 
@@ -2231,61 +2497,238 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
   }
 
   Widget _buildInventoryForecastCard() {
+    final hasRecipe = _ingredientLines.isNotEmpty;
+
+    // Build forecast data
+    int? maxServings;
+    String? bottleneckName;
+    final List<Map<String, dynamic>> forecastRows = [];
+
+    if (hasRecipe && _allIngredients.isNotEmpty) {
+      for (final line in _ingredientLines) {
+        if (line.ingredientId.isEmpty || line.quantity <= 0) continue;
+        final ingredient = _allIngredients.where((i) => i.id == line.ingredientId).firstOrNull;
+        if (ingredient == null) continue;
+
+        double recipeQty = line.quantity;
+        // Convert units if needed
+        if (line.unit.isNotEmpty && ingredient.unit.isNotEmpty && line.unit != ingredient.unit) {
+          final converted = IngredientService.convertUnit(recipeQty, line.unit, ingredient.unit);
+          if (converted != null) {
+            recipeQty = converted;
+          }
+        }
+
+        final int possible = recipeQty > 0 ? (ingredient.currentStock / recipeQty).floor() : 0;
+        String status;
+        Color statusColor;
+        if (possible <= 0) {
+          status = 'Out';
+          statusColor = Colors.red;
+        } else if (possible <= 5) {
+          status = 'Low';
+          statusColor = Colors.orange;
+        } else {
+          status = 'OK';
+          statusColor = Colors.green;
+        }
+
+        forecastRows.add({
+          'name': ingredient.name,
+          'stock': ingredient.currentStock,
+          'unit': ingredient.unit,
+          'possible': possible,
+          'status': status,
+          'statusColor': statusColor,
+        });
+
+        if (maxServings == null || possible < maxServings) {
+          maxServings = possible;
+          bottleneckName = ingredient.name;
+        }
+      }
+    }
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: _rSurface, borderRadius: BorderRadius.circular(12), border: Border.all(color: _rBorder)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-           const Text('Inventory Forecast', style: TextStyle(color: _rTextMain, fontSize: 14, fontWeight: FontWeight.w600)),
-           const SizedBox(height: 16),
-           const Text('Link a recipe and maintain ingredient stock to enable forecasting.', style: TextStyle(color: _rTextSubtle, fontSize: 12)),
+          const Text('Inventory Forecast', style: TextStyle(color: _rTextMain, fontSize: 14, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 16),
+          if (!hasRecipe)
+            const Text('Add recipe ingredients to enable forecasting.', style: TextStyle(color: _rTextSubtle, fontSize: 12))
+          else if (forecastRows.isEmpty)
+            const Text('No valid ingredient data to forecast.', style: TextStyle(color: _rTextSubtle, fontSize: 12))
+          else ...[
+            // Max servings banner
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: (maxServings != null && maxServings > 0 ? Colors.green : Colors.red).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: (maxServings != null && maxServings > 0 ? Colors.green : Colors.red).withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    maxServings != null && maxServings > 0 ? Icons.restaurant_rounded : Icons.warning_amber_rounded,
+                    color: maxServings != null && maxServings > 0 ? Colors.green : Colors.red,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Can make ${maxServings ?? 0} more servings',
+                          style: TextStyle(
+                            color: maxServings != null && maxServings > 0 ? Colors.green.shade800 : Colors.red.shade800,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        if (bottleneckName != null)
+                          Text(
+                            'Bottleneck: $bottleneckName',
+                            style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            // Ingredient rows
+            ...forecastRows.map((row) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 8, height: 8,
+                    decoration: BoxDecoration(
+                      color: row['statusColor'] as Color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      row['name'] as String,
+                      style: const TextStyle(fontSize: 12, color: _rTextMain),
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text(
+                    '${(row['stock'] as double).toStringAsFixed(1)} ${row['unit']}',
+                    style: const TextStyle(fontSize: 11, color: _rTextSubtle),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: (row['statusColor'] as Color).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${row['possible']}x',
+                      style: TextStyle(
+                        color: row['statusColor'] as Color,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )),
+          ],
         ],
       ),
     );
   }
   Widget _buildWeeklySalesCard() {
-    final heights = [0.4, 0.35, 0.55, 0.60, 0.85, 1.0, 0.90];
-    final labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    final now = DateTime.now();
+    final dayLabels = List.generate(7, (i) {
+      final d = now.subtract(Duration(days: 6 - i));
+      const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return names[d.weekday - 1];
+    });
+
+    final maxSale = _weeklySalesData.fold<double>(0.0, (a, b) => a > b ? a : b);
+    final totalSales = _weeklySalesData.fold<double>(0.0, (a, b) => a + b);
+    final hasData = maxSale > 0;
+
+    final heights = hasData
+        ? _weeklySalesData.map((v) => maxSale > 0 ? (v / maxSale).clamp(0.05, 1.0) : 0.05).toList()
+        : List.filled(7, 0.05);
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: _rSurface, borderRadius: BorderRadius.circular(12), border: Border.all(color: _rBorder)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Weekly Sales', style: TextStyle(color: _rTextMain, fontSize: 14, fontWeight: FontWeight.w600)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Weekly Sales', style: TextStyle(color: _rTextMain, fontSize: 14, fontWeight: FontWeight.w600)),
+              if (hasData)
+                Text('${totalSales.toStringAsFixed(0)} sold', style: TextStyle(color: Colors.green.shade700, fontSize: 12, fontWeight: FontWeight.w600)),
+            ],
+          ),
           const SizedBox(height: 16),
-          SizedBox(
-            height: 100,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: List.generate(7, (i) {
-                return Expanded(
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 2),
-                    child: FractionallySizedBox(
-                      heightFactor: heights[i],
-                      alignment: Alignment.bottomCenter,
+          if (_isLoadingSales)
+            const SizedBox(
+              height: 100,
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Colors.deepPurple)),
+            )
+          else if (!hasData && !_isEdit)
+            const SizedBox(
+              height: 100,
+              child: Center(child: Text('Save the dish first to see sales data.', style: TextStyle(color: _rTextSubtle, fontSize: 12))),
+            )
+          else ...[
+            SizedBox(
+              height: 100,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: List.generate(7, (i) {
+                  final h = heights[i];
+                  final qty = _weeklySalesData[i];
+                  return Expanded(
+                    child: Tooltip(
+                      message: '${qty.toStringAsFixed(0)} sold',
                       child: Container(
-                        decoration: BoxDecoration(
-                          color: _rPrimary.withOpacity(heights[i] > 0.8 ? 1.0 : heights[i] > 0.5 ? 0.6 : 0.2),
-                          borderRadius: const BorderRadius.vertical(top: Radius.circular(2))
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        child: FractionallySizedBox(
+                          heightFactor: h,
+                          alignment: Alignment.bottomCenter,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: _rPrimary.withOpacity(h > 0.8 ? 1.0 : h > 0.5 ? 0.6 : 0.25),
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  )
-                );
-              }),
+                  );
+                }),
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-             children: labels.map((l) => Expanded(child: Center(child: Text(l, style: const TextStyle(color: _rTextSubtle, fontSize: 10))))).toList(),
-          )
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: dayLabels.map((l) => Expanded(child: Center(child: Text(l, style: const TextStyle(color: _rTextSubtle, fontSize: 10))))).toList(),
+            ),
+          ],
         ],
-      )
+      ),
     );
   }
 }

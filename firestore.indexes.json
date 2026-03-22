@@ -451,6 +451,84 @@
                     "order": "ASCENDING"
                 }
             ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "shifts",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "staffName",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "dayOfWeek",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "shifts",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffEmail",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "dayOfWeek",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "attendance",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "date",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "clockIn",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "attendance",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "date",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "clockIn",
+                    "order": "DESCENDING"
+                }
+            ]
         }
     ],
     "fieldOverrides": []

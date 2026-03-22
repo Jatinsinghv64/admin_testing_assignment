@@ -17,6 +17,7 @@ import 'WasteEntryScreenLarge.dart';
 import '../../Widgets/IngredientFormSheet.dart';
 import '../../services/ingredients/IngredientService.dart';
 import '../../services/inventory/ExcelImportService.dart';
+import '../settings/RecipesScreen.dart';
 
 // ─── Theme Colors (matching app ThemeData: light bg, deepPurple primary) ─────
 class _InvColors {
@@ -51,6 +52,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
     'Waste',
     'Categories',
     'Menu Items',
+    'Recipes',
   ];
   static const _tabIcons = [
     Icons.dashboard_outlined,
@@ -59,12 +61,13 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
     Icons.delete_sweep_outlined,
     Icons.category_outlined,
     Icons.restaurant_menu_outlined,
+    Icons.menu_book_outlined,
   ];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
     _tabController.addListener(_onTabChanged);
   }
 
@@ -142,13 +145,14 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
     final idx = _tabController.index;
     final isCategoryTab = idx == 4;
     final isMenuTab = idx == 5;
+    final isRecipeTab = idx == 6;
 
     return Scaffold(
       backgroundColor: _InvColors.bgDark,
       body: Column(
         children: [
           // ─── Header ────────────────────────────────────────────────
-          _buildHeader(idx, isCategoryTab, isMenuTab),
+          _buildHeader(idx, isCategoryTab, isMenuTab, isRecipeTab),
           // ─── Search (for Categories / Menu Items) ──────────────────
           if (isCategoryTab || isMenuTab)
             Container(
@@ -197,6 +201,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                 const WasteDashboardScreen(),
                 _CategoriesManagementTab(searchQuery: _searchQuery),
                 _MenuItemsManagementTab(searchQuery: _searchQuery),
+                const RecipesScreen(),
               ],
             ),
           ),
@@ -205,7 +210,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
     );
   }
 
-  Widget _buildHeader(int idx, bool isCategoryTab, bool isMenuTab) {
+  Widget _buildHeader(int idx, bool isCategoryTab, bool isMenuTab, bool isRecipeTab) {
     return Container(
       padding: const EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 16),
       decoration: BoxDecoration(
@@ -301,6 +306,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                       }
                     },
                   ),
+                // Note: Recipes tab has its own built-in FAB from RecipesScreen
               ],
             ),
             const SizedBox(height: 18),
@@ -308,10 +314,10 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
-                children: List.generate(6, (i) {
+                children: List.generate(7, (i) {
                   final selected = _tabController.index == i;
                   return Padding(
-                    padding: EdgeInsets.only(right: i < 5 ? 8 : 0),
+                    padding: EdgeInsets.only(right: i < 6 ? 8 : 0),
                     child: Material(
                       color: Colors.transparent,
                       child: InkWell(

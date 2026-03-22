@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -29,7 +31,13 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
   int _totalOrdersToday = 0;
   double _avgRating = 0;
   int _activeIncidents = 0;
-  bool _loadingMetrics = true;
+
+  // Stream subscriptions
+  StreamSubscription? _activeRidersSub;
+  StreamSubscription? _todayOrdersSub;
+  StreamSubscription? _deliveredOrdersSub;
+  StreamSubscription? _incidentsSub;
+
 
   @override
   void initState() {
@@ -37,79 +45,103 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     _fetchMetrics();
   }
 
-  Future<void> _fetchMetrics() async {
-    setState(() => _loadingMetrics = true);
-    try {
-      // Active riders (online or on_delivery)
-      final activeQuery = await FirebaseFirestore.instance
-          .collection('Drivers')
-          .where('status', whereIn: ['online', 'on_delivery'])
-          .count()
-          .get();
-      _activeRiderCount = activeQuery.count ?? 0;
+  @override
+  void dispose() {
+    _activeRidersSub?.cancel();
+    _todayOrdersSub?.cancel();
+    _deliveredOrdersSub?.cancel();
+    _incidentsSub?.cancel();
+    super.dispose();
+  }
 
-      // Today's orders
-      final today = DateTime.now();
-      final startOfDay = DateTime(today.year, today.month, today.day);
-      final endOfDay = startOfDay.add(const Duration(days: 1));
-      final ordersToday = await FirebaseFirestore.instance
-          .collection('Orders')
-          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-          .where('timestamp', isLessThan: Timestamp.fromDate(endOfDay))
-          .get();
-      _totalOrdersToday = ordersToday.docs.length;
+  void _fetchMetrics() {
+    // 1. Active riders (online or on_delivery)
+    _activeRidersSub = FirebaseFirestore.instance
+        .collection('Drivers')
+        .where('status', whereIn: ['online', 'on_delivery'])
+        .snapshots()
+        .listen((snapshot) {
+      if (mounted) {
+        setState(() {
+          _activeRiderCount = snapshot.docs.length;
+        });
+      }
+    });
 
-      // Average rating of all delivered orders
-      final deliveredOrders = await FirebaseFirestore.instance
-          .collection('Orders')
-          .where('status', isEqualTo: 'delivered')
-          .get();
+    // 2. Today's orders
+    final today = DateTime.now();
+    final startOfDay = DateTime(today.year, today.month, today.day);
+    final endOfDay = startOfDay.add(const Duration(days: 1));
+    _todayOrdersSub = FirebaseFirestore.instance
+        .collection('Orders')
+        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+        .where('timestamp', isLessThan: Timestamp.fromDate(endOfDay))
+        .snapshots()
+        .listen((snapshot) {
+      if (mounted) {
+        setState(() {
+          _totalOrdersToday = snapshot.docs.length;
+        });
+      }
+    });
+
+    // 3. Delivered orders for rating and delivery time
+    _deliveredOrdersSub = FirebaseFirestore.instance
+        .collection('Orders')
+        .where('status', isEqualTo: 'delivered')
+        .snapshots()
+        .listen((snapshot) {
       double totalRating = 0;
       int ratedCount = 0;
-      for (var doc in deliveredOrders.docs) {
-        final data = doc.data();
-        final raw = data['riderRating'];
-        if (raw is num) {
-          totalRating += raw.toDouble();
-          ratedCount++;
-        } else if (raw is String) {
-          final parsed = double.tryParse(raw);
-          if (parsed != null && parsed > 0) {
-            totalRating += parsed;
-            ratedCount++;
-          }
-        }
-      }
-      _avgRating = ratedCount > 0 ? totalRating / ratedCount : 0;
-
-      // Active incidents: orders with status 'issue' or similar (adjust to your data)
-      final incidents = await FirebaseFirestore.instance
-          .collection('Orders')
-          .where('status', whereIn: ['issue', 'cancelled'])
-          .count()
-          .get();
-      _activeIncidents = incidents.count ?? 0;
-
-      // Average delivery time (in minutes) for delivered orders with a duration field
-      // Assuming you have a field 'deliveryDuration' in minutes
       double totalDuration = 0;
       int durationCount = 0;
-      for (var doc in deliveredOrders.docs) {
+
+      for (var doc in snapshot.docs) {
         final data = doc.data();
+        
+        // Rating
+        final rawRating = data['riderRating'];
+        double? ratingVal;
+        if (rawRating is num) {
+          ratingVal = rawRating.toDouble();
+        } else if (rawRating is String) {
+          ratingVal = double.tryParse(rawRating);
+        }
+        if (ratingVal != null && ratingVal > 0) {
+          totalRating += ratingVal;
+          ratedCount++;
+        }
+
+        // Duration
         final duration = data['deliveryDuration'];
         if (duration is num) {
           totalDuration += duration.toDouble();
           durationCount++;
         }
       }
-      _avgDeliveryTime = durationCount > 0 ? totalDuration / durationCount : 0;
 
-      if (mounted) setState(() => _loadingMetrics = false);
-    } catch (e) {
-      debugPrint('Error fetching metrics: $e');
-      if (mounted) setState(() => _loadingMetrics = false);
-    }
+      if (mounted) {
+        setState(() {
+          _avgRating = ratedCount > 0 ? totalRating / ratedCount : 0;
+          _avgDeliveryTime = durationCount > 0 ? totalDuration / durationCount : 0;
+        });
+      }
+    });
+
+    // 4. Active incidents
+    _incidentsSub = FirebaseFirestore.instance
+        .collection('Orders')
+        .where('status', whereIn: ['issue', 'cancelled'])
+        .snapshots()
+        .listen((snapshot) {
+      if (mounted) {
+        setState(() {
+          _activeIncidents = snapshot.docs.length;
+        });
+      }
+    });
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -154,9 +186,11 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
-      body: Column(
-        children: [
-          // ========== TOP APP BAR ==========
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            // ========== TOP APP BAR ==========
+
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             decoration: BoxDecoration(
@@ -203,74 +237,24 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                         borderRadius: BorderRadius.circular(8)),
                   ),
                 ),
-                const SizedBox(width: 16),
-                // Notifications
-                IconButton(
-                  icon: Icon(Icons.notifications_outlined,
-                      color: theme.iconTheme.color),
-                  onPressed: () {},
-                ),
-                const SizedBox(width: 8),
-                // Profile avatar (dummy)
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: theme.primaryColor.withOpacity(0.2),
-                  backgroundImage: const NetworkImage(
-                      'https://via.placeholder.com/150'), // Replace with real avatar
-                ),
               ],
             ),
           ),
 
-          // ========== MAIN CONTENT ==========
-          Expanded(
-            child: Padding(
+
+            // ========== MAIN CONTENT ==========
+            Padding(
               padding: const EdgeInsets.all(24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header with title and export button
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Rider Management',
-                            style: TextStyle(
-                                fontSize: 28, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _loadingMetrics
-                                ? 'Loading...'
-                                : 'Monitoring $_activeRiderCount active riders across delivery zones.',
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                        ],
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          // Export placeholder
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('Export feature coming soon')),
-                          );
-                        },
-                        icon: const Icon(Icons.download),
-                        label: const Text('Export Data'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: theme.primaryColor,
-                          side: BorderSide(color: theme.primaryColor),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 14),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
-                    ],
+
+                  // Top metrics info
+                  Text(
+                    'Monitoring $_activeRiderCount active riders across delivery zones.',
+                    style: TextStyle(color: Colors.grey[600]),
                   ),
+
                   const SizedBox(height: 24),
 
                   // Performance Metrics Row (real data)
@@ -278,16 +262,19 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                   const SizedBox(height: 24),
 
                   // Three‑column grid
-                  Expanded(
+                  SizedBox(
+                    height: 800, // Constrained height for full page scroll
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+
                         // LEFT COLUMN: Rider list
                         Container(
                           width: 320,
                           margin: const EdgeInsets.only(right: 16),
                           child: _buildRiderList(query, theme.primaryColor),
                         ),
+
 
                         // MIDDLE COLUMN: Map + Active tracking
                         Expanded(
@@ -343,62 +330,22 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                 ],
               ),
             ),
-          ),
-
-          // ========== FOOTER ==========
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            decoration: BoxDecoration(
-              color: theme.cardColor,
-              border: Border(
-                  top: BorderSide(color: theme.primaryColor.withOpacity(0.1))),
-            ),
-            child: Row(
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: theme.primaryColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Text('Server Status: Normal',
-                        style: TextStyle(fontSize: 12)),
-                    const SizedBox(width: 24),
-                    const Icon(Icons.public, size: 14, color: Colors.grey),
-                    const SizedBox(width: 8),
-                    const Text('Region: North America East',
-                        style: TextStyle(fontSize: 12)),
-                  ],
-                ),
-                const Spacer(),
-                Text(
-                  'Last sync: ${_getLastSync()}',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  String _getLastSync() {
-    // You can compute a real timestamp if you have one
-    return '2 minutes ago';
-  }
+
+
+
 
   Widget _buildMetricsRow(Color primary) {
-    if (_loadingMetrics) {
-      return const LinearProgressIndicator();
-    }
-    return Row(
-      children: [
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+
         _MetricCard(
           title: 'Avg. Delivery Time',
           value: '${_avgDeliveryTime.toStringAsFixed(1)} min',
@@ -423,17 +370,19 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
           color: primary,
         ),
         const SizedBox(width: 16),
-        _MetricCard(
-          title: 'Active Incidents',
-          value: '$_activeIncidents',
-          change: 'Low',
-          progress: _activeIncidents / 10, // adjust scale
-          color: primary,
-          isIncident: true,
-        ),
-      ],
+          _MetricCard(
+            title: 'Active Incidents',
+            value: '$_activeIncidents',
+            change: 'Low',
+            progress: _activeIncidents / 10, // adjust scale
+            color: primary,
+            isIncident: true,
+          ),
+        ],
+      ),
     );
   }
+
 
   Widget _buildRiderList(Query<Map<String, dynamic>> query, Color primary) {
     return Container(
@@ -593,7 +542,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                 Container(
                   width: 8,
                   height: 8,
-                  decoration: BoxDecoration(color: primary, shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle),
+
                 ),
                 const SizedBox(width: 8),
                 const Text(
@@ -660,9 +610,10 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                                   shape: BoxShape.circle,
                                   border: Border.all(
                                       color: data['status'] == 'online'
-                                          ? primary
+                                          ? Colors.green
                                           : Colors.orange,
                                       width: 2),
+
                                 ),
                                 child: CircleAvatar(
                                   radius: 16,
@@ -683,10 +634,11 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                                   height: 12,
                                   decoration: BoxDecoration(
                                     color: data['status'] == 'online'
-                                        ? primary
+                                        ? Colors.green
                                         : Colors.orange,
                                     shape: BoxShape.circle,
                                     border: Border.all(color: Colors.white),
+
                                   ),
                                 ),
                               ),
@@ -742,7 +694,7 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                     Container(
                         width: 12,
                         height: 12,
-                        decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
+                        decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle)),
                     const SizedBox(width: 4),
                     const Text('Available', style: TextStyle(fontSize: 12)),
                   ],
@@ -826,14 +778,21 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(data['name'] ?? 'Unknown',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold)),
+                                Text(
+                                  data['name'] ?? 'Unknown',
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold),
+                                ),
                                 Text(
                                   'Order: ${data['assignedOrderId'] ?? 'N/A'}',
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
                                   style: TextStyle(
                                       fontSize: 10, color: Colors.grey[600]),
                                 ),
+
                               ],
                             ),
                           ),
@@ -842,9 +801,10 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                             children: [
                               Text(
                                 '${(data['distanceToNext'] ?? '?')} km',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.bold, color: primary),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, color: Colors.orange),
                               ),
+
                               Text(
                                 'ETA: ${(data['eta'] ?? '?')} min',
                                 style: TextStyle(
@@ -884,16 +844,19 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
             child: Column(
               children: [
                 AppBar(
-                  title: Text('Live Tracking: ${(driverDoc.data() as Map)['name'] ?? 'Driver'}'),
+                  title: Text(
+                    'Live Tracking: ${(driverDoc.data() as Map)['name'] ?? 'Driver'}',
+                    style: const TextStyle(color: Colors.white),
+                  ),
                   backgroundColor: Theme.of(context).primaryColor,
                   foregroundColor: Colors.white,
                   shape: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                   ),
-                  leading: const Icon(Icons.location_on),
+                  leading: const Icon(Icons.location_on, color: Colors.white),
                   actions: [
                     IconButton(
-                      icon: const Icon(Icons.close),
+                      icon: const Icon(Icons.close, color: Colors.white),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ],
@@ -941,14 +904,15 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                             markers: [
                               Marker(
                                 point: position,
-                                width: 80,
+                                width: 120, // Increased to avoid clipping labels
                                 height: 80,
+
                                 child: Column(
                                   children: [
                                     Container(
-                                      padding: const EdgeInsets.all(4),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                       decoration: BoxDecoration(
-                                        color: Colors.white,
+                                        color: status == 'online' ? Colors.green : Theme.of(context).primaryColor,
                                         borderRadius: BorderRadius.circular(8),
                                         boxShadow: [
                                           BoxShadow(
@@ -960,18 +924,22 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                                       child: Text(
                                         data['name'] ?? 'Driver',
                                         style: const TextStyle(
-                                          fontSize: 10,
+                                          fontSize: 12,
                                           fontWeight: FontWeight.bold,
+                                          color: Colors.white,
                                         ),
                                       ),
                                     ),
+
+
                                     Icon(
                                       Icons.location_on,
                                       color: status == 'online'
-                                          ? Theme.of(context).primaryColor
-                                          : Colors.red,
+                                          ? Colors.green
+                                          : (status == 'on_delivery' ? Colors.orange : Colors.grey),
                                       size: 40,
                                     ),
+
                                   ],
                                 ),
                               ),
@@ -1035,11 +1003,12 @@ class _FilterChip extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            color: selected ? Colors.black : primary,
+            color: selected ? Colors.white : primary,
             fontWeight: FontWeight.bold,
             fontSize: 12,
           ),
         ),
+
       ),
     );
   }
@@ -1077,7 +1046,7 @@ class _DriverListTile extends StatelessWidget {
     Color statusColor;
     String statusLabel;
     if (status == 'online') {
-      statusColor = primaryColor;
+      statusColor = Colors.green;
       statusLabel = 'Available';
     } else if (status == 'on_delivery') {
       statusColor = Colors.orange;
@@ -1087,16 +1056,18 @@ class _DriverListTile extends StatelessWidget {
       statusLabel = 'Offline';
     }
 
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected ? primaryColor.withOpacity(0.05) : Colors.transparent,
+          color: isSelected ? primaryColor : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: isSelected ? primaryColor : Colors.transparent),
         ),
+
         child: Row(
           children: [
             Stack(
@@ -1132,16 +1103,25 @@ class _DriverListTile extends StatelessWidget {
                 children: [
                   Text(
                     name,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: isSelected ? primaryColor : Colors.black87,
+                      color: isSelected ? Colors.white : Colors.black87,
                     ),
                   ),
+
                   const SizedBox(height: 4),
                   Text(
                     vehicleType,
-                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: isSelected ? Colors.white.withOpacity(0.8) : Colors.grey[600]),
                   ),
+
+
                 ],
               ),
             ),
@@ -1150,9 +1130,10 @@ class _DriverListTile extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
-                color: statusColor,
+                color: isSelected ? Colors.white : statusColor,
               ),
             ),
+
           ],
         ),
       ),
@@ -1179,17 +1160,18 @@ class _MetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey[200]!),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    return Container(
+      width: 220, // Fixed width for scrolling
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -1227,9 +1209,10 @@ class _MetricCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
+      );
   }
+
+
 }
 
 // ========== DETAIL PANE ==========
@@ -1251,13 +1234,21 @@ class _DriverDetailPaneNew extends StatefulWidget {
 class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
   int? _realDeliveryCount;
   double? _realAverageRating;
-  bool _isLoadingStats = true;
+  StreamSubscription? _statsSub;
+
 
   @override
   void initState() {
     super.initState();
     _fetchRealStats();
   }
+
+  @override
+  void dispose() {
+    _statsSub?.cancel();
+    super.dispose();
+  }
+
 
   @override
   void didUpdateWidget(covariant _DriverDetailPaneNew oldWidget) {
@@ -1267,19 +1258,18 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
     }
   }
 
-  Future<void> _fetchRealStats() async {
-    setState(() => _isLoadingStats = true);
-    try {
-      final ordersSnapshot = await FirebaseFirestore.instance
-          .collection('Orders')
-          .where('riderId', isEqualTo: widget.driverDoc.id)
-          .where('status', isEqualTo: 'delivered')
-          .get();
-
+  void _fetchRealStats() {
+    _statsSub?.cancel();
+    _statsSub = FirebaseFirestore.instance
+        .collection('Orders')
+        .where('riderId', isEqualTo: widget.driverDoc.id)
+        .where('status', isEqualTo: 'delivered')
+        .snapshots()
+        .listen((snapshot) {
       double totalRating = 0.0;
       int ratedOrdersCount = 0;
 
-      for (final doc in ordersSnapshot.docs) {
+      for (final doc in snapshot.docs) {
         final data = doc.data();
         final rawRating = data['riderRating'];
         double? ratingVal;
@@ -1298,19 +1288,14 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
 
       if (mounted) {
         setState(() {
-          _realDeliveryCount = ordersSnapshot.docs.length;
+          _realDeliveryCount = snapshot.docs.length;
           _realAverageRating =
-          ratedOrdersCount > 0 ? totalRating / ratedOrdersCount : 0.0;
-          _isLoadingStats = false;
+              ratedOrdersCount > 0 ? totalRating / ratedOrdersCount : 0.0;
         });
       }
-    } catch (e) {
-      debugPrint('Error fetching real driver stats: $e');
-      if (mounted) {
-        setState(() => _isLoadingStats = false);
-      }
-    }
+    });
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -1318,124 +1303,124 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
     final data = widget.driverDoc.data() as Map<String, dynamic>;
     final name = data['name'] ?? 'Unknown';
     final vehicle = data['vehicle'] ?? {};
-
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey[200]!),
       ),
-      child: Column(
-        children: [
-          // Header with avatar and edit button
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: theme.primaryColor.withOpacity(0.1),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-            ),
-            child: Stack(
-              children: [
-                Column(
-                  children: [
-                    CircleAvatar(
-                      radius: 48,
-                      backgroundColor: Colors.white,
-                      backgroundImage: data['profileImageUrl'] != null
-                          ? NetworkImage(data['profileImageUrl'])
-                          : null,
-                      child: data['profileImageUrl'] == null
-                          ? Icon(Icons.person, size: 48, color: Colors.grey)
-                          : null,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      name,
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-                Positioned(
-                  top: 0,
-                  right: 0,
-                  child: IconButton(
-                    icon: Icon(Icons.edit, color: theme.primaryColor),
-                    onPressed: () {
-                      showDialog(
-                        context: context,
-                        builder: (context) => _DriverDialog(
-                          userScope: widget.userScope,
-                          driverDoc: widget.driverDoc
-                          as DocumentSnapshot<Map<String, dynamic>>,
-                        ),
-                      );
-                    },
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            // Header with avatar and edit button
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: theme.primaryColor.withOpacity(0.1),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+              child: Stack(
+                children: [
+                  Column(
+                    children: [
+                      CircleAvatar(
+                        radius: 48,
+                        backgroundColor: Colors.white,
+                        backgroundImage: data['profileImageUrl'] != null
+                            ? NetworkImage(data['profileImageUrl'])
+                            : null,
+                        child: data['profileImageUrl'] == null
+                            ? Icon(Icons.person, size: 48, color: Colors.grey)
+                            : null,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        name,
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
-          ),
-          // Contact and vehicle info
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _DetailRow(icon: Icons.phone, label: data['phone'] ?? 'N/A'),
-                _DetailRow(
-                    icon: Icons.motorcycle,
-                    label:
-                    '${vehicle['type'] ?? 'Unknown'} • ${vehicle['number'] ?? ''}'),
-                _DetailRow(icon: Icons.email, label: data['email'] ?? 'N/A'),
-                const SizedBox(height: 16),
-                // Stats row
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StatBox(
-                        label: 'Deliveries',
-                        value: _isLoadingStats ? '...' : '${_realDeliveryCount ?? 0}',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _StatBox(
-                        label: 'Rating',
-                        value: _isLoadingStats
-                            ? '...'
-                            : (_realAverageRating?.toStringAsFixed(1) ?? '0.0'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                // History button
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => _DriverOrderHistoryScreen(
-                            driverId: widget.driverDoc.id,
-                            driverName: name,
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: IconButton(
+                      icon: Icon(Icons.edit, color: theme.primaryColor),
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => _DriverDialog(
+                            userScope: widget.userScope,
+                            driverDoc: widget.driverDoc
+                            as DocumentSnapshot<Map<String, dynamic>>,
                           ),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.history),
-                    label: const Text('View Full History'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: theme.primaryColor,
-                      side: BorderSide(color: theme.primaryColor),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                        );
+                      },
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+            // Contact and vehicle info
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _DetailRow(icon: Icons.phone, label: data['phone'] ?? 'N/A'),
+                  _DetailRow(
+                      icon: Icons.motorcycle,
+                      label:
+                      '${vehicle['type'] ?? 'Unknown'} • ${vehicle['number'] ?? ''}'),
+                  _DetailRow(icon: Icons.email, label: data['email'] ?? 'N/A'),
+                  const SizedBox(height: 16),
+                  // Stats row
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _StatBox(
+                          label: 'Deliveries',
+                          value: '${_realDeliveryCount ?? 0}',
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _StatBox(
+                          label: 'Rating',
+                          value: _realAverageRating?.toStringAsFixed(1) ?? '0.0',
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+                  // History button
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => _DriverOrderHistoryScreen(
+                              driverId: widget.driverDoc.id,
+                              driverName: name,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.history),
+                      label: const Text('View Full History'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: theme.primaryColor,
+                        side: BorderSide(color: theme.primaryColor),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

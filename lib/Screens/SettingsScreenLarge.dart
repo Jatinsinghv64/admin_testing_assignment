@@ -8,15 +8,14 @@ import '../main.dart'; // UserScopeService
 import '../services/DashboardThemeService.dart'; // ✅ Added
 import '../Widgets/notification.dart'; // ✅ Added
 
-// Child Screens
-import 'AnalyticsScreen.dart';
-import 'BranchManagement.dart';
-import 'PromoSettingsScreen.dart';
+import 'analytics_screen_large.dart';
+import 'promotions_screen_large.dart';
+import 'branch_management_screen_large.dart';
 import 'OrderHistory.dart';
 import 'RestaurantTimingScreen.dart';
-import 'StaffManagementScreen.dart'; // Explicit import
+import 'staff_management_screen_large.dart';
 import 'TableManagement.dart';
-import 'settings/IngredientsAndRecipesScreen.dart';
+// Removal of unused ingredients import
 
 class SettingsScreenLarge extends StatefulWidget {
   const SettingsScreenLarge({super.key});
@@ -28,6 +27,7 @@ class SettingsScreenLarge extends StatefulWidget {
 class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
   // Navigation State
   String _selectedSection = 'timings'; // Default section
+  bool _isSidebarCollapsed = false; // ✅ Added
 
   @override
   Widget build(BuildContext context) {
@@ -40,8 +40,10 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
       body: Row(
         children: [
           // LEFT SIDEBAR (Navigation)
-          Container(
-            width: 300,
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            width: _isSidebarCollapsed ? 80 : 280,
             decoration: BoxDecoration(
               color: Colors.white,
               border: Border(right: BorderSide(color: Colors.grey[200]!)),
@@ -60,6 +62,7 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                           label: 'Timings',
                           id: 'timings',
                           isSelected: _selectedSection == 'timings',
+                          isCollapsed: _isSidebarCollapsed,
                           onTap: () =>
                               setState(() => _selectedSection = 'timings'),
                         ),
@@ -70,6 +73,7 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                           label: 'Order History',
                           id: 'history',
                           isSelected: _selectedSection == 'history',
+                          isCollapsed: _isSidebarCollapsed,
                           onTap: () =>
                               setState(() => _selectedSection = 'history'),
                         ),
@@ -79,6 +83,7 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                           label: 'Staff',
                           id: 'staff',
                           isSelected: _selectedSection == 'staff',
+                          isCollapsed: _isSidebarCollapsed,
                           onTap: () =>
                               setState(() => _selectedSection = 'staff'),
                         ),
@@ -87,6 +92,7 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                           label: 'Branches',
                           id: 'branches',
                           isSelected: _selectedSection == 'branches',
+                          isCollapsed: _isSidebarCollapsed,
                           onTap: () =>
                               setState(() => _selectedSection = 'branches'),
                         ),
@@ -95,6 +101,7 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                           label: 'Analytics',
                           id: 'analytics',
                           isSelected: _selectedSection == 'analytics',
+                          isCollapsed: _isSidebarCollapsed,
                           onTap: () =>
                               setState(() => _selectedSection = 'analytics'),
                         ),
@@ -106,6 +113,7 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                           label: 'Promotions',
                           id: 'promotions',
                           isSelected: _selectedSection == 'promotions',
+                          isCollapsed: _isSidebarCollapsed,
                           onTap: () =>
                               setState(() => _selectedSection = 'promotions'),
                         ),
@@ -116,6 +124,7 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                           label: 'Tables',
                           id: 'tables',
                           isSelected: _selectedSection == 'tables',
+                          isCollapsed: _isSidebarCollapsed,
                           onTap: () =>
                               setState(() => _selectedSection = 'tables'),
                         ),
@@ -128,8 +137,9 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                         label: 'Dark Mode',
                         id: 'dark_mode',
                         isSelected: false,
+                        isCollapsed: _isSidebarCollapsed,
                         iconColor: Colors.amber,
-                        trailing: Switch(
+                        trailing: _isSidebarCollapsed ? null : Switch(
                           value: context.watch<DashboardThemeService>().isDarkMode,
                           onChanged: (value) {
                             context.read<DashboardThemeService>().toggleDarkMode();
@@ -145,6 +155,7 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                         label: 'Notifications',
                         id: 'notifications',
                         isSelected: false,
+                        isCollapsed: _isSidebarCollapsed,
                         iconColor: Colors.red,
                         onTap: () => _showNotificationSettings(context),
                       ),
@@ -155,6 +166,7 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                         label: 'Sign Out',
                         id: 'logout',
                         isSelected: false,
+                        isCollapsed: _isSidebarCollapsed,
                         iconColor: Colors.red,
                         textColor: Colors.red,
                         onTap: () => _showLogoutDialog(context, authService),
@@ -194,14 +206,14 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
         return const OrderHistoryScreen();
       // Placeholder for StaffManagementScreen check
       case 'staff':
-        return const StaffManagementScreen();
+        return const StaffManagementScreenLarge();
       case 'branches':
-        return const BranchManagementScreen();
+        return const BranchManagementScreenLarge();
       case 'analytics':
-        return const AnalyticsScreen();
+        return const AnalyticsScreenLarge();
 
       case 'promotions':
-        return const PromoSettingsScreen();
+        return const PromotionsScreenLarge();
       case 'tables':
         return const TableManagementScreen();
       default:
@@ -222,54 +234,69 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
         : 'U';
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.symmetric(
+        horizontal: _isSidebarCollapsed ? 0 : 16,
+        vertical: 12,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: Colors.grey[100]!)),
       ),
       child: Row(
+        mainAxisAlignment: _isSidebarCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
         children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: Colors.deepPurple,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Center(
-              child: Text(
-                initials,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
+          if (!_isSidebarCollapsed) ...[
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.deepPurple,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Center(
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  identifier,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    identifier,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  userScope.role.toUpperCase(),
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
+                  Text(
+                    userScope.role.toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.grey,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
+          ],
+          IconButton(
+            onPressed: () => setState(() => _isSidebarCollapsed = !_isSidebarCollapsed),
+            icon: Icon(
+              _isSidebarCollapsed ? Icons.menu : Icons.menu_open,
+              color: Colors.deepPurple,
+              size: 26,
+            ),
+            tooltip: _isSidebarCollapsed ? 'Expand' : 'Collapse',
           ),
         ],
       ),
@@ -277,6 +304,7 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
   }
 
   Widget _buildSectionHeader(String title) {
+    if (_isSidebarCollapsed) return const Divider(height: 32, indent: 16, endIndent: 16);
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
       child: Text(
@@ -368,6 +396,7 @@ class _NavItem extends StatelessWidget {
   final Widget? trailing;
   final Color? iconColor;
   final Color? textColor;
+  final bool isCollapsed; // ✅ Added
 
   const _NavItem({
     required this.icon,
@@ -378,6 +407,7 @@ class _NavItem extends StatelessWidget {
     this.trailing,
     this.iconColor,
     this.textColor,
+    this.isCollapsed = false, // ✅ Added
   });
 
   @override
@@ -392,27 +422,41 @@ class _NavItem extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: EdgeInsets.symmetric(
+            horizontal: isCollapsed ? 0 : 16,
+            vertical: 12,
+          ),
           decoration: BoxDecoration(
-            color: isSelected ? Colors.deepPurple.shade50 : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
+            color: isSelected
+                ? Colors.deepPurple.withValues(alpha: 0.08)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected
+                  ? Colors.deepPurple.withValues(alpha: 0.2)
+                  : Colors.transparent,
+            ),
           ),
           child: Row(
+            mainAxisAlignment: isCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
             children: [
-              Icon(icon, size: 20, color: effectiveIconColor),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    color: effectiveTextColor,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                    fontSize: 14,
+              Icon(icon, size: 24, color: effectiveIconColor),
+              if (!isCollapsed) ...[
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: effectiveTextColor,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
-              ),
-              if (trailing != null) trailing!,
+                if (trailing != null) trailing!,
+              ],
             ],
           ),
         ),

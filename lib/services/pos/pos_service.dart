@@ -2233,10 +2233,31 @@ class PosService extends ChangeNotifier {
         if (ingredientId.isEmpty) continue;
 
         final double recipeQty = (ri['quantity'] as num?)?.toDouble() ?? 0.0;
-        final deductQty = recipeQty * orderedCount;
+        final String recipeUnit = (ri['unit'] ?? '').toString();
+        double deductQty = recipeQty * orderedCount;
         if (deductQty <= 0) continue;
 
         try {
+          // Fetch the ingredient to get its storage unit for conversion
+          final ingDoc = await db
+              .collection(AppConstants.collectionIngredients)
+              .doc(ingredientId)
+              .get();
+          if (!ingDoc.exists) continue;
+
+          final ingData = ingDoc.data()!;
+          final String ingUnit = (ingData['unit'] ?? '').toString();
+
+          // Convert recipe unit → ingredient storage unit if they differ
+          if (recipeUnit.isNotEmpty && ingUnit.isNotEmpty && recipeUnit != ingUnit) {
+            final converted = IngredientService.convertUnit(deductQty, recipeUnit, ingUnit);
+            if (converted == null) {
+              debugPrint('⚠️ POS: Cannot convert $recipeUnit→$ingUnit for ingredient $ingredientId, skipping');
+              continue;
+            }
+            deductQty = converted;
+          }
+
           await ingredientService.adjustStock(
             ingredientId: ingredientId,
             branchIds: branchIds,

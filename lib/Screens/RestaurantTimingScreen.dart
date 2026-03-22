@@ -7,7 +7,10 @@ import '../main.dart';
 import '../Widgets/BranchFilterService.dart';
 import '../Widgets/BranchSelectorDialog.dart';
 import '../constants.dart';
+import '../utils/responsive_helper.dart';
 import 'ConnectionUtils.dart';
+import 'RestaurantTimingScreenLarge.dart';
+
 
 class RestaurantTimingScreen extends StatefulWidget {
   const RestaurantTimingScreen({super.key});
@@ -1074,72 +1077,42 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: !_hasUnsavedChanges,
-      onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) return;
-        final shouldPop = await _onWillPop();
-        if (shouldPop && mounted) {
-          Navigator.of(context).pop();
-        }
-      },
-      child: Scaffold(
-        backgroundColor: Colors.grey[50],
-        appBar: AppBar(
-          title: const Text('Restaurant Timings',
-              style: TextStyle(
-                  color: Colors.black87, fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.white,
-          elevation: 0,
-          centerTitle: true,
-          iconTheme: const IconThemeData(color: Colors.black87),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () async {
-              if (_hasUnsavedChanges) {
-                final shouldPop = await _onWillPop();
-                if (shouldPop && mounted) {
-                  Navigator.of(context).pop();
-                }
-              } else {
-                Navigator.of(context).pop();
-              }
-            },
-          ),
-          actions: [
-            if (!_isLoading && !_hasError && _selectedBranchId != null)
-              TextButton.icon(
-                onPressed: _isSaving ? null : _saveTimings,
-                icon: _isSaving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.green))
-                    : Icon(Icons.check_circle,
-                        color: _hasUnsavedChanges ? Colors.green : Colors.grey),
-                label: Text(
-                  _isSaving ? 'Saving...' : 'Save',
-                  style: TextStyle(
-                    color: _hasUnsavedChanges ? Colors.green : Colors.grey,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            const SizedBox(width: 8),
-          ],
-        ),
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: Colors.deepPurple)),
+      );
+    }
+
+    if (_hasError) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Restaurant Timings')),
         body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 800),
-            child: _buildBody(),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const SizedBox(height: 16),
+              Text(_errorMessage ?? 'An error occurred'),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _initializeScreen,
+                child: const Text('Retry'),
+              ),
+            ],
           ),
         ),
-      ),
+      );
+    }
+
+    return ResponsiveLayout(
+      mobile: _buildMobileLayout(),
+      desktop: _selectedBranchId != null 
+          ? RestaurantTimingScreenLarge(branchId: _selectedBranchId!)
+          : _buildMobileLayout(),
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildMobileLayout() {
     if (_isLoading) {
       return const Center(
         child: Column(

@@ -28,6 +28,7 @@ import 'Widgets/AccessDeniedWidget.dart'; // ✅ Added
 import 'Widgets/BranchFilterService.dart'; // ✅ Branch filter for multi-branch users
 import 'services/DashboardThemeService.dart'; // ✅ Added for Dashboard Dark/Light Theme
 import 'services/pos/pos_service.dart';
+import 'services/staff/staff_service.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -194,6 +195,7 @@ class MyApp extends StatelessWidget {
           value: dashboardThemeService,
         ),
         ChangeNotifierProvider<PosService>(create: (_) => PosService()),
+        Provider<StaffService>(create: (_) => StaffService()),
       ],
       child: MaterialApp(
         navigatorKey: navigatorKey,

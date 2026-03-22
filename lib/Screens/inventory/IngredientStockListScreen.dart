@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:rxdart/rxdart.dart';
 import '../../Models/IngredientModel.dart';
@@ -1256,6 +1257,9 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                     controller: deltaController,
                     keyboardType: const TextInputType.numberWithOptions(
                         decimal: true, signed: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.-]')),
+                    ],
                     decoration: const InputDecoration(
                       labelText: 'Adjustment delta (+/-)',
                       hintText: 'e.g. -1.5 or 2',

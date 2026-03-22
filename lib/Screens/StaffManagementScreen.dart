@@ -10,6 +10,9 @@ import '../main.dart';
 // Extracted from SettingsScreen.dart
 // -----------------------------------------------------------------------------
 
+import '../utils/responsive_helper.dart';
+import 'staff_management_screen_large.dart';
+
 class StaffManagementScreen extends StatefulWidget {
   const StaffManagementScreen({super.key});
 
@@ -106,8 +109,13 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
     }
 
     // Update cached permission state
-    _hadPermissionOnInit = true;
+    return ResponsiveLayout(
+      mobile: _buildMobileLayout(context, userScope, branchFilter),
+      desktop: const StaffManagementScreenLarge(),
+    );
+  }
 
+  Widget _buildMobileLayout(BuildContext context, UserScopeService userScope, BranchFilterService branchFilter) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -674,7 +682,6 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
   @override
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
-    final isSuperAdmin = userScope.isSuperAdmin;
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

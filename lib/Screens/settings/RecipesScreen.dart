@@ -567,6 +567,7 @@ class _RecipeFormSheetState extends State<_RecipeFormSheet> {
   bool _serviceInitialized = false;
 
   final _imagePicker = ImagePicker();
+  final Map<int, TextEditingController> _ingredientQtyControllers = {};
 
   @override
   void initState() {
@@ -652,6 +653,9 @@ class _RecipeFormSheetState extends State<_RecipeFormSheet> {
     _prepTimeCtr.dispose();
     _yieldCtr.dispose();
     _servingSizeCtr.dispose();
+    for (var controller in _ingredientQtyControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -1105,8 +1109,21 @@ class _RecipeFormSheetState extends State<_RecipeFormSheet> {
   }
 
   Widget _buildIngredientRow(int idx, RecipeIngredientLine line) {
-    final qtyCtrl = TextEditingController(
-        text: line.quantity > 0 ? line.quantity.toString() : '');
+    // Get or create stable controller for this row
+    final qtyCtrl = _ingredientQtyControllers.putIfAbsent(idx, () {
+      final ctrl = TextEditingController(
+          text: line.quantity > 0 ? line.quantity.toString() : '');
+      return ctrl;
+    });
+
+    // Update text if it's different but not if user is actively typing a dot
+    final currentText = qtyCtrl.text;
+    final modelValue = line.quantity;
+    final parsedValue = double.tryParse(currentText) ?? 0.0;
+
+    if (modelValue != parsedValue && !currentText.endsWith('.')) {
+      qtyCtrl.text = modelValue > 0 ? modelValue.toString() : '';
+    }
 
     // Find selected ingredient
     final selectedIngredient =
@@ -1201,7 +1218,7 @@ class _RecipeFormSheetState extends State<_RecipeFormSheet> {
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
               ],
               decoration: InputDecoration(
                 enabledBorder: OutlineInputBorder(
