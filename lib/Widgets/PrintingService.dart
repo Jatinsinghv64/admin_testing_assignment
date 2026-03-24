@@ -117,10 +117,41 @@ class PrintingService {
               _cachedLogo!.offsetInBytes, _cachedLogo!.lengthInBytes))
           : null;
 
-      await Printing.layoutPdf(onLayout: (PdfPageFormat format) async {
-        final Map<String, dynamic> order =
-            Map<String, dynamic>.from(orderDoc.data() as Map);
+      // --- 1. PRE-FETCH DATA ---
+      final Map<String, dynamic> order =
+          Map<String, dynamic>.from(orderDoc.data() as Map);
 
+      // Branch Info - Fetch BEFORE layoutPdf
+      final List<dynamic> branchIds = order['branchIds'] ?? [];
+      String primaryBranchId =
+          branchIds.isNotEmpty ? branchIds.first.toString() : '';
+
+      Map<String, dynamic>? branchData;
+      if (primaryBranchId.isNotEmpty) {
+        // Clear expired cache entries
+        PrintingService._clearExpiredCache();
+
+        // Check cache or fetch from Firestore
+        final cached = PrintingService._branchCache[primaryBranchId];
+        if (cached == null || cached.isExpired) {
+          try {
+            final branchSnap = await FirebaseFirestore.instance
+                .collection('Branch')
+                .doc(primaryBranchId)
+                .get()
+                .timeout(AppConstants.firestoreTimeout);
+            if (branchSnap.exists) {
+              PrintingService._branchCache[primaryBranchId] =
+                  _CachedBranch(branchSnap.data()!);
+            }
+          } catch (e) {
+            debugPrint("⚠️ Failed to fetch branch data: $e");
+          }
+        }
+        branchData = PrintingService._branchCache[primaryBranchId]?.data;
+      }
+
+      await Printing.layoutPdf(onLayout: (PdfPageFormat format) async {
         // --- 1. Prepare Data & Totals ---
         final double subtotal = (order['subtotal'] as num?)?.toDouble() ?? 0.0;
         final double discount =
@@ -135,6 +166,7 @@ class PrintingService {
 
         // Coupon/Discount details
         final String couponCode = (order['couponCode'] ?? '').toString();
+        // ignore: unused_local_variable
         final double discountPercent =
             (order['discountPercent'] as num?)?.toDouble() ?? 0.0;
 
@@ -178,6 +210,7 @@ class PrintingService {
         }).toList();
         
         // Calculate total savings
+        // ignore: unused_local_variable
         final double totalSavings = discount > 0 
             ? discount 
             : (totalOriginalPrice > subtotal ? totalOriginalPrice - subtotal : 0.0);
@@ -196,49 +229,26 @@ class PrintingService {
         final String formattedTime =
             orderDate != null ? DateFormat('hh:mm a').format(orderDate) : "N/A";
 
-        // Branch Info
-        final List<dynamic> branchIds = order['branchIds'] ?? [];
-        String primaryBranchId =
-            branchIds.isNotEmpty ? branchIds.first.toString() : '';
-
+        // Branch Info (using branchData pre-fetched)
         String branchName = "MITRAN Restaurant";
         String branchNameAr = "مطعم ميت ران";
         String branchPhone = "";
         String branchAddress = "Doha, Qatar";
 
-        if (primaryBranchId.isNotEmpty) {
-          // Clear expired cache entries
-          PrintingService._clearExpiredCache();
+        if (branchData != null) {
+          branchName = branchData['name'] ?? branchName;
+          branchNameAr = branchData['name_ar'] ?? branchNameAr;
+          branchPhone = branchData['phone'] ?? "";
 
-          // Check cache or fetch from Firestore
-          final cached = PrintingService._branchCache[primaryBranchId];
-          if (cached == null || cached.isExpired) {
-            final branchSnap = await FirebaseFirestore.instance
-                .collection('Branch')
-                .doc(primaryBranchId)
-                .get()
-                .timeout(AppConstants.firestoreTimeout);
-            if (branchSnap.exists) {
-              PrintingService._branchCache[primaryBranchId] =
-                  _CachedBranch(branchSnap.data()!);
-            }
-          }
-          final branchData =
-              PrintingService._branchCache[primaryBranchId]?.data;
-          if (branchData != null) {
-            branchName = branchData['name'] ?? branchName;
-            branchNameAr = branchData['name_ar'] ?? branchNameAr;
-            branchPhone = branchData['phone'] ?? "";
-
-            final addressMap =
-                branchData['address'] as Map<String, dynamic>? ?? {};
-            final street = addressMap['street'] ?? '';
-            final city = addressMap['city'] ?? '';
-            branchAddress = (street.isNotEmpty || city.isNotEmpty)
-                ? "$street, $city"
-                : branchAddress;
-          }
+          final addressMap =
+              branchData['address'] as Map<String, dynamic>? ?? {};
+          final street = addressMap['street'] ?? '';
+          final city = addressMap['city'] ?? '';
+          branchAddress = (street.isNotEmpty || city.isNotEmpty)
+              ? "$street, $city"
+              : branchAddress;
         }
+
 
         // Order Details
         final String dailyOrderNumber = order['dailyOrderNumber']?.toString() ??
@@ -681,6 +691,7 @@ class PrintingService {
     try {
       await _loadAssets();
       pw.Font? regularFont = _cachedRegularFont;
+      pw.Font? arabicFont = _cachedArabicFont;
 
       await Printing.layoutPdf(onLayout: (PdfPageFormat format) async {
         final Map<String, dynamic> order =
@@ -693,6 +704,7 @@ class PrintingService {
           final String baseName = (m['name'] ?? 'Item').toString();
           return {
             'name': isAddOn ? '[ADD-ON] $baseName' : baseName,
+            'name_ar': (m['name_ar'] ?? '').toString(),
             'qty': int.tryParse(
                     (m['quantity'] ?? m['qty'] ?? '1').toString()) ??
                 1,
@@ -733,6 +745,17 @@ class PrintingService {
             fontWeight: pw.FontWeight.bold);
         final pw.TextStyle fontSmall =
             pw.TextStyle(font: regularFont, fontSize: 10);
+
+        // Arabic styles
+        final pw.TextStyle fontArLarge = arabicFont != null
+            ? pw.TextStyle(font: arabicFont, fontSize: 14, fontWeight: pw.FontWeight.bold)
+            : fontLarge;
+        final pw.TextStyle fontArMed = arabicFont != null
+            ? pw.TextStyle(font: arabicFont, fontSize: 12)
+            : fontMed;
+        final pw.TextStyle fontArMedBold = arabicFont != null
+            ? pw.TextStyle(font: arabicFont, fontSize: 12, fontWeight: pw.FontWeight.bold)
+            : fontMedBold;
 
         pdf.addPage(pw.Page(
             pageFormat: PdfPageFormat.roll80,
@@ -782,20 +805,36 @@ class PrintingService {
                               children: [
                                 pw.Expanded(
                                   child: pw.Column(
-                                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                                    children: [
-                                      pw.Text(item['name'].toString(), style: fontLarge),
-                                      if ((item['addons'] as List).isNotEmpty)
-                                        ... (item['addons'] as List).map((addon) {
-                                          final a = Map<String, dynamic>.from(addon as Map);
-                                          return pw.Text(
-                                            "  + ${a['name']}",
-                                            style: fontMedBold.copyWith(color: PdfColors.grey800),
-                                          );
-                                        }),
-                                    ],
-                                  ),
+                                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                  children: [
+                                    pw.Text(item['name'].toString(), style: fontLarge),
+                                    if (item['name_ar'].toString().isNotEmpty && arabicFont != null)
+                                      pw.Text(item['name_ar'].toString(), 
+                                         style: fontArLarge.copyWith(fontSize: 12), 
+                                         textDirection: pw.TextDirection.rtl),
+                                    
+                                    if ((item['addons'] as List).isNotEmpty)
+                                      ... (item['addons'] as List).map((addon) {
+                                        final a = Map<String, dynamic>.from(addon as Map);
+                                        final String aName = a['name'] ?? '';
+                                        final String aNameAr = a['name_ar'] ?? '';
+                                        return pw.Column(
+                                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                          children: [
+                                            pw.Text("  + $aName", style: fontMedBold.copyWith(color: PdfColors.grey800)),
+                                            if (aNameAr.isNotEmpty && arabicFont != null)
+                                              pw.Padding(
+                                                padding: const pw.EdgeInsets.only(left: 10),
+                                                child: pw.Text(aNameAr, 
+                                                  style: fontArMedBold.copyWith(fontSize: 10, color: PdfColors.grey800),
+                                                  textDirection: pw.TextDirection.rtl),
+                                              ),
+                                          ],
+                                        );
+                                      }),
+                                  ],
                                 ),
+                              ),
 
                                 pw.Text('x${item['qty']}',
                                     style: fontLarge.copyWith(

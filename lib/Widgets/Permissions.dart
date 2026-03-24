@@ -40,6 +40,7 @@ enum AppTab {
   orders,
   purchases,
   riders,
+  manualAssignment,
   suppliers,
   analytics,
   settings,

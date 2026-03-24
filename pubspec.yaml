@@ -81,6 +81,7 @@ flutter:
     - assets/notification.mp3
     - assets/placeholder_avatar.png
     - assets/mitranlogo.jpg # Added for receipt printing
+    - assets/fonts/NotoSansArabic-Regular.ttf
 
   fonts:
     - family: NotoSansArabic

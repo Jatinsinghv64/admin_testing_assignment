@@ -1,8 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../Widgets/AccessDeniedWidget.dart';
 import '../Widgets/Authorization.dart';
 import '../Widgets/Permissions.dart';
@@ -31,7 +29,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   // State to track logout process
-  bool _isLoggingOut = false;
+  final bool _isLoggingOut = false;
 
   // Cache permission state to prevent flash during scope reload
   bool? _hadPermissionOnInit;
@@ -50,6 +48,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
         branchFilter.loadBranchNames(userScope.branchIds);
       }
     });
+  }
+
+  void _handleBackToHome() {
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
+  }
+
+  PreferredSizeWidget _buildSettingsAppBar() {
+    final canPop = Navigator.of(context).canPop();
+    return AppBar(
+      elevation: 0,
+      backgroundColor: Colors.white,
+      centerTitle: true,
+      automaticallyImplyLeading: false,
+      leading: canPop
+          ? IconButton(
+              onPressed: _handleBackToHome,
+              icon: const Icon(
+                Icons.arrow_back_rounded,
+                color: Colors.deepPurple,
+              ),
+              tooltip: 'Back to Home',
+            )
+          : null,
+      title: const Text(
+        'Settings',
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Colors.deepPurple,
+          fontSize: 24,
+        ),
+      ),
+    );
   }
 
   @override
@@ -78,7 +111,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final userScope = context.watch<UserScopeService>();
     final authService = context.read<AuthService>();
     // Listen to branch filter changes to rebuild when names are loaded
-    final branchFilter = context.watch<BranchFilterService>();
+    context.watch<BranchFilterService>();
 
     // Cache permission state when first loaded
     if (_hadPermissionOnInit == null && userScope.isLoaded) {
@@ -89,19 +122,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!userScope.isLoaded) {
       return Scaffold(
         backgroundColor: Colors.grey[50],
-        appBar: AppBar(
-          elevation: 0,
-          backgroundColor: Colors.white,
-          centerTitle: true,
-          title: const Text(
-            'Settings',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.deepPurple,
-              fontSize: 24,
-            ),
-          ),
-        ),
+        appBar: _buildSettingsAppBar(),
         body: const Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -121,19 +142,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (_hadPermissionOnInit == true) {
         return Scaffold(
           backgroundColor: Colors.grey[50],
-          appBar: AppBar(
-            elevation: 0,
-            backgroundColor: Colors.white,
-            centerTitle: true,
-            title: const Text(
-              'Settings',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.deepPurple,
-                fontSize: 24,
-              ),
-            ),
-          ),
+          appBar: _buildSettingsAppBar(),
           body: const Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -146,8 +155,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         );
       }
-      return const Scaffold(
-        body: AccessDeniedWidget(permission: 'manage settings'),
+      return Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: _buildSettingsAppBar(),
+        body: const AccessDeniedWidget(permission: 'manage settings'),
       );
     }
 
@@ -156,19 +167,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.white,
-        centerTitle: true,
-        title: const Text(
-          'Settings',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Colors.deepPurple,
-            fontSize: 24,
-          ),
-        ),
-      ),
+      appBar: _buildSettingsAppBar(),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 800),
@@ -302,8 +301,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 12),
                 _buildGroupedSettingsCard([
                   _SettingsItem(
-                    icon: context.watch<DashboardThemeService>().isDarkMode 
-                        ? Icons.dark_mode_rounded 
+                    icon: context.watch<DashboardThemeService>().isDarkMode
+                        ? Icons.dark_mode_rounded
                         : Icons.light_mode_rounded,
                     title: 'Dashboard Appearance',
                     subtitle: 'Toggle dark mode',
@@ -342,7 +341,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     UserScopeService userScope,
     AuthService authService,
   ) {
-    // ✅ Support both email and phone users for initials
     final identifier = userScope.userEmail.isNotEmpty
         ? userScope.userEmail
         : userScope.userIdentifier;
@@ -378,19 +376,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           colors: [Colors.deepPurple.shade50, Colors.white],
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.deepPurple.withOpacity(0.1)),
+        border: Border.all(color: Colors.deepPurple.withValues(alpha: 0.1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.deepPurple.withOpacity(0.08),
+            color: Colors.deepPurple.withValues(alpha: 0.08),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: Row(
-        children: [
-          // Avatar
-          Container(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 420;
+
+          final avatar = Container(
             width: 60,
             height: 60,
             decoration: BoxDecoration(
@@ -400,7 +399,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.deepPurple.withOpacity(0.3),
+                  color: Colors.deepPurple.withValues(alpha: 0.3),
                   blurRadius: 12,
                   offset: const Offset(0, 4),
                 ),
@@ -416,69 +415,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ),
-          ),
-          const SizedBox(width: 16),
-          // Info
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ✅ Display email or phone number
-                Text(
-                  userScope.userEmail.isNotEmpty
-                      ? userScope.userEmail
-                      : userScope.userIdentifier,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Colors.black87,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+          );
+
+          final info = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                identifier,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.black87,
                 ),
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _getRoleColor(userScope.role).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    _formatRole(userScope.role),
-                    style: TextStyle(
-                      color: _getRoleColor(userScope.role),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          _getRoleColor(userScope.role).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _formatRole(userScope.role),
+                      style: TextStyle(
+                        color: _getRoleColor(userScope.role),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
-                ),
-                if (userScope.branchIds.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(Icons.store, size: 14, color: Colors.grey[600]),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          branchText,
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontSize: 12,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      ),
-                    ],
-                  ),
                 ],
+              ),
+              if (userScope.branchIds.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Icon(Icons.store, size: 14, color: Colors.grey[600]),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        branchText,
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 12,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: isCompact ? 2 : 1,
+                      ),
+                    ),
+                  ],
+                ),
               ],
-            ),
-          ),
-          // Edit button - navigates to Staff Management
-          GestureDetector(
+            ],
+          );
+
+          final editButton = GestureDetector(
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (context) => const StaffManagementScreen(),
@@ -496,8 +498,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: Colors.grey[600],
               ),
             ),
-          ),
-        ],
+          );
+
+          if (isCompact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    avatar,
+                    const SizedBox(width: 16),
+                    Expanded(child: info),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Align(alignment: Alignment.centerRight, child: editButton),
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              avatar,
+              const SizedBox(width: 16),
+              Expanded(child: info),
+              const SizedBox(width: 12),
+              editButton,
+            ],
+          );
+        },
       ),
     );
   }
@@ -533,7 +563,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.deepPurple.withOpacity(0.1),
+            color: Colors.deepPurple.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(icon, color: Colors.deepPurple, size: 18),
@@ -562,7 +592,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -595,50 +625,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return InkWell(
       onTap: item.trailing != null ? null : item.onTap,
       borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: item.iconColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(item.icon, color: item.iconColor, size: 20),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 360;
+          final iconCard = Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: item.iconColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    item.subtitle,
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                  ),
-                ],
+            child: Icon(item.icon, color: item.iconColor, size: 20),
+          );
+
+          final textBlock = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                  color: Colors.black87,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            if (item.trailing != null)
-              item.trailing!
-            else
+              const SizedBox(height: 2),
+              Text(
+                item.subtitle,
+                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                maxLines: isCompact ? 2 : 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          );
+
+          final trailingWidget = item.trailing ??
               Icon(
                 Icons.chevron_right_rounded,
                 color: Colors.grey[400],
                 size: 22,
+              );
+
+          if (isCompact) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      iconCard,
+                      const SizedBox(width: 16),
+                      Expanded(child: textBlock),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: trailingWidget,
+                  ),
+                ],
               ),
-          ],
-        ),
+            );
+          }
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                iconCard,
+                const SizedBox(width: 16),
+                Expanded(child: textBlock),
+                const SizedBox(width: 12),
+                trailingWidget,
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -653,7 +719,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.red.withOpacity(0.3),
+            color: Colors.red.withValues(alpha: 0.3),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),
@@ -687,24 +753,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _SettingsCard({required Widget child}) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.grey[200]!),
-      ),
-      child: Padding(padding: const EdgeInsets.all(16.0), child: child),
-    );
-  }
-
   Widget buildSectionHeader(String title, IconData icon) {
     return Row(
       children: [
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.deepPurple.withOpacity(0.1),
+            color: Colors.deepPurple.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(icon, color: Colors.deepPurple, size: 20),
@@ -739,7 +794,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -756,7 +811,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 width: 50,
                 height: 50,
                 decoration: BoxDecoration(
-                  color: effectiveIconColor.withOpacity(0.1),
+                  color: effectiveIconColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Icon(icon, color: effectiveIconColor, size: 26),
@@ -955,7 +1010,9 @@ class _SuperAdminStatusCardState extends State<_SuperAdminStatusCard> {
         });
       } else {
         // Regular admin OR SuperAdmin with single branch - use their primary branch
-        _selectedBranchId = widget.userScope.branchIds.isNotEmpty ? widget.userScope.branchIds.first : null;
+        _selectedBranchId = widget.userScope.branchIds.isNotEmpty
+            ? widget.userScope.branchIds.first
+            : null;
         final doc = await FirebaseFirestore.instance
             .collection('Branch')
             .doc(_selectedBranchId)

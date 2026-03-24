@@ -2,13 +2,14 @@
 // Reusable product card for the POS grid
 
 import 'package:flutter/material.dart';
-import '../../constants.dart';
 
 class PosProductTile extends StatelessWidget {
   final String name;
   final double price;
   final String? imageUrl;
   final bool isAvailable;
+  final bool disableTapWhenUnavailable;
+  final String unavailableLabel;
   final Color? chinColor;
   final VoidCallback onTap;
 
@@ -18,6 +19,8 @@ class PosProductTile extends StatelessWidget {
     required this.price,
     this.imageUrl,
     this.isAvailable = true,
+    this.disableTapWhenUnavailable = true,
+    this.unavailableLabel = 'Unavailable',
     this.chinColor,
     required this.onTap,
   });
@@ -27,7 +30,7 @@ class PosProductTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: isAvailable ? onTap : null,
+        onTap: (isAvailable || !disableTapWhenUnavailable) ? onTap : null,
         borderRadius: BorderRadius.circular(16),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
@@ -36,12 +39,12 @@ class PosProductTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: isAvailable
-                  ? Colors.grey.withOpacity(0.15)
-                  : Colors.grey.withOpacity(0.3),
+                  ? Colors.grey.withValues(alpha: 0.15)
+                  : Colors.grey.withValues(alpha: 0.3),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.04),
+                color: Colors.black.withValues(alpha: 0.04),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -65,7 +68,9 @@ class PosProductTile extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
-                            color: isAvailable ? Colors.grey[900] : Colors.grey[500],
+                            color: isAvailable
+                                ? Colors.grey[900]
+                                : Colors.grey[500],
                             height: 1.25,
                           ),
                           maxLines: 3,
@@ -84,7 +89,9 @@ class PosProductTile extends StatelessWidget {
                   right: 0,
                   child: Container(
                     height: 4,
-                    color: isAvailable ? chinColor : chinColor!.withOpacity(0.3),
+                    color: isAvailable
+                        ? chinColor
+                        : chinColor!.withValues(alpha: 0.3),
                   ),
                 ),
               // Unavailable overlay
@@ -92,7 +99,7 @@ class PosProductTile extends StatelessWidget {
                 Positioned.fill(
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.5),
+                      color: Colors.white.withValues(alpha: 0.5),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Center(
@@ -100,11 +107,11 @@ class PosProductTile extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.9),
+                          color: Colors.red.withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: const Text(
-                          'Unavailable',
+                        child: Text(
+                          unavailableLabel,
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 11,
@@ -118,16 +125,6 @@ class PosProductTile extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildPlaceholderIcon() {
-    return Center(
-      child: Icon(
-        Icons.restaurant_menu_rounded,
-        size: 36,
-        color: Colors.deepPurple.withOpacity(0.25),
       ),
     );
   }

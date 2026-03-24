@@ -5,6 +5,13 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../utils/responsive_helper.dart';
 import 'BranchManagement.dart'; // For BranchDialog
+import '../services/branch_metrics_service.dart';
+import '../main.dart'; // UserScopeService
+import '../Widgets/BranchFilterService.dart';
+import 'AnalyticsScreen.dart';
+import 'analytics_screen_large.dart';
+import 'package:provider/provider.dart';
+import '../constants.dart';
 
 class BranchManagementScreenLarge extends StatefulWidget {
   const BranchManagementScreenLarge({super.key});
@@ -17,6 +24,7 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
   String _searchQuery = '';
   String _statusFilter = 'All';
   String _cityFilter = 'All';
+  final BranchMetricsService _metricsService = BranchMetricsService();
 
   // App Palette COLORS
   static const Color appBackground = Color(0xFFF9FAFB); // grey[50]
@@ -43,49 +51,72 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
             const SizedBox(height: 40),
             _buildFilterBar(primaryColor),
             const SizedBox(height: 24),
-            _buildBranchGrid(primaryColor),
+            Consumer<UserScopeService>(
+              builder: (context, userScope, _) {
+                return _buildBranchGrid(primaryColor, userScope.branchIds);
+              },
+            ),
             const SizedBox(height: 48),
             _buildActivityAndMap(textTheme),
           ],
         ),
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => showDialog(context: context, builder: (_) => const BranchDialog()),
+        label: const Text('New Branch', style: TextStyle(fontWeight: FontWeight.bold)),
+        icon: const Icon(Icons.add_location),
+        backgroundColor: appPrimary,
+      ),
     );
   }
 
   Widget _buildHeader(TextTheme textTheme, Color primaryColor) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Consumer<UserScopeService>(
+      builder: (context, userScope, _) {
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(
-              'BRANCH MANAGEMENT',
-              style: textTheme.headlineLarge?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: Colors.black87,
-                letterSpacing: -1,
-                fontSize: 36,
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'BRANCH MANAGEMENT',
+                  style: textTheme.headlineLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black87,
+                    letterSpacing: -1,
+                    fontSize: 36,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Operational control of regional logistics hubs.',
+                  style: textTheme.bodyMedium?.copyWith(color: Colors.grey[600], fontWeight: FontWeight.w500),
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Operational control of regional logistics hubs.',
-              style: textTheme.bodyMedium?.copyWith(color: Colors.grey[600], fontWeight: FontWeight.w500),
+            Row(
+              children: [
+                StreamBuilder<int>(
+                  stream: _metricsService.getActiveBranchesCount(),
+                  builder: (context, snap) => _buildKPI('Active Branches', (snap.data ?? 0).toString(), '+0%', primaryColor),
+                ),
+                const SizedBox(width: 16),
+                StreamBuilder<double>(
+                  stream: _metricsService.getTodayVolume(userScope.branchIds),
+                  builder: (context, snap) => _buildKPI('Today Volume', 'QAR ${(snap.data ?? 0).toStringAsFixed(0)}', 'Live', primaryColor),
+                ),
+                const SizedBox(width: 16),
+                StreamBuilder<String>(
+                  stream: _metricsService.getTodayAvgDeliveryTime(userScope.branchIds),
+                  builder: (context, snap) => _buildKPI('Avg Delivery', snap.data ?? '--', 'Static', appTertiary),
+                ),
+              ],
             ),
           ],
-        ),
-        Row(
-          children: [
-            _buildKPI('Active Branches', '42', '+3%', primaryColor),
-            const SizedBox(width: 16),
-            _buildKPI('System Volume', '1,284', 'Live', primaryColor),
-            const SizedBox(width: 16),
-            _buildKPI('Avg Delivery', '24.5m', '-1.2m', appTertiary),
-          ],
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -174,9 +205,17 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
           ),
           _buildDropdown('Status: $_statusFilter', ['All', 'Open', 'Closed'], (val) => setState(() => _statusFilter = val!)),
           const SizedBox(width: 12),
-          _buildDropdown('City: $_cityFilter', ['All', 'Cairo', 'Alexandria', 'Mansoura'], (val) => setState(() => _cityFilter = val!)),
+          StreamBuilder<List<String>>(
+            stream: _metricsService.getUniqueCities(),
+            builder: (context, snap) {
+              final cities = snap.data ?? ['All'];
+              return _buildDropdown('City: $_cityFilter', cities, (val) => setState(() => _cityFilter = val!));
+            },
+          ),
           const SizedBox(width: 12),
-          _buildActionButton('Advanced', Icons.filter_list, () {}),
+          _buildActionButton('Advanced', Icons.filter_list, () {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Advanced filters coming soon!')));
+          }),
         ],
       ),
     );
@@ -228,7 +267,7 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
     );
   }
 
-  Widget _buildBranchGrid(Color primaryColor) {
+  Widget _buildBranchGrid(Color primaryColor, List<String> userBranchIds) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('Branch').orderBy('name').snapshots(),
       builder: (context, snapshot) {
@@ -243,9 +282,14 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
           final data = doc.data() as Map<String, dynamic>;
           final name = data['name']?.toString().toLowerCase() ?? '';
           final city = (data['address'] as Map?)?['city']?.toString().toLowerCase() ?? '';
+          final id = doc.id.toLowerCase();
           final status = (data['isOpen'] ?? false) ? 'Open' : 'Closed';
 
-          final matchesSearch = name.contains(_searchQuery) || city.contains(_searchQuery);
+          // User Access Filter
+          bool hasAccess = userBranchIds.isEmpty || userBranchIds.contains(doc.id);
+          if (!hasAccess) return false;
+
+          final matchesSearch = name.contains(_searchQuery) || city.contains(_searchQuery) || id.contains(_searchQuery);
           final matchesStatus = _statusFilter == 'All' || status == _statusFilter;
           final matchesCity = _cityFilter == 'All' || city.contains(_cityFilter.toLowerCase());
 
@@ -279,7 +323,7 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
     final name = data['name'] ?? 'Unnamed';
     final isOpen = data['isOpen'] ?? false;
     final city = (data['address'] as Map?)?['city'] ?? 'Unknown';
-    final capacity = (index % 3 == 0) ? 84 : (index % 3 == 1 ? 92 : 45); 
+    final estimatedTime = (data['estimatedTime'] ?? 25).toString();
 
     return Container(
       decoration: BoxDecoration(
@@ -345,57 +389,67 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
             ),
           ),
           const Divider(height: 1),
+          // Branch Stats Section
           Expanded(
             child: Container(
               padding: const EdgeInsets.all(20),
-              decoration: const BoxDecoration(
-                color: Colors.transparent,
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+              child: StreamBuilder<int>(
+                stream: _metricsService.getActiveOrdersCount(doc.id),
+                builder: (context, ordersSnap) {
+                  final activeOrders = ordersSnap.data ?? 0;
+                  // Dummy Capacity Logic: (Active Orders / 50 max) capped at 100
+                  final int maxCapacity = 50; 
+                  final capacity = (activeOrders / maxCapacity * 100).clamp(0, 100).toInt();
+
+                  return Column(
                     children: [
-                      _buildMiniStat('Active Orders', '124', primaryColor),
-                      _buildMiniStat('Avg Delivery', '18m', Colors.black87),
-                      _buildMiniStat('Riders', '32', Colors.black87),
-                    ],
-                  ),
-                  const Spacer(),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Hub Load Capacity', style: TextStyle(fontSize: 12, color: appTextVariant)),
-                      Text('$capacity%', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: capacity > 90 ? appError : Colors.green)),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    height: 6,
-                    width: double.infinity,
-                    decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(3)),
-                    child: FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: capacity / 100,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: capacity > 90 ? appError : Colors.green,
-                          borderRadius: BorderRadius.circular(3),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _buildMiniStat('Active Orders', activeOrders.toString(), primaryColor),
+                          _buildMiniStat('Avg Delivery', '${estimatedTime}m', Colors.black87),
+                          StreamBuilder<int>(
+                            stream: _metricsService.getRiderCount(doc.id),
+                            builder: (context, riderSnap) => _buildMiniStat('Riders', (riderSnap.data ?? 0).toString(), Colors.black87),
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Hub Load Capacity', style: TextStyle(fontSize: 12, color: appTextVariant)),
+                          Text('$capacity%', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: capacity > 90 ? appError : Colors.green)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        height: 6,
+                        width: double.infinity,
+                        decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(3)),
+                        child: FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: capacity / 100,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: capacity > 90 ? appError : Colors.green,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                ],
+                    ],
+                  );
+                }
               ),
             ),
           ),
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(color: Colors.transparent),
             child: Row(
               children: [
                 Expanded(
-                  child: _buildSmallButton('View Dashboard', () {}),
+                  child: _buildSmallButton('View Dashboard', () => _navigateToDashboard(doc.id)),
                 ),
                 const SizedBox(width: 8),
                 _buildSmallIconButton(Icons.settings, () => _editBranch(doc)),
@@ -504,18 +558,53 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
             ],
           ),
           const SizedBox(height: 24),
-          _buildAnomalyItem(
-            'System Latency: Alex Waterfront',
-            'Delivery estimation engine reporting 5ms lag above threshold.',
-            '14:22',
-            appError,
-          ),
-          const SizedBox(height: 16),
-          _buildAnomalyItem(
-            'High Load: Cairo Terminal 1',
-            'Approaching 95% capacity. Suggest diverting new orders to Heliopolis.',
-            '12:05',
-            Colors.orange,
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection(AppConstants.collectionOrders)
+                .where('timestamp', isGreaterThanOrEqualTo: DateTime.now().subtract(const Duration(hours: 24)))
+                .snapshots(),
+            builder: (context, snapshot) {
+              final orders = snapshot.data?.docs ?? [];
+              final anomalies = orders.where((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final status = data['status']?.toString() ?? '';
+                if (AppConstants.isTerminalStatus(status)) return false;
+                
+                final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
+                if (timestamp == null) return false;
+                
+                final duration = DateTime.now().difference(timestamp);
+                return duration.inMinutes > 30; // 30 min threshold for anomaly
+              }).toList();
+
+              if (anomalies.isEmpty) {
+                return _buildAnomalyItem(
+                  'System Normal',
+                  'All logistics hubs operating within optimal parameters.',
+                  'Now',
+                  Colors.green,
+                );
+              }
+
+              return Column(
+                children: anomalies.take(3).map((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final orderId = doc.id.substring(0, 8).toUpperCase();
+                  final timestamp = (data['timestamp'] as Timestamp).toDate();
+                  final duration = DateTime.now().difference(timestamp).inMinutes;
+                  
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: _buildAnomalyItem(
+                      'Delayed Order: #$orderId',
+                      'Order has been active for $duration minutes. Check branch preparation capacity.',
+                      DateFormat('HH:mm').format(timestamp),
+                      appError,
+                    ),
+                  );
+                }).toList(),
+              );
+            },
           ),
         ],
       ),
@@ -574,32 +663,83 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Stack(
-                children: [
-                  FlutterMap(
-                    options: const MapOptions(
-                      initialCenter: LatLng(25.276987, 51.520008), // Doha
-                      initialZoom: 11,
-                    ),
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('Branch').snapshots(),
+                builder: (context, snapshot) {
+                  final branches = snapshot.data?.docs ?? [];
+                  final markers = branches.map((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final geo = (data['address'] as Map?)?['geolocation'] as GeoPoint?;
+                    if (geo == null) return null;
+                    return Marker(
+                      width: 40,
+                      height: 40,
+                      point: LatLng(geo.latitude, geo.longitude),
+                      child: Tooltip(
+                        message: data['name'] ?? 'Branch',
+                        child: const Icon(Icons.location_on, color: appPrimary, size: 30),
+                      ),
+                    );
+                  }).whereType<Marker>().toList();
+
+                  // Find center
+                  LatLng center = const LatLng(25.276987, 51.520008); // Doha default
+                  if (markers.isNotEmpty) {
+                    double lat = 0, lng = 0;
+                    for (var m in markers) {
+                      lat += m.point.latitude;
+                      lng += m.point.longitude;
+                    }
+                    center = LatLng(lat / markers.length, lng / markers.length);
+                  }
+
+                  return Stack(
                     children: [
-                      TileLayer(
-                        urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        subdomains: const ['a', 'b', 'c'],
+                      FlutterMap(
+                        options: MapOptions(
+                          initialCenter: center,
+                          initialZoom: markers.length > 1 ? 10 : 12,
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            subdomains: const ['a', 'b', 'c'],
+                          ),
+                          MarkerLayer(markers: markers),
+                        ],
+                      ),
+                      const Positioned(
+                        bottom: 12,
+                        left: 12,
+                        child: Text('LIVE DEPLOYMENT VIEW', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.black54, letterSpacing: 1)),
                       ),
                     ],
-                  ),
-                  const Positioned(
-                    bottom: 12,
-                    left: 12,
-                    child: Text('LIVE DEPLOYMENT VIEW', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.black54, letterSpacing: 1)),
-                  ),
-                ],
+                  );
+                }
               ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  // Functional Methods
+  void _navigateToDashboard(String branchId) {
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
+    branchFilter.selectBranch(branchId);
+    
+    if (ResponsiveHelper.isDesktop(context)) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const AnalyticsScreenLarge()),
+      );
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const AnalyticsScreen()),
+      );
+    }
   }
 
   // Functional Methods

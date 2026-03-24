@@ -2,11 +2,12 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../Widgets/BranchFilterService.dart';
 import '../services/staff/staff_service.dart';
 import '../main.dart'; // For UserScopeService
 
 class MyTimeClockWidget extends StatefulWidget {
-  const MyTimeClockWidget({Key? key}) : super(key: key);
+  const MyTimeClockWidget({super.key});
 
   @override
   State<MyTimeClockWidget> createState() => _MyTimeClockWidgetState();
@@ -14,8 +15,8 @@ class MyTimeClockWidget extends StatefulWidget {
 
 class _MyTimeClockWidgetState extends State<MyTimeClockWidget> {
   Timer? _timer;
-  Duration _elapsed = Duration.zero;
   DateTime? _clockInTime;
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
@@ -25,12 +26,10 @@ class _MyTimeClockWidgetState extends State<MyTimeClockWidget> {
 
   void _startTimer(DateTime clockIn) {
     if (_clockInTime == clockIn && _timer != null && _timer!.isActive) return;
-    
+
     _timer?.cancel();
     _clockInTime = clockIn;
-    // Update variable directly without setState to avoid "setState during build" error
-    _elapsed = DateTime.now().difference(_clockInTime!);
-    
+
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       _updateElapsed();
     });
@@ -38,10 +37,14 @@ class _MyTimeClockWidgetState extends State<MyTimeClockWidget> {
 
   void _updateElapsed() {
     if (_clockInTime != null && mounted) {
-      setState(() {
-        _elapsed = DateTime.now().difference(_clockInTime!);
-      });
+      setState(() {});
     }
+  }
+
+  void _stopTimer() {
+    _timer?.cancel();
+    _timer = null;
+    _clockInTime = null;
   }
 
   String _formatDuration(Duration d) {
@@ -52,33 +55,236 @@ class _MyTimeClockWidgetState extends State<MyTimeClockWidget> {
     return '$minutes:$seconds';
   }
 
+  List<String> _resolveClockInBranchIds(
+    UserScopeService userScope,
+    BranchFilterService branchFilter,
+  ) {
+    final selectedBranchId = branchFilter.selectedBranchId;
+    if (selectedBranchId != null &&
+        userScope.branchIds.contains(selectedBranchId)) {
+      return [selectedBranchId];
+    }
+    if (userScope.branchIds.isNotEmpty) {
+      return [userScope.branchIds.first];
+    }
+    return const [];
+  }
+
+  Future<void> _handleClockIn(
+    BuildContext context,
+    StaffService staffService,
+    UserScopeService userScope,
+    BranchFilterService branchFilter,
+  ) async {
+    if (_isSubmitting) return;
+
+    final clockInBranchIds = _resolveClockInBranchIds(userScope, branchFilter);
+    if (clockInBranchIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No branch is assigned to this account.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      await staffService.clockIn(
+        staffId: userScope.userIdentifier,
+        staffEmail: userScope.userEmail,
+        staffName: userScope.isSuperAdmin
+            ? 'Super Admin'
+            : userScope.userEmail.isNotEmpty
+                ? userScope.userEmail.split('@').first
+                : userScope.userIdentifier,
+        branchIds: clockInBranchIds,
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  Future<void> _handleClockOut(
+    BuildContext context,
+    StaffService staffService,
+    String docId,
+  ) async {
+    if (_isSubmitting) return;
+
+    setState(() => _isSubmitting = true);
+    try {
+      await staffService.clockOut(docId);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  Widget _buildLoadingIndicator() {
+    return const Padding(
+      key: ValueKey('time-clock-loading'),
+      padding: EdgeInsets.symmetric(horizontal: 16),
+      child: SizedBox(
+        width: 20,
+        height: 20,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+    );
+  }
+
+  Widget _buildClockOutChip(
+    BuildContext context,
+    StaffService staffService,
+    String docId,
+    Duration elapsed,
+  ) {
+    return Container(
+      key: const ValueKey('time-clock-active'),
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.timer, color: Colors.red, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            _formatDuration(elapsed),
+            style: const TextStyle(
+              color: Colors.red,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: _isSubmitting
+                ? null
+                : () => _confirmClockOut(context, staffService, docId),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: _isSubmitting
+                  ? const SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'CLOCK OUT',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildClockInButton(
+    BuildContext context,
+    StaffService staffService,
+    UserScopeService userScope,
+    BranchFilterService branchFilter,
+  ) {
+    return Container(
+      key: const ValueKey('time-clock-idle'),
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: ElevatedButton.icon(
+        onPressed: _isSubmitting
+            ? null
+            : () => _handleClockIn(
+                  context,
+                  staffService,
+                  userScope,
+                  branchFilter,
+                ),
+        icon: _isSubmitting
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(Icons.login, size: 16),
+        label: Text(_isSubmitting ? 'CLOCKING IN...' : 'CLOCK IN'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.green,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
     final staffService = context.watch<StaffService>();
+    final branchFilter = context.watch<BranchFilterService>();
 
     if (!userScope.isLoaded) return const SizedBox.shrink();
 
     return StreamBuilder<QuerySnapshot>(
-      // Filter the global branch-level stream for this user specifically in the builder
       stream: staffService.getTodayAttendanceStream(
-        branchIds: userScope.branchIds, 
         staffId: userScope.userIdentifier,
       ),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-            ),
-          );
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return _buildLoadingIndicator();
         }
 
-        // The stream is now filtered by staffId in the service, 
-        // but we still check for clockOut == null to find the active session.
+        final docs = snapshot.data?.docs ?? const [];
         DocumentSnapshot? activeRecord;
-        for (var doc in snapshot.data!.docs) {
+        for (final doc in docs) {
           final data = doc.data() as Map<String, dynamic>;
           if (data['clockOut'] == null) {
             activeRecord = doc;
@@ -87,85 +293,47 @@ class _MyTimeClockWidgetState extends State<MyTimeClockWidget> {
         }
 
         if (activeRecord != null) {
-          // Clocked in
           final data = activeRecord.data() as Map<String, dynamic>;
           final clockInTimestamp = data['clockIn'] as Timestamp?;
-          
           if (clockInTimestamp != null) {
-            _startTimer(clockInTimestamp.toDate());
-          }
-
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: Colors.red.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.red.withOpacity(0.3)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.timer, color: Colors.red, size: 16),
-                const SizedBox(width: 6),
-                Text(
-                  _formatDuration(_elapsed),
-                  style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-                const SizedBox(width: 8),
-                InkWell(
-                  onTap: () => _confirmClockOut(context, staffService, activeRecord!.id),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Text('CLOCK OUT', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              ],
-            ),
-          );
-        } else {
-          // Not clocked in
-          _timer?.cancel();
-          _timer = null;
-          
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: ElevatedButton.icon(
-              onPressed: () async {
-                try {
-                  await staffService.clockIn(
-                    staffId: userScope.userIdentifier,
-                    staffEmail: userScope.userEmail,
-                    staffName: userScope.isSuperAdmin ? 'Super Admin' : userScope.userEmail.isNotEmpty ? userScope.userEmail.split('@').first : userScope.userIdentifier,
-                    branchIds: userScope.branchIds,
-                  );
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
-                  }
-                }
-              },
-              icon: const Icon(Icons.login, size: 16),
-              label: const Text('CLOCK IN'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            final clockIn = clockInTimestamp.toDate();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _startTimer(clockIn);
+              }
+            });
+            final elapsed = DateTime.now().difference(clockIn);
+            return AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: _buildClockOutChip(
+                context,
+                staffService,
+                activeRecord.id,
+                elapsed,
               ),
-            ),
-          );
+            );
+          }
         }
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _stopTimer();
+        });
+
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: _buildClockInButton(
+            context,
+            staffService,
+            userScope,
+            branchFilter,
+          ),
+        );
       },
     );
   }
 
-  void _confirmClockOut(BuildContext context, StaffService staffService, String docId) {
+  void _confirmClockOut(
+      BuildContext context, StaffService staffService, String docId) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -179,13 +347,7 @@ class _MyTimeClockWidgetState extends State<MyTimeClockWidget> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              try {
-                await staffService.clockOut(docId);
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
-                }
-              }
+              await _handleClockOut(context, staffService, docId);
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Clock Out'),

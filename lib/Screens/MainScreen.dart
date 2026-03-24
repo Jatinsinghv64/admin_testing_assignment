@@ -11,6 +11,7 @@ import 'inventory/InventoryDashboardScreen.dart';
 import 'OrdersScreen.dart';
 import 'purchases/PurchaseOrdersScreen.dart';
 import 'RidersScreen.dart';
+import 'ManualAssignmentScreen.dart';
 import 'purchases/SuppliersScreen.dart';
 import 'SettingsScreen.dart';
 import 'RestaurantTimingScreen.dart';
@@ -38,7 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
       false; // ← tracks when _allScreens was freshly rebuilt
   String? _lastKnownBranchId;
   bool _isSidebarCollapsed = false;
-  String _lastKnownPermissions = ''; // ✅ Tracks permission changes to avoid spurious nav rebuilds
+  String _lastKnownPermissions =
+      ''; // ✅ Tracks permission changes to avoid spurious nav rebuilds
 
   void _onTabChange(int index) {
     setState(() {
@@ -66,8 +68,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final userScope = context.watch<UserScopeService>();
     final badgeProvider = context.read<BadgeCountProvider>();
 
-    if (_allScreens.isEmpty || (userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null) != _lastKnownBranchId) {
-      _lastKnownBranchId = userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null;
+    if (_allScreens.isEmpty ||
+        (userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null) !=
+            _lastKnownBranchId) {
+      _lastKnownBranchId =
+          userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null;
       _allScreensRebuilt = true; // ← mark that nav items need rebuilding too
       badgeProvider.initializeStream(userScope);
 
@@ -122,6 +127,16 @@ class _HomeScreenState extends State<HomeScreen> {
             label: 'Riders',
           ),
         ),
+        AppTab.manualAssignment: AppScreen(
+          tab: AppTab.manualAssignment,
+          permissionKey: Permissions.canManageManualAssignment,
+          screen: const ManualAssignmentScreen(),
+          navItem: const BottomNavigationBarItem(
+            icon: ManualAssignmentBadge(),
+            activeIcon: ManualAssignmentBadge(isActive: true),
+            label: 'Assignments',
+          ),
+        ),
         AppTab.suppliers: AppScreen(
           tab: AppTab.suppliers,
           permissionKey: Permissions.canManagePurchases,
@@ -169,8 +184,10 @@ class _HomeScreenState extends State<HomeScreen> {
         '${userScope.can(Permissions.canManageOrders)}'
         '${userScope.can(Permissions.canManagePurchases)}'
         '${userScope.can(Permissions.canManageRiders)}'
+        '${userScope.can(Permissions.canManageManualAssignment)}'
         '${userScope.can(Permissions.canManagePOS)}'
-        '${userScope.can(Permissions.canViewKitchenDisplay)}';
+        '${userScope.can(Permissions.canViewKitchenDisplay)}'
+        '${ResponsiveHelper.isMobile(context)}';
 
     final needsRebuild = _screens.isEmpty ||
         newPermissionKey != _lastKnownPermissions ||
@@ -333,7 +350,8 @@ class _HomeScreenState extends State<HomeScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => _BranchStatusToggleSheet(branchIds: userScope.branchIds),
+      builder: (context) =>
+          _BranchStatusToggleSheet(branchIds: userScope.branchIds),
     );
   }
 
@@ -520,6 +538,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (userScope.can(Permissions.canManageRiders)) {
       allowedScreens.add(_allScreens[AppTab.riders]!);
     }
+    if (!ResponsiveHelper.isMobile(context) &&
+        userScope.can(Permissions.canManageManualAssignment)) {
+      allowedScreens.add(_allScreens[AppTab.manualAssignment]!);
+    }
     if (userScope.can(Permissions.canManagePurchases)) {
       allowedScreens.add(_allScreens[AppTab.suppliers]!);
     }
@@ -647,7 +669,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildGlobalBranchSelector() {
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
-    final showSelector = userScope.isSuperAdmin && userScope.branchIds.length > 1;
+    final showSelector =
+        userScope.isSuperAdmin && userScope.branchIds.length > 1;
 
     if (!showSelector) return const SizedBox.shrink();
 
@@ -675,7 +698,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Text(
                   branchFilter.selectedBranchId == null
                       ? 'All Branches'
-                      : branchFilter.getBranchName(branchFilter.selectedBranchId!),
+                      : branchFilter
+                          .getBranchName(branchFilter.selectedBranchId!),
                   style: const TextStyle(
                     color: Colors.deepPurple,
                     fontWeight: FontWeight.w600,
@@ -685,7 +709,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(width: 2),
-              const Icon(Icons.arrow_drop_down, color: Colors.deepPurple, size: 18),
+              const Icon(Icons.arrow_drop_down,
+                  color: Colors.deepPurple, size: 18),
             ],
           ),
         ),
@@ -951,8 +976,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Text(
                         item.label ?? '',
                         style: TextStyle(
-                          color: isSelected ? Colors.deepPurple : Colors.grey[800],
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                          color:
+                              isSelected ? Colors.deepPurple : Colors.grey[800],
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.w500,
                           fontSize: 15,
                         ),
                         maxLines: 1,
@@ -1181,7 +1208,9 @@ class BadgeCountProvider with ChangeNotifier {
   String? _currentBranchId;
 
   void initializeStream(UserScopeService userScope) {
-    final branchId = userScope.isSuperAdmin ? null : (userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null);
+    final branchId = userScope.isSuperAdmin
+        ? null
+        : (userScope.branchIds.isNotEmpty ? userScope.branchIds.first : null);
 
     if (_currentBranchId == branchId && _subscription != null) return;
 
@@ -1238,7 +1267,8 @@ class BadgeCountProvider with ChangeNotifier {
 // ✅ NEW: Branch status toggle sheet for SuperAdmin
 class _BranchStatusToggleSheet extends StatefulWidget {
   final List<String> branchIds;
-  const _BranchStatusToggleSheet({Key? key, required this.branchIds}) : super(key: key);
+  const _BranchStatusToggleSheet({Key? key, required this.branchIds})
+      : super(key: key);
 
   @override
   State<_BranchStatusToggleSheet> createState() =>
@@ -1269,9 +1299,10 @@ class _BranchStatusToggleSheetState extends State<_BranchStatusToggleSheet> {
       final List<Map<String, dynamic>> loadedBranches = [];
 
       // Fetch all branches in parallel for better performance
-      final futures = widget.branchIds.map((id) => 
-        FirebaseFirestore.instance.collection('Branch').doc(id).get()
-      ).toList();
+      final futures = widget.branchIds
+          .map((id) =>
+              FirebaseFirestore.instance.collection('Branch').doc(id).get())
+          .toList();
 
       final snapshots = await Future.wait(futures);
 

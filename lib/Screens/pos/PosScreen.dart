@@ -12,6 +12,7 @@ import '../../constants.dart';
 import '../../Widgets/BranchFilterService.dart';
 import '../../services/pos/pos_service.dart';
 import '../../services/pos/pos_models.dart';
+import '../../services/inventory/menu_item_stock_assessment_service.dart';
 import '../../Widgets/PrintingService.dart';
 import 'PosProductTile.dart';
 import 'PosCartPanel.dart';
@@ -30,6 +31,8 @@ class PosScreen extends StatefulWidget {
 }
 
 class _PosScreenState extends State<PosScreen> {
+  final MenuItemStockAssessmentService _stockAssessmentService =
+      MenuItemStockAssessmentService();
   String? _selectedCategoryId; // null = All
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
@@ -820,7 +823,11 @@ class _PosScreenState extends State<PosScreen> {
             final name = data['name']?.toString() ?? 'Item';
             final price = (data['price'] ?? 0).toDouble();
             final imageUrl = data['imageUrl']?.toString();
-            final isAvailable = data['isAvailable'] ?? true;
+            final isAvailable = data['isAvailable'] == true;
+            final outOfStockBranches =
+                List<String>.from(data['outOfStockBranches'] ?? const []);
+            final isMarkedOutOfStock =
+                outOfStockBranches.contains(activeBranchId);
 
             final catId = data['categoryId']?.toString();
             final catName =
@@ -831,16 +838,54 @@ class _PosScreenState extends State<PosScreen> {
               name: name,
               price: price,
               imageUrl: imageUrl,
-              isAvailable: isAvailable == true,
+              isAvailable: isAvailable && !isMarkedOutOfStock,
+              disableTapWhenUnavailable: false,
+              unavailableLabel:
+                  isMarkedOutOfStock ? 'Out of Stock' : 'Unavailable',
               chinColor: chinColor,
               onTap: () async {
-                final pos = context.read<PosService>();
+                if (!isAvailable) {
+                  await _showMenuItemBlockedDialog(
+                    context,
+                    title: 'Dish Unavailable',
+                    message:
+                        '"$name" is currently disabled in menu settings for this branch.',
+                  );
+                  return;
+                }
+
+                if (isMarkedOutOfStock) {
+                  await _showMenuItemBlockedDialog(
+                    context,
+                    title: 'Out of Stock',
+                    message:
+                        '"$name" is marked out of stock for this branch. Restock its ingredients or update the dish availability before adding it.',
+                  );
+                  return;
+                }
+
+                final assessment = await _stockAssessmentService.assessMenuItem(
+                  menuItemId: doc.id,
+                  menuItemName: name,
+                  explicitRecipeId: data['recipeId']?.toString(),
+                );
+                if (!mounted) return;
+
+                final canProceed = await _confirmStockAssessmentForAdd(
+                  context: this.context,
+                  itemName: name,
+                  assessment: assessment,
+                );
+                if (!canProceed || !mounted) return;
+
+                final pos = this.context.read<PosService>();
                 final variants = data['variants'] as Map<String, dynamic>?;
 
                 List<PosAddon> selectedAddons = [];
                 if (variants != null && variants.isNotEmpty) {
+                  if (!mounted) return;
                   final result = await showDialog<List<PosAddon>>(
-                    context: context,
+                    context: this.context,
                     builder: (ctx) => VariantSelectionDialog(
                       productName: name,
                       variants: variants,
@@ -866,6 +911,260 @@ class _PosScreenState extends State<PosScreen> {
         );
       },
     );
+  }
+
+  Future<void> _showMenuItemBlockedDialog(
+    BuildContext context, {
+    required String title,
+    required String message,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red[600]),
+            const SizedBox(width: 10),
+            Expanded(child: Text(title)),
+          ],
+        ),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool> _confirmStockAssessmentForAdd({
+    required BuildContext context,
+    required String itemName,
+    required MenuItemStockAssessment assessment,
+  }) async {
+    if (!assessment.needsAttention) {
+      return true;
+    }
+
+    final hasBlockingIssues = assessment.hasBlockingIssues;
+    final hasLowStockIssues = assessment.hasLowStockIssues;
+    final accentColor = hasBlockingIssues
+        ? Colors.red
+        : hasLowStockIssues
+            ? Colors.orange
+            : Colors.blue;
+    final summaryColor = hasBlockingIssues
+        ? Colors.red.shade700
+        : hasLowStockIssues
+            ? Colors.orange.shade800
+            : Colors.blue.shade700;
+    final title = hasBlockingIssues
+        ? 'Out of Stock'
+        : hasLowStockIssues
+            ? 'Low Stock Warning'
+            : 'Inventory Tracking Warning';
+    final summary = hasBlockingIssues
+        ? '"$itemName" uses ingredients that are currently out of stock.'
+        : hasLowStockIssues
+            ? '"$itemName" uses low-stock ingredients.'
+            : '"$itemName" is not fully connected to inventory tracking.';
+    final primaryLabel = hasBlockingIssues
+        ? 'Close'
+        : hasLowStockIssues
+            ? 'Add Anyway'
+            : 'Continue';
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: !hasBlockingIssues,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(
+              hasBlockingIssues
+                  ? Icons.cancel_rounded
+                  : Icons.inventory_2_rounded,
+              color: accentColor,
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text(title)),
+          ],
+        ),
+        content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: accentColor.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Text(
+                    summary,
+                    style: TextStyle(
+                      color: summaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (assessment.warnings.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Warnings',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...assessment.warnings.map(
+                    (warning) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.info_outline_rounded,
+                            size: 18,
+                            color: accentColor,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(warning)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+                if (assessment.ingredientIssues.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Affected Ingredients',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ...assessment.ingredientIssues.map(
+                    (issue) => Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: issue.isBlocking
+                            ? Colors.red.withValues(alpha: 0.05)
+                            : Colors.orange.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: issue.isBlocking
+                              ? Colors.red.withValues(alpha: 0.18)
+                              : Colors.orange.withValues(alpha: 0.22),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  issue.ingredientName,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: issue.isBlocking
+                                      ? Colors.red.withValues(alpha: 0.12)
+                                      : Colors.orange.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  issue.statusLabel,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: issue.isBlocking
+                                        ? Colors.red.shade700
+                                        : Colors.orange.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Available: ${issue.availableStock.toStringAsFixed(2)} ${issue.unit}  |  Need: ${issue.requiredStock.toStringAsFixed(2)} ${issue.unit}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Possible servings at current stock: ${issue.possibleServings}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                          if (issue.note?.isNotEmpty == true) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              issue.note!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: issue.isBlocking
+                                    ? Colors.red.shade700
+                                    : Colors.orange.shade800,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          if (!hasBlockingIssues)
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, !hasBlockingIssues),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: accentColor,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(primaryLabel),
+          ),
+        ],
+      ),
+    );
+
+    return result ?? false;
   }
 
   // ── Actions ─────────────────────────────────────────────────
