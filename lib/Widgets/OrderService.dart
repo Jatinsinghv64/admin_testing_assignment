@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import '../main.dart';
 import 'TimeUtils.dart';
@@ -8,6 +10,10 @@ import '../Widgets/RiderAssignment.dart';
 import '../constants.dart';
 import '../utils/security_utils.dart';
 import '../services/inventory/InventoryService.dart';
+import '../services/pos/pos_models.dart';
+import '../services/pos/pos_service.dart';
+
+
 
 class OrderService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -192,7 +198,7 @@ class OrderService {
         // Log the return in history
         'statusHistory': FieldValue.arrayUnion([{
           'status': AppConstants.statusPreparing,
-          'timestamp': FieldValue.serverTimestamp(),
+          'timestamp': Timestamp.now(),
           'note': 'Exchange Requested: $reason'
         }])
       });
@@ -243,7 +249,7 @@ class OrderService {
               'statusHistory': FieldValue.arrayUnion([
                 {
                   'status': AppConstants.statusCancelled,
-                  'timestamp': FieldValue.serverTimestamp(),
+                  'timestamp': Timestamp.now(),
                   'by': sanitizedEmail,
                   if (sanitizedReason != null) 'reason': sanitizedReason,
                 }
@@ -283,13 +289,17 @@ class OrderService {
               throw Exception("Cannot update order - it is already $currentStatus");
             }
 
-            final Map<String, dynamic> updateData = {'status': newStatus};
+            final Map<String, dynamic> updateData = {
+              'status': newStatus,
+              'orderStatus': newStatus,
+              'lastUpdated': FieldValue.serverTimestamp(),
+            };
 
             // Always append to statusHistory for audit
             updateData['statusHistory'] = FieldValue.arrayUnion([
               {
                 'status': newStatus,
-                'timestamp': FieldValue.serverTimestamp(),
+                'timestamp': Timestamp.now(),
                 'by': sanitizedEmail,
                 if (sanitizedReason != null) 'reason': sanitizedReason,
               }
@@ -320,26 +330,43 @@ class OrderService {
                 updateData['autoAssignStarted'] = FieldValue.serverTimestamp();
                 updateData['lastAssignmentUpdate'] = FieldValue.serverTimestamp();
               }
+
+              // KDS Sync: Add acceptance and preparing timestamps
+              updateData['preparingAt'] = FieldValue.serverTimestamp();
+              updateData['acceptedAt'] = FieldValue.serverTimestamp();
+              updateData['acceptedBy'] = sanitizedEmail;
+              updateData['kitchenDecisionStatus'] = 'accepted';
+              updateData['kitchenDecisionAt'] = FieldValue.serverTimestamp();
+              updateData['kitchenDecisionBy'] = sanitizedEmail;
+              updateData['timestamps.${AppConstants.statusPreparing}'] = FieldValue.serverTimestamp();
             }
 
             if (newStatus == AppConstants.statusDelivered) {
               updateData['timestamps.delivered'] = FieldValue.serverTimestamp();
+              updateData['deliveredAt'] = FieldValue.serverTimestamp();
             } else if (AppConstants.statusEquals(newStatus, AppConstants.statusPickedUp)) {
               updateData['timestamps.pickedUp'] = FieldValue.serverTimestamp();
+              updateData['pickedUpAt'] = FieldValue.serverTimestamp();
             } else if (newStatus == AppConstants.statusRiderAssigned) {
               updateData['timestamps.riderAssigned'] = FieldValue.serverTimestamp();
+              updateData['riderAssignedAt'] = FieldValue.serverTimestamp();
             } else if (newStatus == AppConstants.statusPrepared) {
               updateData['timestamps.prepared'] = FieldValue.serverTimestamp();
+              updateData['preparedAt'] = FieldValue.serverTimestamp();
             } else if (newStatus == AppConstants.statusServed) {
               updateData['timestamps.served'] = FieldValue.serverTimestamp();
-            } else if (newStatus == AppConstants.statusPaid) {
-              updateData['timestamps.paid'] = FieldValue.serverTimestamp();
+              updateData['servedAt'] = FieldValue.serverTimestamp();
             } else if (newStatus == AppConstants.statusCollected) {
               updateData['timestamps.collected'] = FieldValue.serverTimestamp();
+              updateData['collectedAt'] = FieldValue.serverTimestamp();
+            } else if (newStatus == AppConstants.statusPaid) {
+              updateData['timestamps.paid'] = FieldValue.serverTimestamp();
+              updateData['paidAt'] = FieldValue.serverTimestamp();
             } else if (newStatus == AppConstants.statusRefunded) {
               updateData['timestamps.refunded'] = FieldValue.serverTimestamp();
               if (sanitizedReason != null) updateData['refundReason'] = sanitizedReason;
             }
+
 
             transaction.update(orderRef, updateData);
 
@@ -392,9 +419,125 @@ class OrderService {
           continue;
         }
         debugPrint("Error updating order: $e");
-        FirebaseCrashlytics.instance.recordError(e, stack, reason: 'Order Status Update Failed: $orderId -> $newStatus');
+        if (!kIsWeb) {
+          FirebaseCrashlytics.instance.recordError(e, stack, reason: 'Order Status Update Failed: $orderId -> $newStatus');
+        }
         throw Exception("Failed to update order status: ${e.toString()}");
+
       }
     }
   }
+
+  Future<void> markOrderAsPaidWithPayment(
+      BuildContext context, String orderId, PosPayment payment,
+      {String? currentUserEmail}) async {
+    final sanitizedOrderId = InputSanitizer.sanitizeDocumentId(orderId);
+    final sanitizedEmail = currentUserEmail != null
+        ? InputSanitizer.sanitizeEmail(currentUserEmail)
+        : 'Admin';
+
+    final orderRef = _db.collection(AppConstants.collectionOrders).doc(sanitizedOrderId);
+
+    try {
+      await _db.runTransaction((transaction) async {
+        final snapshot = await transaction.get(orderRef);
+        if (!snapshot.exists) throw Exception("Order does not exist!");
+
+        final data = snapshot.data() as Map<String, dynamic>;
+        
+        // Build robust payment fields compatible with POS
+        final paymentFields = _buildPaymentWriteFields(payment);
+        
+        final Map<String, dynamic> updateData = {
+          ...paymentFields,
+          'status': AppConstants.statusPaid,
+          'orderStatus': AppConstants.statusPaid,
+          'isPaid': true,
+          'paidAt': FieldValue.serverTimestamp(),
+          'paymentStatus': 'paid',
+          'lastUpdated': FieldValue.serverTimestamp(),
+        };
+
+
+        // Update status history
+        updateData['statusHistory'] = FieldValue.arrayUnion([
+          {
+            'status': AppConstants.statusPaid,
+            'timestamp': Timestamp.now(),
+            'by': sanitizedEmail,
+            'note': 'Order marked as paid via Admin Dashboard with ${payment.method} payment.',
+          }
+        ]);
+
+        // Add timestamp for paid status
+        updateData['timestamps.paid'] = FieldValue.serverTimestamp();
+
+        // Perform inventory deduction if not already done
+        if (data['inventoryDeducted'] != true) {
+          await InventoryService().performDeductionInTransaction(
+            transaction: transaction,
+            orderId: sanitizedOrderId,
+            branchIds: data['branchIds'] is List 
+                ? List<String>.from(data['branchIds']) 
+                : [data['branchId']?.toString() ?? ''],
+            recordedBy: sanitizedEmail,
+          );
+        }
+
+        // IMPORTANT: Perform the primary order update LAST to satisfy Firestore Web transaction requirements
+        // (All gets must happen before any writes)
+        transaction.update(orderRef, updateData);
+      }).timeout(AppConstants.firestoreWriteTimeout);
+
+      // ── New Table Clearing Logic ──
+      // Fetch fresh data for table cleanup
+      final finalSnap = await orderRef.get();
+      if (finalSnap.exists) {
+        final finalData = finalSnap.data() as Map<String, dynamic>;
+        final isDineIn = AppConstants.isDineInOrder(finalData['Order_type'] ?? finalData['orderType']);
+        final tableId = finalData['tableId']?.toString() ?? '';
+        
+        if (isDineIn && tableId.isNotEmpty) {
+          final branchIds = finalData['branchIds'] is List 
+              ? List<String>.from(finalData['branchIds']) 
+              : [finalData['branchId']?.toString() ?? ''];
+              
+          // Trigger table cleanup (this checks if any other active orders exist on this table)
+          await PosService.cleanupTableIfEmpty(
+            branchIds: branchIds,
+            tableId: tableId,
+          );
+        }
+      }
+    } catch (e, stack) {
+
+      debugPrint("Error marking order as paid: $e");
+      if (!kIsWeb) {
+        FirebaseCrashlytics.instance.recordError(e, stack, reason: 'Order Payment Update Failed: $orderId');
+      }
+      throw Exception("Failed to mark order as paid: ${e.toString()}");
+
+    }
+  }
+
+  Map<String, dynamic> _buildPaymentWriteFields(PosPayment payment) {
+    final breakdown = payment.splits.isNotEmpty ? payment.splits : <PosPayment>[payment];
+    final paymentMethods = <String>[];
+    for (final part in breakdown) {
+      final method = part.method.trim().toLowerCase();
+      if (method.isEmpty || paymentMethods.contains(method)) continue;
+      paymentMethods.add(method);
+    }
+
+    return {
+      'paymentMethod': payment.isSplit ? 'split' : payment.method,
+      'paymentMethods': paymentMethods,
+      'paymentAmount': _roundMoney(payment.amount),
+      'paymentAppliedAmount': _roundMoney(payment.appliedAmount),
+      'paymentChange': _roundMoney(payment.change),
+      'payments': breakdown.map((part) => part.toMap()).toList(),
+    };
+  }
+
+  double _roundMoney(double value) => double.parse(value.toStringAsFixed(2));
 }

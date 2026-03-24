@@ -405,324 +405,267 @@ class _BranchTableCard extends StatelessWidget {
 
   void _showAddTableDialog(BuildContext context, String branchId,
       Map<String, dynamic> currentTables) {
-    _showTableDialog(
+    _showStandardTableDialog(
       context,
       branchId: branchId,
       existingTableData: const {},
       isEdit: false,
     );
   }
+}
 
-  void _showTableDialog(
-    BuildContext context, {
-    required String branchId,
-    required Map<String, dynamic> existingTableData,
-    required bool isEdit,
-    String? existingTableId,
-  }) {
-    final formKey = GlobalKey<FormState>();
-    final idCtrl = TextEditingController(text: existingTableId ?? '');
-    final seatsCtrl = TextEditingController(
-      text: (existingTableData['seats'] ?? '').toString(),
-    );
+// ── Shared Table Dialog ───────────────────────────────────────────
+void _showStandardTableDialog(
+  BuildContext context, {
+  required String branchId,
+  bool isEdit = false,
+  String? existingTableId,
+  Map<String, dynamic>? existingTableData,
+}) {
+  final nameController =
+      TextEditingController(text: existingTableData?['name']?.toString() ?? '');
+  final zoneController = TextEditingController(
+      text: (existingTableData?['zone'] ?? existingTableData?['floor'] ?? '')
+          .toString());
+  final seatsController = TextEditingController(
+      text: (existingTableData?['seats'] ?? '4').toString());
+  String selectedShape =
+      (existingTableData?['shape'] ?? 'square').toString().toLowerCase();
+  if (selectedShape != 'round' && selectedShape != 'square') {
+    selectedShape = 'square';
+  }
 
-    const List<String> kStatusValues = ['available', 'occupied', 'reserved'];
-    const Map<String, String> kStatusLabels = {
-      'available': 'Available',
-      'occupied': 'Occupied',
-      'reserved': 'Reserved',
-    };
-
-    String normalizeStatus(String? raw) {
-      final s = (raw ?? '').trim().toLowerCase();
-      if (kStatusValues.contains(s)) return s;
-      switch (s) {
-        case 'ordered':
-        case 'booked':
-          return 'reserved';
-        case 'busy':
-          return 'occupied';
-        case 'free':
-          return 'available';
-        default:
-          return 'available';
-      }
-    }
-
-    String status = normalizeStatus(existingTableData['status']?.toString());
-
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setState) {
-          return Dialog(
+  showDialog(
+    context: context,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 600),
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+            titlePadding: EdgeInsets.zero,
+            title: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: const BoxDecoration(
+                color: Colors.deepPurple,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Row(
                 children: [
-                  // Header
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.deepPurple.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          isEdit ? Icons.edit_rounded : Icons.add_rounded,
-                          color: Colors.deepPurple,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Text(
-                          isEdit ? 'Edit Table' : 'Add New Table',
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.deepPurple,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close_rounded),
-                        color: Colors.grey[600],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Form
-                  Form(
-                    key: formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Table ID
-                        TextFormField(
-                          controller: idCtrl,
-                          enabled: !isEdit,
-                          decoration: InputDecoration(
-                            labelText: 'Table ID',
-                            hintText: 'Enter table identifier',
-                            prefixIcon: Icon(Icons.tag_rounded,
-                                color: Colors.deepPurple.shade400),
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2),
-                            ),
-                            filled: true,
-                            fillColor: isEdit ? Colors.grey[100] : Colors.white,
-                          ),
-                          validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Table ID is required'
-                              : null,
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Seats
-                        TextFormField(
-                          controller: seatsCtrl,
-                          decoration: InputDecoration(
-                            labelText: 'Number of Seats',
-                            hintText: 'Enter seat capacity',
-                            prefixIcon: Icon(Icons.chair_rounded,
-                                color: Colors.deepPurple.shade400),
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2),
-                            ),
-                            filled: true,
-                            fillColor: Colors.white,
-                          ),
-                          keyboardType: TextInputType.number,
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty)
-                              return 'Number of seats is required';
-                            final seats = int.tryParse(v);
-                            if (seats == null || seats <= 0)
-                              return 'Please enter a valid number greater than 0';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Status
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Table Status',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                                color: Colors.grey[700],
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              decoration: BoxDecoration(
-                                border: Border.all(color: Colors.grey[300]!),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: DropdownButtonFormField<String>(
-                                value: kStatusValues.contains(status)
-                                    ? status
-                                    : 'available',
-                                isExpanded: true,
-                                decoration: InputDecoration(
-                                  border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 12),
-                                  prefixIcon: Icon(Icons.info_outline_rounded,
-                                      color: Colors.deepPurple.shade400),
-                                ),
-                                items: kStatusValues
-                                    .map(
-                                      (v) => DropdownMenuItem<String>(
-                                        value: v,
-                                        child: Row(
-                                          children: [
-                                            Container(
-                                              width: 12,
-                                              height: 12,
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: v == 'available'
-                                                    ? Colors.green
-                                                    : v == 'occupied'
-                                                        ? Colors.orange
-                                                        : Colors.blue,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Text(kStatusLabels[v]!),
-                                          ],
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (val) => setState(
-                                    () => status = normalizeStatus(val)),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-
-                  // Action buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            side: BorderSide(color: Colors.grey[400]!),
-                          ),
-                          child: Text(
-                            'Cancel',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey[700],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            if (!formKey.currentState!.validate()) return;
-
-                            final tableId = idCtrl.text.trim();
-                            final seats = int.parse(seatsCtrl.text.trim());
-
-                            final branchRef = FirebaseFirestore.instance
-                                .collection('Branch')
-                                .doc(branchId);
-                            final snap = await branchRef.get();
-                            final Map<String, dynamic> allTables =
-                                Map<String, dynamic>.from(snap.data()?['Tables']
-                                        as Map<String, dynamic>? ??
-                                    {});
-
-                            if (!isEdit && allTables.containsKey(tableId)) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                      'Table ID already exists in this branch'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                              return;
-                            }
-
-                            allTables[tableId] = {
-                              'seats': seats,
-                              'status': status,
-                            };
-
-                            await branchRef.update({'Tables': allTables});
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  isEdit
-                                      ? 'Table updated successfully'
-                                      : 'Table "$tableId" added successfully',
-                                ),
-                                backgroundColor: Colors.green,
-                              ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.deepPurple,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                          ),
-                          child: Text(
-                            isEdit ? 'Update Table' : 'Add Table',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                  Icon(isEdit ? Icons.edit_rounded : Icons.add_rounded,
+                      color: Colors.white),
+                  const SizedBox(width: 12),
+                  Text(
+                    isEdit ? 'Edit Table' : 'Add New Table',
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
             ),
+            content: SizedBox(
+              width: 400,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 8),
+                    _buildDialogField(
+                      label: 'Table Name / Number',
+                      controller: nameController,
+                      icon: Icons.badge_outlined,
+                      hint: 'e.g. Table 1 or T-1',
+                    ),
+                    const SizedBox(height: 16),
+                    _buildDialogField(
+                      label: 'Zone / Floor',
+                      controller: zoneController,
+                      icon: Icons.layers_outlined,
+                      hint: 'e.g. Ground Floor, VIP, Terrace',
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildDialogField(
+                            label: 'Seats',
+                            controller: seatsController,
+                            icon: Icons.person_outline,
+                            keyboardType: TextInputType.number,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Shape',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Container(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[50],
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.grey[200]!),
+                                ),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String>(
+                                    value: selectedShape,
+                                    isExpanded: true,
+                                    items: ['square', 'round']
+                                        .map((shape) => DropdownMenuItem(
+                                              value: shape,
+                                              child: Text(shape[0]
+                                                      .toUpperCase() +
+                                                  shape.substring(1)),
+                                            ))
+                                        .toList(),
+                                    onChanged: (val) {
+                                      if (val != null) {
+                                        setDialogState(() {
+                                          selectedShape = val;
+                                        });
+                                      }
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel', style: TextStyle(color: Colors.grey[600])),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final name = nameController.text.trim();
+                  if (name.isEmpty) return;
+
+                  final zone = zoneController.text.trim();
+                  final seats = int.tryParse(seatsController.text) ?? 4;
+
+                  final tableMap = {
+                    'name': name,
+                    'zone': zone,
+                    'seats': seats,
+                    'shape': selectedShape,
+                    'status': existingTableData?['status'] ?? 'available',
+                    'updatedAt': FieldValue.serverTimestamp(),
+                    if (!isEdit) 'createdAt': FieldValue.serverTimestamp(),
+                  };
+
+                  try {
+                    final branchRef = FirebaseFirestore.instance
+                        .collection('Branch')
+                        .doc(branchId);
+                    final snap = await branchRef.get();
+                    final Map<String, dynamic> allTables =
+                        Map<String, dynamic>.from(snap.data()?['Tables']
+                                as Map<String, dynamic>? ??
+                            {});
+
+                    if (isEdit && existingTableId != null) {
+                      allTables[existingTableId] = tableMap;
+                    } else {
+                      final newId =
+                          DateTime.now().millisecondsSinceEpoch.toString();
+                      allTables[newId] = tableMap;
+                    }
+
+                    await branchRef.update({'Tables': allTables});
+
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(isEdit
+                            ? 'Table updated successfully'
+                            : 'Table added successfully'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error: $e')),
+                    );
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepPurple,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                child: Text(isEdit ? 'Save Changes' : 'Add Table'),
+              ),
+            ],
           );
         },
+      );
+    },
+  );
+}
+
+Widget _buildDialogField({
+  required String label,
+  required TextEditingController controller,
+  required IconData icon,
+  String? hint,
+  TextInputType keyboardType = TextInputType.text,
+}) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: Colors.grey[600],
+        ),
       ),
-    );
-  }
+      const SizedBox(height: 8),
+      TextField(
+        controller: controller,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(
+          hintText: hint,
+          prefixIcon: Icon(icon, size: 20, color: Colors.deepPurple),
+          filled: true,
+          fillColor: Colors.grey[50],
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey[200]!),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey[200]!),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.deepPurple.withOpacity(0.5)),
+          ),
+        ),
+      ),
+    ],
+  );
 }
 
 class _TableListItem extends StatelessWidget {
@@ -895,7 +838,7 @@ class _TableListItem extends StatelessWidget {
   }
 
   void _showEditTableDialog(BuildContext context) {
-    _showTableDialog(
+    _showStandardTableDialog(
       context,
       branchId: branchId,
       existingTableData: tableData,
@@ -962,316 +905,6 @@ class _TableListItem extends StatelessWidget {
     }
   }
 
-  void _showTableDialog(
-    BuildContext context, {
-    required String branchId,
-    required Map<String, dynamic> existingTableData,
-    required bool isEdit,
-    String? existingTableId,
-  }) {
-    final formKey = GlobalKey<FormState>();
-    final idCtrl = TextEditingController(text: existingTableId ?? '');
-    final seatsCtrl = TextEditingController(
-      text: (existingTableData['seats'] ?? '').toString(),
-    );
-
-    const List<String> kStatusValues = ['available', 'occupied', 'reserved'];
-    const Map<String, String> kStatusLabels = {
-      'available': 'Available',
-      'occupied': 'Occupied',
-      'reserved': 'Reserved',
-    };
-
-    String normalizeStatus(String? raw) {
-      final s = (raw ?? '').trim().toLowerCase();
-      if (kStatusValues.contains(s)) return s;
-      switch (s) {
-        case 'ordered':
-        case 'booked':
-          return 'reserved';
-        case 'busy':
-          return 'occupied';
-        case 'free':
-          return 'available';
-        default:
-          return 'available';
-      }
-    }
-
-    String status = normalizeStatus(existingTableData['status']?.toString());
-
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setState) {
-          return Dialog(
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 600),
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.deepPurple.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          isEdit ? Icons.edit_rounded : Icons.add_rounded,
-                          color: Colors.deepPurple,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Text(
-                          isEdit ? 'Edit Table' : 'Add New Table',
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.deepPurple,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close_rounded),
-                        color: Colors.grey[600],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Form
-                  Form(
-                    key: formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Table ID
-                        TextFormField(
-                          controller: idCtrl,
-                          enabled: !isEdit,
-                          decoration: InputDecoration(
-                            labelText: 'Table ID',
-                            hintText: 'Enter table identifier',
-                            prefixIcon: Icon(Icons.tag_rounded,
-                                color: Colors.deepPurple.shade400),
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2),
-                            ),
-                            filled: true,
-                            fillColor: isEdit ? Colors.grey[100] : Colors.white,
-                          ),
-                          validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Table ID is required'
-                              : null,
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Seats
-                        TextFormField(
-                          controller: seatsCtrl,
-                          decoration: InputDecoration(
-                            labelText: 'Number of Seats',
-                            hintText: 'Enter seat capacity',
-                            prefixIcon: Icon(Icons.chair_rounded,
-                                color: Colors.deepPurple.shade400),
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2),
-                            ),
-                            filled: true,
-                            fillColor: Colors.white,
-                          ),
-                          keyboardType: TextInputType.number,
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty)
-                              return 'Number of seats is required';
-                            final seats = int.tryParse(v);
-                            if (seats == null || seats <= 0)
-                              return 'Please enter a valid number greater than 0';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Status
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Table Status',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                                color: Colors.grey[700],
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              decoration: BoxDecoration(
-                                border: Border.all(color: Colors.grey[300]!),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: DropdownButtonFormField<String>(
-                                value: kStatusValues.contains(status)
-                                    ? status
-                                    : 'available',
-                                isExpanded: true,
-                                decoration: InputDecoration(
-                                  border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 12),
-                                  prefixIcon: Icon(Icons.info_outline_rounded,
-                                      color: Colors.deepPurple.shade400),
-                                ),
-                                items: kStatusValues
-                                    .map(
-                                      (v) => DropdownMenuItem<String>(
-                                        value: v,
-                                        child: Row(
-                                          children: [
-                                            Container(
-                                              width: 12,
-                                              height: 12,
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: v == 'available'
-                                                    ? Colors.green
-                                                    : v == 'occupied'
-                                                        ? Colors.orange
-                                                        : Colors.blue,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Text(kStatusLabels[v]!),
-                                          ],
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (val) => setState(
-                                    () => status = normalizeStatus(val)),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-
-                  // Action buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            side: BorderSide(color: Colors.grey[400]!),
-                          ),
-                          child: Text(
-                            'Cancel',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey[700],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            if (!formKey.currentState!.validate()) return;
-
-                            final tId = idCtrl.text.trim();
-                            final seats = int.parse(seatsCtrl.text.trim());
-
-                            final branchRef = FirebaseFirestore.instance
-                                .collection('Branch')
-                                .doc(branchId);
-                            final snap = await branchRef.get();
-                            final Map<String, dynamic> tables =
-                                Map<String, dynamic>.from(snap.data()?['Tables']
-                                        as Map<String, dynamic>? ??
-                                    {});
-
-                            if (!isEdit && tables.containsKey(tId)) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                      'Table ID already exists in this branch'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                              return;
-                            }
-
-                            tables[tId] = {
-                              'seats': seats,
-                              'status': status,
-                            };
-
-                            await branchRef.update({'Tables': tables});
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  isEdit
-                                      ? 'Table updated successfully'
-                                      : 'Table "$tId" added successfully',
-                                ),
-                                backgroundColor: Colors.green,
-                              ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.deepPurple,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                          ),
-                          child: Text(
-                            isEdit ? 'Update Table' : 'Add Table',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
 }
 
 class _TableCardLarge extends StatelessWidget {

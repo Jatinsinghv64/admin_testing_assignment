@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-class KitchenLoadCard extends StatelessWidget {
+class KitchenLoadCard extends StatefulWidget {
   final int preparationTime;
   final ValueChanged<int> onPreparationTimeChanged;
   final bool isUpdatingPrepTime;
@@ -9,6 +9,7 @@ class KitchenLoadCard extends StatelessWidget {
   final List<Map<String, dynamic>> throttleRules;
   final VoidCallback onAddRule;
   final ValueChanged<int> onDeleteRule;
+  final ValueChanged<int> onEditRule;
 
   const KitchenLoadCard({
     super.key,
@@ -20,7 +21,29 @@ class KitchenLoadCard extends StatelessWidget {
     required this.throttleRules,
     required this.onAddRule,
     required this.onDeleteRule,
+    required this.onEditRule,
   });
+
+  @override
+  State<KitchenLoadCard> createState() => _KitchenLoadCardState();
+}
+
+class _KitchenLoadCardState extends State<KitchenLoadCard> {
+  late int _localPrepTime;
+
+  @override
+  void initState() {
+    super.initState();
+    _localPrepTime = widget.preparationTime;
+  }
+
+  @override
+  void didUpdateWidget(KitchenLoadCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.preparationTime != widget.preparationTime && !widget.isUpdatingPrepTime) {
+      _localPrepTime = widget.preparationTime;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -134,7 +157,7 @@ class KitchenLoadCard extends StatelessWidget {
                     text: TextSpan(
                       children: [
                         TextSpan(
-                          text: '+$preparationTime',
+                          text: '+${widget.isUpdatingPrepTime ? widget.preparationTime : _localPrepTime}',
                           style: textTheme.headlineSmall?.copyWith(
                             color: Colors.deepPurple,
                             fontWeight: FontWeight.w900,
@@ -164,10 +187,17 @@ class KitchenLoadCard extends StatelessWidget {
                   overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
                 ),
                 child: Slider(
-                  value: preparationTime.toDouble(),
+                  value: _localPrepTime.toDouble().clamp(0, 60),
                   min: 0,
                   max: 60,
-                  onChanged: (v) => onPreparationTimeChanged(v.round()),
+                  onChanged: (v) {
+                    setState(() {
+                      _localPrepTime = v.round();
+                    });
+                  },
+                  onChangeEnd: (v) {
+                    widget.onPreparationTimeChanged(v.round());
+                  },
                 ),
               ),
               Row(
@@ -199,7 +229,7 @@ class KitchenLoadCard extends StatelessWidget {
                       ),
                     ),
                     TextButton(
-                      onPressed: onAddRule,
+                      onPressed: widget.onAddRule,
                       style: TextButton.styleFrom(
                         padding: EdgeInsets.zero,
                         minimumSize: Size.zero,
@@ -216,7 +246,7 @@ class KitchenLoadCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-                ...throttleRules.asMap().entries.map((entry) {
+                ...widget.throttleRules.asMap().entries.map((entry) {
                   final index = entry.key;
                   final rule = entry.value;
                   return Padding(
@@ -250,9 +280,18 @@ class KitchenLoadCard extends StatelessWidget {
                                 ),
                             ],
                           ),
-                          GestureDetector(
-                            onTap: () => onDeleteRule(index),
-                            child: const Icon(Icons.close, color: const Color(0xFF64748b), size: 12),
+                          Row(
+                            children: [
+                              GestureDetector(
+                                onTap: () => widget.onEditRule(index),
+                                child: const Icon(Icons.edit, color: Color(0xFF64748b), size: 14),
+                              ),
+                              const SizedBox(width: 12),
+                              GestureDetector(
+                                onTap: () => widget.onDeleteRule(index),
+                                child: const Icon(Icons.close, color: Color(0xFF64748b), size: 14),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -295,8 +334,8 @@ class KitchenLoadCard extends StatelessWidget {
                   ],
                 ),
                 Switch(
-                  value: rushModeOverride,
-                  onChanged: onRushModeChanged,
+                  value: widget.rushModeOverride,
+                  onChanged: widget.onRushModeChanged,
                   activeColor: Colors.deepPurple,
                   activeTrackColor: Colors.deepPurple.withOpacity(0.2),
                 ),

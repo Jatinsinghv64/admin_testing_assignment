@@ -1209,7 +1209,7 @@ class PosService extends ChangeNotifier {
       }).timeout(_firestoreWriteTimeout);
 
       for (final tableId in tablesToCleanup) {
-        await _cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
+        await cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
       }
 
       clearCart();
@@ -1368,7 +1368,7 @@ class PosService extends ChangeNotifier {
       if (shouldCleanupTable &&
           resolvedTableId != null &&
           resolvedBranchIds.isNotEmpty) {
-        await _cleanupTableIfEmpty(
+        await cleanupTableIfEmpty(
           branchIds: resolvedBranchIds,
           tableId: resolvedTableId!,
         );
@@ -1565,7 +1565,7 @@ class PosService extends ChangeNotifier {
       }).timeout(_firestoreWriteTimeout);
 
       if (tableId != null && effectiveBranchIds.isNotEmpty) {
-        _cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
+        cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
       }
       notifyListeners();
     } catch (e) {
@@ -1637,7 +1637,7 @@ class PosService extends ChangeNotifier {
       }).timeout(_firestoreWriteTimeout);
 
       if (tableId != null && effectiveBranchIds.isNotEmpty) {
-        _cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
+        cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
       }
       notifyListeners();
     } catch (e) {
@@ -1832,7 +1832,7 @@ class PosService extends ChangeNotifier {
         if (tableId != null &&
             branchIdsList != null &&
             branchIdsList.isNotEmpty) {
-          await _cleanupTableIfEmpty(
+          await cleanupTableIfEmpty(
               branchIds: branchIdsList.cast<String>(), tableId: tableId);
         }
       }
@@ -1903,7 +1903,7 @@ class PosService extends ChangeNotifier {
           AppConstants.statusServed,
         ]).get();
         if (snapshot.docs.isEmpty) {
-          await _cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
+          await cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
           return true;
         }
         for (final doc in snapshot.docs) {
@@ -1923,7 +1923,7 @@ class PosService extends ChangeNotifier {
         await batch.commit();
       }
       if (tableId != null && branchIds != null && branchIds.isNotEmpty) {
-        await _cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
+        await cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
       }
       notifyListeners();
       return true;
@@ -1935,7 +1935,7 @@ class PosService extends ChangeNotifier {
 
   /// Helper to check if a table has any remaining active orders and free it if not.
   /// Moved OUTSIDE of transactions to avoid timeouts and blocking.
-  static Future<void> _cleanupTableIfEmpty({
+  static Future<void> cleanupTableIfEmpty({
     required List<String> branchIds,
     required String tableId,
   }) async {

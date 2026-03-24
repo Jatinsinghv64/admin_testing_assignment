@@ -38,11 +38,91 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
   StreamSubscription? _deliveredOrdersSub;
   StreamSubscription? _incidentsSub;
 
+  // Stable stream references
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _directoryStream;
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _mapStream;
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _trackingStream;
+
+  List<String>? _lastFilterBranchIds;
+  String? _lastFilterStatus;
+
+  void _updateStableStreams(List<String> filterBranchIds, List<String> userBranchIds) {
+    final bool branchIdsChanged = _lastFilterBranchIds == null || 
+        _lastFilterBranchIds!.length != filterBranchIds.length ||
+        !_lastFilterBranchIds!.every((id) => filterBranchIds.contains(id));
+    
+    final bool statusChanged = _lastFilterStatus != _filterStatus;
+
+    if (branchIdsChanged || statusChanged) {
+      // 1. Directory Query
+      Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('Drivers').orderBy('name');
+      if (filterBranchIds.isNotEmpty) {
+        if (filterBranchIds.length == 1) {
+          query = query.where('branchIds', arrayContains: filterBranchIds.first);
+        } else {
+          query = query.where('branchIds', arrayContainsAny: filterBranchIds.take(10).toList());
+        }
+      } else if (userBranchIds.isNotEmpty) {
+        if (userBranchIds.length == 1) {
+          query = query.where('branchIds', arrayContainsAny: userBranchIds);
+        } else {
+          query = query.where('branchIds', arrayContainsAny: userBranchIds.take(10).toList());
+        }
+      }
+
+      if (_filterStatus == 'online') {
+        query = query.where('status', isEqualTo: 'online');
+      } else if (_filterStatus == 'offline') {
+        query = query.where('status', isEqualTo: 'offline');
+      } else if (_filterStatus == 'available') {
+        query = query.where('isAvailable', isEqualTo: true);
+      } else if (_filterStatus == 'busy') {
+        query = query.where('isAvailable', isEqualTo: false);
+      }
+      _directoryStream = query.snapshots();
+
+      // 2. Map Query (Always online or on_delivery + branch filter)
+      Query<Map<String, dynamic>> mapQuery = FirebaseFirestore.instance
+          .collection('Drivers')
+          .where('status', whereIn: ['online', 'on_delivery']);
+      
+      if (filterBranchIds.isNotEmpty) {
+        if (filterBranchIds.length == 1) {
+          mapQuery = mapQuery.where('branchIds', arrayContains: filterBranchIds.first);
+        } else {
+          mapQuery = mapQuery.where('branchIds', arrayContainsAny: filterBranchIds.take(10).toList());
+        }
+      }
+      _mapStream = mapQuery.snapshots();
+
+      // 3. Tracking Query (Always on_delivery + branch filter)
+      Query<Map<String, dynamic>> trackingQuery = FirebaseFirestore.instance
+          .collection('Drivers')
+          .where('status', isEqualTo: 'on_delivery');
+      
+      if (filterBranchIds.isNotEmpty) {
+        if (filterBranchIds.length == 1) {
+          trackingQuery = trackingQuery.where('branchIds', arrayContains: filterBranchIds.first);
+        } else {
+          trackingQuery = trackingQuery.where('branchIds', arrayContainsAny: filterBranchIds.take(10).toList());
+        }
+      }
+      _trackingStream = trackingQuery.limit(5).snapshots();
+
+      if (branchIdsChanged) {
+        _fetchMetrics(filterBranchIds);
+      }
+
+      _lastFilterBranchIds = List.from(filterBranchIds);
+      _lastFilterStatus = _filterStatus;
+    }
+  }
+
 
   @override
   void initState() {
     super.initState();
-    _fetchMetrics();
+    // Initial metrics fetch will happen in build/updateStableStreams
   }
 
   @override
@@ -54,13 +134,27 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     super.dispose();
   }
 
-  void _fetchMetrics() {
+  void _fetchMetrics(List<String> branchIds) {
+    // Cancel existing subscriptions
+    _activeRidersSub?.cancel();
+    _todayOrdersSub?.cancel();
+    _deliveredOrdersSub?.cancel();
+    _incidentsSub?.cancel();
+
     // 1. Active riders (online or on_delivery)
-    _activeRidersSub = FirebaseFirestore.instance
+    Query<Map<String, dynamic>> ridersQuery = FirebaseFirestore.instance
         .collection('Drivers')
-        .where('status', whereIn: ['online', 'on_delivery'])
-        .snapshots()
-        .listen((snapshot) {
+        .where('status', whereIn: ['online', 'on_delivery']);
+    
+    if (branchIds.isNotEmpty) {
+      if (branchIds.length == 1) {
+        ridersQuery = ridersQuery.where('branchIds', arrayContains: branchIds.first);
+      } else {
+        ridersQuery = ridersQuery.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+      }
+    }
+
+    _activeRidersSub = ridersQuery.snapshots().listen((snapshot) {
       if (mounted) {
         setState(() {
           _activeRiderCount = snapshot.docs.length;
@@ -72,12 +166,21 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     final today = DateTime.now();
     final startOfDay = DateTime(today.year, today.month, today.day);
     final endOfDay = startOfDay.add(const Duration(days: 1));
-    _todayOrdersSub = FirebaseFirestore.instance
+    
+    Query<Map<String, dynamic>> ordersQuery = FirebaseFirestore.instance
         .collection('Orders')
         .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-        .where('timestamp', isLessThan: Timestamp.fromDate(endOfDay))
-        .snapshots()
-        .listen((snapshot) {
+        .where('timestamp', isLessThan: Timestamp.fromDate(endOfDay));
+    
+    if (branchIds.isNotEmpty) {
+      if (branchIds.length == 1) {
+        ordersQuery = ordersQuery.where('branchIds', arrayContains: branchIds.first);
+      } else {
+        ordersQuery = ordersQuery.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+      }
+    }
+
+    _todayOrdersSub = ordersQuery.snapshots().listen((snapshot) {
       if (mounted) {
         setState(() {
           _totalOrdersToday = snapshot.docs.length;
@@ -86,11 +189,19 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     });
 
     // 3. Delivered orders for rating and delivery time
-    _deliveredOrdersSub = FirebaseFirestore.instance
+    Query<Map<String, dynamic>> deliveredQuery = FirebaseFirestore.instance
         .collection('Orders')
-        .where('status', isEqualTo: 'delivered')
-        .snapshots()
-        .listen((snapshot) {
+        .where('status', isEqualTo: 'delivered');
+    
+    if (branchIds.isNotEmpty) {
+      if (branchIds.length == 1) {
+        deliveredQuery = deliveredQuery.where('branchIds', arrayContains: branchIds.first);
+      } else {
+        deliveredQuery = deliveredQuery.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+      }
+    }
+
+    _deliveredOrdersSub = deliveredQuery.snapshots().listen((snapshot) {
       double totalRating = 0;
       int ratedCount = 0;
       double totalDuration = 0;
@@ -129,11 +240,19 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     });
 
     // 4. Active incidents
-    _incidentsSub = FirebaseFirestore.instance
+    Query<Map<String, dynamic>> incidentsQuery = FirebaseFirestore.instance
         .collection('Orders')
-        .where('status', whereIn: ['issue', 'cancelled'])
-        .snapshots()
-        .listen((snapshot) {
+        .where('status', whereIn: ['issue', 'cancelled']);
+    
+    if (branchIds.isNotEmpty) {
+      if (branchIds.length == 1) {
+        incidentsQuery = incidentsQuery.where('branchIds', arrayContains: branchIds.first);
+      } else {
+        incidentsQuery = incidentsQuery.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+      }
+    }
+
+    _incidentsSub = incidentsQuery.snapshots().listen((snapshot) {
       if (mounted) {
         setState(() {
           _activeIncidents = snapshot.docs.length;
@@ -149,40 +268,10 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     final branchFilter = context.watch<BranchFilterService>();
     final theme = Theme.of(context);
 
-    // Build base query (same as original)
-    Query<Map<String, dynamic>> query =
-    FirebaseFirestore.instance.collection('Drivers').orderBy('name');
+    final filterBranchIds = 
+        branchFilter.getFilterBranchIds(userScope.branchIds);
 
-    // Branch filtering
-    final filterBranchIds =
-    branchFilter.getFilterBranchIds(userScope.branchIds);
-
-    if (filterBranchIds.isNotEmpty) {
-      if (filterBranchIds.length == 1) {
-        query = query.where('branchIds', arrayContains: filterBranchIds.first);
-      } else {
-        query = query.where('branchIds',
-            arrayContainsAny: filterBranchIds.take(10).toList());
-      }
-    } else if (userScope.branchIds.isNotEmpty) {
-      if (userScope.branchIds.length == 1) {
-        query = query.where('branchIds', arrayContainsAny: userScope.branchIds);
-      } else {
-        query = query.where('branchIds',
-            arrayContainsAny: userScope.branchIds.take(10).toList());
-      }
-    }
-
-    // Status filtering
-    if (_filterStatus == 'online') {
-      query = query.where('status', isEqualTo: 'online');
-    } else if (_filterStatus == 'offline') {
-      query = query.where('status', isEqualTo: 'offline');
-    } else if (_filterStatus == 'available') {
-      query = query.where('isAvailable', isEqualTo: true);
-    } else if (_filterStatus == 'busy') {
-      query = query.where('isAvailable', isEqualTo: false);
-    }
+    _updateStableStreams(filterBranchIds, userScope.branchIds);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -272,7 +361,7 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                         Container(
                           width: 320,
                           margin: const EdgeInsets.only(right: 16),
-                          child: _buildRiderList(query, theme.primaryColor),
+                          child: _buildRiderList(_directoryStream!, theme.primaryColor),
                         ),
 
 
@@ -384,7 +473,7 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
   }
 
 
-  Widget _buildRiderList(Query<Map<String, dynamic>> query, Color primary) {
+  Widget _buildRiderList(Stream<QuerySnapshot<Map<String, dynamic>>> stream, Color primary) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -457,7 +546,7 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
           const Divider(height: 1),
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: query.snapshots(),
+              stream: stream,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return ProfessionalErrorWidget(
@@ -571,10 +660,7 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
           const Divider(height: 1),
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance
-                  .collection('Drivers')
-                  .where('status', whereIn: ['online', 'on_delivery'])
-                  .snapshots(),
+              stream: _mapStream,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
@@ -730,11 +816,7 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance
-                  .collection('Drivers')
-                  .where('status', isEqualTo: 'on_delivery')
-                  .limit(5)
-                  .snapshots(),
+              stream: _trackingStream,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());

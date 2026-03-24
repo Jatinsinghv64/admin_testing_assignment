@@ -9,6 +9,9 @@ import '../Widgets/timings/TimingKpiRow.dart';
 import '../Widgets/timings/KitchenLoadCard.dart';
 import '../Widgets/timings/HolidayClosuresCard.dart';
 import '../Widgets/timings/WeeklyScheduleGrid.dart';
+import '../models/timing_template.dart';
+import '../services/timing_template_service.dart';
+import 'TimingTemplatesManagement.dart';
 import '../constants.dart';
 
 class RestaurantTimingScreenLarge extends StatefulWidget {
@@ -26,6 +29,7 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
   late String _currentBranchId;
   Map<String, dynamic> _branchData = {};
   StreamSubscription<DocumentSnapshot>? _subscription;
+  final _templateService = TimingTemplateService();
 
   // Constants for calculations
   static const double _avgHourlyRate = 25.0; // QAR
@@ -35,6 +39,7 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
   void initState() {
     super.initState();
     _currentBranchId = widget.branchId;
+    _templateService.seedDefaultTemplates(); // Ensure defaults exist
     _startSubscription();
   }
 
@@ -58,6 +63,24 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
         });
       }
     });
+  }
+
+  Future<void> _updateFirestore(Map<String, dynamic> data, String description) async {
+    final userEmail = context.read<UserScopeService>().userEmail;
+    final batch = FirebaseFirestore.instance.batch();
+    
+    final branchRef = FirebaseFirestore.instance.collection(AppConstants.collectionBranch).doc(_currentBranchId);
+    batch.update(branchRef, data);
+
+    final logRef = branchRef.collection('changeLogs').doc();
+    batch.set(logRef, {
+      'description': description,
+      'user': userEmail,
+      'timestamp': FieldValue.serverTimestamp(),
+      'type': 'timing_update'
+    });
+
+    await batch.commit();
   }
 
   // --- Calculations ---
@@ -84,37 +107,35 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
     return (_avgDailyRevenue / laborCost) * 10; // Simple ratio for display
   }
 
-  Future<void> _applyTemplate(String name) async {
-    final Map<String, dynamic> workingHours = {};
-    final days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    
-    List<Map<String, dynamic>> slots = [];
-    if (name == 'Standard Ops') {
-      slots = [
-        {'open': '09:00', 'close': '22:00', 'staffCount': 4, 'requiredStaff': 4}
-      ];
-    } else if (name == 'Extended Weekend') {
-      // Split between weekdays and weekends
-    }
+  Future<void> _applyTemplate(TimingTemplate template) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator(color: Colors.deepPurple)),
+    );
 
-    for (var day in days) {
-      if (name == 'Extended Weekend' && (day == 'friday' || day == 'saturday')) {
-        workingHours[day] = {
-          'isOpen': true,
-          'slots': [
-            {'open': '09:00', 'close': '23:59', 'staffCount': 6, 'requiredStaff': 6}
-          ]
-        };
-      } else {
-        workingHours[day] = {'isOpen': true, 'slots': List.from(slots)};
+    try {
+      await _updateFirestore({
+        'workingHours': template.workingHours,
+        'activeTemplate': template.name
+      }, 'Applied template: ${template.name}');
+      
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Applied "${template.name}" template')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to apply template: $e')),
+        );
       }
     }
-
-    await FirebaseFirestore.instance
-        .collection(AppConstants.collectionBranch)
-        .doc(_currentBranchId)
-        .update({'workingHours': workingHours, 'activeTemplate': name});
   }
+
 
   int _calculateConflicts() {
     final workingHours = _branchData['workingHours'] as Map? ?? {};
@@ -172,32 +193,79 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
 
   Future<void> _updatePrepTime(int value) async {
     setState(() => _isSaving = true);
-    await FirebaseFirestore.instance
-        .collection(AppConstants.collectionBranch)
-        .doc(_currentBranchId)
-        .update({
+    await _updateFirestore({
       'estimatedTime': value,
       'estimatedTimeUpdatedAt': FieldValue.serverTimestamp(),
-    });
+    }, 'Updated estimated prep time to $value mins');
     setState(() => _isSaving = false);
   }
 
-  Future<void> _addThrottleRule() async {
+  Future<void> _showThrottleRuleDialog([int? index]) async {
     final rules = List<Map<String, dynamic>>.from(_branchData['throttleRules'] ?? []);
-    rules.add({'orderCount': 10, 'extraTime': 5});
-    await FirebaseFirestore.instance
-        .collection(AppConstants.collectionBranch)
-        .doc(_currentBranchId)
-        .update({'throttleRules': rules});
+    int orderCount = index != null ? (rules[index]['orderCount'] as num?)?.toInt() ?? 10 : 10;
+    int extraTime = index != null ? (rules[index]['extraTime'] as num?)?.toInt() ?? 5 : 5;
+
+    final countController = TextEditingController(text: orderCount.toString());
+    final timeController = TextEditingController(text: extraTime.toString());
+    final formKey = GlobalKey<FormState>();
+
+    final result = await showDialog<Map<String, int>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(index == null ? 'Add Throttle Rule' : 'Edit Throttle Rule'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: countController,
+                decoration: const InputDecoration(labelText: 'If orders >'),
+                keyboardType: TextInputType.number,
+                validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: timeController,
+                decoration: const InputDecoration(labelText: 'Add extra time (mins)'),
+                keyboardType: TextInputType.number,
+                validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(context, {
+                  'orderCount': int.parse(countController.text),
+                  'extraTime': int.parse(timeController.text),
+                });
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null) {
+      if (index != null) {
+        rules[index] = result;
+        await _updateFirestore({'throttleRules': rules}, 'Updated throttle rule');
+      } else {
+        rules.add(result);
+        await _updateFirestore({'throttleRules': rules}, 'Added throttle rule');
+      }
+    }
   }
 
   Future<void> _deleteThrottleRule(int index) async {
     final rules = List<Map<String, dynamic>>.from(_branchData['throttleRules'] ?? []);
     rules.removeAt(index);
-    await FirebaseFirestore.instance
-        .collection(AppConstants.collectionBranch)
-        .doc(_currentBranchId)
-        .update({'throttleRules': rules});
+    await _updateFirestore({'throttleRules': rules}, 'Deleted a throttle rule');
   }
 
   Future<void> _addHoliday() async {
@@ -207,10 +275,7 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
       'date': Timestamp.fromDate(DateTime.now().add(const Duration(days: 7))),
       'type': 'Fully Closed',
     });
-    await FirebaseFirestore.instance
-        .collection(AppConstants.collectionBranch)
-        .doc(_currentBranchId)
-        .update({'holidayClosures': holidays});
+    await _updateFirestore({'holidayClosures': holidays}, 'Added a new holiday exception');
   }
 
   // --- UI ---
@@ -224,7 +289,7 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
       return const Center(child: CircularProgressIndicator(color: Colors.deepPurple));
     }
 
-    final prepTime = (_branchData['estimatedPreparationTime'] as int?) ?? 20;
+    final prepTime = (_branchData['estimatedTime'] as num?)?.toInt() ?? 20;
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
@@ -311,8 +376,9 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
                         rushModeOverride: _branchData['rushModeEnabled'] ?? false,
                         onRushModeChanged: (v) => _toggleRushMode(v),
                         throttleRules: List<Map<String, dynamic>>.from(_branchData['throttleRules'] ?? []),
-                        onAddRule: _addThrottleRule,
+                        onAddRule: () => _showThrottleRuleDialog(),
                         onDeleteRule: _deleteThrottleRule,
+                        onEditRule: (idx) => _showThrottleRuleDialog(idx),
                       ),
                       const SizedBox(height: 32),
                       HolidayClosuresCard(
@@ -343,33 +409,46 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
           style: textTheme.labelSmall?.copyWith(color: Colors.grey, fontWeight: FontWeight.bold),
         ),
         const SizedBox(width: 12),
-        PopupMenuButton<String>(
-          onSelected: _applyTemplate,
-          offset: const Offset(0, 48),
-          itemBuilder: (context) => [
-            _buildTemplateItem('Standard Ops', Icons.auto_awesome),
-            _buildTemplateItem('Extended Weekend', Icons.wb_sunny),
-            _buildTemplateItem('Holiday Minimal', Icons.ac_unit),
-          ],
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.deepPurple.withOpacity(0.3)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.dashboard_customize, color: Colors.deepPurple, size: 16),
-                const SizedBox(width: 8),
-                Text(
-                  activeTemplate,
-                  style: textTheme.bodySmall?.copyWith(color: Colors.deepPurple, fontWeight: FontWeight.bold),
+        StreamBuilder<List<TimingTemplate>>(
+          stream: _templateService.getTemplates(),
+          builder: (context, snapshot) {
+            final templates = snapshot.data ?? [];
+            return PopupMenuButton<TimingTemplate>(
+              onSelected: _applyTemplate,
+              offset: const Offset(0, 48),
+              itemBuilder: (context) => templates.map((t) => _buildTemplateItem(t)).toList(),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.deepPurple.withOpacity(0.3)),
                 ),
-                const Icon(Icons.arrow_drop_down, color: Colors.deepPurple),
-              ],
-            ),
-          ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.dashboard_customize, color: Colors.deepPurple, size: 16),
+                    const SizedBox(width: 8),
+                    Text(
+                      activeTemplate,
+                      style: textTheme.bodySmall?.copyWith(color: Colors.deepPurple, fontWeight: FontWeight.bold),
+                    ),
+                    const Icon(Icons.arrow_drop_down, color: Colors.deepPurple),
+                  ],
+                ),
+              ),
+            );
+          }
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const TimingTemplatesManagement()),
+            );
+          },
+          icon: const Icon(Icons.settings, color: Colors.grey, size: 20),
+          tooltip: 'Manage Templates',
         ),
 
         const Spacer(),
@@ -378,7 +457,9 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
           const SizedBox(width: 12),
         ],
         OutlinedButton.icon(
-          onPressed: () {},
+          onPressed: () {
+            showDialog(context: context, builder: (_) => ChangeLogDialog(branchId: _currentBranchId));
+          },
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.deepPurple,
             side: const BorderSide(color: Colors.deepPurple),
@@ -489,10 +570,7 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
     dayData['slots'] = slots;
     workingHours[dayKey] = dayData;
     
-    await FirebaseFirestore.instance
-        .collection(AppConstants.collectionBranch)
-        .doc(_currentBranchId)
-        .update({'workingHours': workingHours});
+    await _updateFirestore({'workingHours': workingHours}, 'Added new shift on $day');
   }
 
   Future<void> _deleteShift(String day, int index) async {
@@ -505,10 +583,7 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
     dayData['slots'] = slots;
     workingHours[dayKey] = dayData;
     
-    await FirebaseFirestore.instance
-        .collection(AppConstants.collectionBranch)
-        .doc(_currentBranchId)
-        .update({'workingHours': workingHours});
+    await _updateFirestore({'workingHours': workingHours}, 'Deleted shift on $day');
   }
 
   Future<void> _updateShift(String day, int index, Map<String, dynamic> data, {Map<String, dynamic>? existing}) async {
@@ -527,10 +602,7 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
       dayData['slots'] = slots;
       workingHours[dayKey] = dayData;
       
-      await FirebaseFirestore.instance
-          .collection(AppConstants.collectionBranch)
-          .doc(_currentBranchId)
-          .update({'workingHours': workingHours});
+      await _updateFirestore({'workingHours': workingHours}, 'Updated shift on $day');
     }
   }
 
@@ -542,26 +614,30 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
     dayData['isOpen'] = isOpen;
     workingHours[dayKey] = dayData;
     
-    await FirebaseFirestore.instance
-        .collection(AppConstants.collectionBranch)
-        .doc(_currentBranchId)
-        .update({'workingHours': workingHours});
+    await _updateFirestore({'workingHours': workingHours}, isOpen ? 'Opened on $day' : 'Closed on $day');
   }
 
   Future<void> _toggleRushMode(bool value) async {
-    await FirebaseFirestore.instance
-        .collection(AppConstants.collectionBranch)
-        .doc(_currentBranchId)
-        .update({'rushModeEnabled': value});
+    // Optimistic UI update
+    setState(() {
+      _branchData['rushModeEnabled'] = value;
+    });
+    try {
+      await _updateFirestore({'rushModeEnabled': value}, 'Toggled Rush Mode: $value');
+    } catch(e) {
+      if(mounted) {
+        setState(() {
+          _branchData['rushModeEnabled'] = !value;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to toggle rush mode: $e')));
+      }
+    }
   }
 
   Future<void> _deleteHoliday(int index) async {
     final holidays = List<Map<String, dynamic>>.from(_branchData['holidayClosures'] ?? []);
     holidays.removeAt(index);
-    await FirebaseFirestore.instance
-        .collection(AppConstants.collectionBranch)
-        .doc(_currentBranchId)
-        .update({'holidayClosures': holidays});
+    await _updateFirestore({'holidayClosures': holidays}, 'Deleted a holiday condition');
   }
   
   Future<void> _editHoliday(int index) async {
@@ -573,14 +649,20 @@ class _RestaurantTimingScreenLargeState extends State<RestaurantTimingScreenLarg
     );
 
   }
-  PopupMenuItem<String> _buildTemplateItem(String name, IconData icon) {
+  PopupMenuItem<TimingTemplate> _buildTemplateItem(TimingTemplate template) {
+    IconData icon;
+    switch (template.icon) {
+      case 'wb_sunny': icon = Icons.wb_sunny; break;
+      case 'ac_unit': icon = Icons.ac_unit; break;
+      default: icon = Icons.auto_awesome;
+    }
     return PopupMenuItem(
-      value: name,
+      value: template,
       child: Row(
         children: [
           Icon(icon, color: Colors.deepPurple, size: 18),
           const SizedBox(width: 12),
-          Text(name, style: const TextStyle(color: Colors.black87, fontSize: 13, fontWeight: FontWeight.bold)),
+          Text(template.name, style: const TextStyle(color: Colors.black87, fontSize: 13, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -639,8 +721,8 @@ class _ShiftEditDialogState extends State<_ShiftEditDialog> {
   @override
   void initState() {
     super.initState();
-    _open = widget.initialData['open'] ?? '09:00';
-    _close = widget.initialData['close'] ?? '22:00';
+    _open = widget.initialData['open'] ?? widget.initialData['startTime'] ?? '09:00';
+    _close = widget.initialData['close'] ?? widget.initialData['endTime'] ?? '22:00';
     _staff = widget.initialData['staffCount'] ?? 4;
     _required = widget.initialData['requiredStaff'] ?? 4;
   }
@@ -927,6 +1009,80 @@ class _HolidayEditDialogState extends State<_HolidayEditDialog> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class ChangeLogDialog extends StatefulWidget {
+  final String branchId;
+  const ChangeLogDialog({super.key, required this.branchId});
+
+  @override
+  State<ChangeLogDialog> createState() => _ChangeLogDialogState();
+}
+
+class _ChangeLogDialogState extends State<ChangeLogDialog> {
+  late Stream<QuerySnapshot> _logStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _logStream = FirebaseFirestore.instance
+        .collection(AppConstants.collectionBranch)
+        .doc(widget.branchId)
+        .collection('changeLogs')
+        .orderBy('timestamp', descending: true)
+        .limit(50)
+        .snapshots();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 600,
+        height: 500,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Timing Change Logs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+              ],
+            ),
+            const Divider(),
+            Expanded(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: _logStream,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('No change logs found.', style: TextStyle(color: Colors.grey)));
+                  return ListView.separated(
+                    itemCount: snapshot.data!.docs.length,
+                    separatorBuilder: (_, __) => const Divider(),
+                    itemBuilder: (context, index) {
+                      final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+                      final desc = data['description'] ?? 'System configuration updated';
+                      final user = data['usedBy'] ?? data['user'] ?? 'System'; // Fixed typo in previous implementation mapping? 
+                      final ts = data['timestamp'] as Timestamp?;
+                      final dateStr = ts != null ? DateFormat('MMM dd, yyyy HH:mm').format(ts.toDate()) : 'Unknown Date';
+                      return ListTile(
+                        leading: const CircleAvatar(backgroundColor: Colors.deepPurple, child: Icon(Icons.history, color: Colors.white, size: 18)),
+                        title: Text(desc, style: const TextStyle(fontSize: 14)),
+                        subtitle: Text('By $user on $dateStr', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -144,8 +144,8 @@ class WeeklyScheduleGrid extends StatelessWidget {
         children: [
           Expanded(flex: 3, child: Text('DAY', style: style)),
           Expanded(flex: 2, child: Center(child: Text('STATUS', style: style))),
-          Expanded(flex: 12, child: Padding(padding: const EdgeInsets.only(left: 16), child: Text('ACTIVE SHIFTS & STAFFING', style: style))),
-          Expanded(flex: 1, child: Align(alignment: Alignment.centerRight, child: Text('ACTION', style: style))),
+          Expanded(flex: 10, child: Padding(padding: const EdgeInsets.only(left: 16), child: Text('ACTIVE SHIFTS & STAFFING', style: style))),
+          Expanded(flex: 2, child: Align(alignment: Alignment.centerRight, child: Text('ACTION', style: style))),
         ],
       ),
     );
@@ -206,7 +206,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
             ),
           ),
           Expanded(
-            flex: 12,
+            flex: 10,
             child: Padding(
               padding: const EdgeInsets.only(left: 16),
               child: !isOpen
@@ -223,7 +223,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
             ),
           ),
           Expanded(
-            flex: 1,
+            flex: 2,
             child: Align(
               alignment: Alignment.centerRight,
               child: IconButton(

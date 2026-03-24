@@ -664,6 +664,64 @@ class _CouponDialogState extends State<CouponDialog> {
     }
   }
 
+  Future<void> _selectDateTime(BuildContext context, bool isStart) async {
+    final DateTime initialDate = (isStart ? _validFrom : _validUntil) ?? DateTime.now();
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2022),
+      lastDate: DateTime(2100),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Colors.deepPurple,
+              onPrimary: Colors.white,
+              onSurface: Colors.black,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (pickedDate != null) {
+      final TimeOfDay? pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(initialDate),
+        builder: (context, child) {
+          return Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: const ColorScheme.light(
+                primary: Colors.deepPurple,
+                onPrimary: Colors.white,
+                onSurface: Colors.black,
+              ),
+            ),
+            child: child!,
+          );
+        },
+      );
+
+      if (pickedTime != null) {
+        setState(() {
+          final newDateTime = DateTime(
+            pickedDate.year,
+            pickedDate.month,
+            pickedDate.day,
+            pickedTime.hour,
+            pickedTime.minute,
+          );
+          if (isStart) {
+            _validFrom = newDateTime;
+          } else {
+            _validUntil = newDateTime;
+          }
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
     _codeCtrl.dispose();
@@ -810,11 +868,9 @@ class _CouponDialogState extends State<CouponDialog> {
                   const SizedBox(height: 24),
 
                   _formSectionHeader('Validity Period'),
-                  _dateRow('Valid From', _validFrom,
-                      (date) => setState(() => _validFrom = date)),
+                  _dateRow('Valid From', _validFrom, true),
                   const SizedBox(height: 12),
-                  _dateRow('Valid Until', _validUntil,
-                      (date) => setState(() => _validUntil = date)),
+                  _dateRow('Valid Until', _validUntil, false),
                   const SizedBox(height: 32),
 
                   // Action Buttons
@@ -1018,17 +1074,9 @@ class _CouponDialogState extends State<CouponDialog> {
     );
   }
 
-  Widget _dateRow(String label, DateTime? date, ValueChanged<DateTime> onPick) {
+  Widget _dateRow(String label, DateTime? date, bool isStart) {
     return GestureDetector(
-      onTap: () async {
-        final picked = await showDatePicker(
-          context: context,
-          initialDate: date ?? DateTime.now(),
-          firstDate: DateTime(2022),
-          lastDate: DateTime(2100),
-        );
-        if (picked != null) onPick(picked);
-      },
+      onTap: () => _selectDateTime(context, isStart),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.grey[50],
@@ -1038,7 +1086,7 @@ class _CouponDialogState extends State<CouponDialog> {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            Icon(Icons.calendar_today_rounded,
+            const Icon(Icons.calendar_today_rounded,
                 color: Colors.deepPurple, size: 20),
             const SizedBox(width: 12),
             Text(label,
@@ -1047,8 +1095,8 @@ class _CouponDialogState extends State<CouponDialog> {
             const Spacer(),
             Text(
               date != null
-                  ? '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}'
-                  : 'Select Date',
+                  ? '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}'
+                  : 'Select Date & Time',
               style: const TextStyle(
                 color: Colors.deepPurple,
                 fontWeight: FontWeight.bold,

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../Widgets/BranchFilterService.dart';
+import '../Widgets/BranchFilterSelector.dart';
 import '../main.dart';
 import '../services/staff/staff_service.dart';
 
@@ -21,6 +22,39 @@ class _StaffManagementScreenLargeState extends State<StaffManagementScreenLarge>
     super.dispose();
   }
 
+  // Stable stream references
+  Stream<int>? _activeStaffStream;
+  Stream<int>? _totalStaffStream;
+  Stream<int>? _clockedInTodayStream;
+  Stream<int>? _shiftsTodayStream;
+  Stream<QuerySnapshot>? _staffStream;
+  Stream<QuerySnapshot>? _shiftsStream;
+  Stream<QuerySnapshot>? _attendanceStream;
+
+  List<String>? _lastFilterBranchIds;
+  String? _lastSelectedBranchId;
+
+  void _updateStreams(List<String> filterBranchIds, String? selectedBranchId, StaffService staffService) {
+    final bool branchIdsChanged = _lastFilterBranchIds == null || 
+        _lastFilterBranchIds!.length != filterBranchIds.length ||
+        !_lastFilterBranchIds!.every((id) => filterBranchIds.contains(id));
+    
+    final bool selectionChanged = _lastSelectedBranchId != selectedBranchId;
+
+    if (branchIdsChanged || selectionChanged) {
+      _activeStaffStream = staffService.getTotalActiveStaffCount(filterBranchIds);
+      _totalStaffStream = staffService.getTotalStaffCount(filterBranchIds);
+      _clockedInTodayStream = staffService.getClockedInTodayCount(selectedBranchId: selectedBranchId, branchIds: filterBranchIds);
+      _shiftsTodayStream = staffService.getTodayShiftCount(selectedBranchId: selectedBranchId, branchIds: filterBranchIds);
+      _staffStream = staffService.getStaffStream(branchIds: filterBranchIds, selectedBranchId: selectedBranchId);
+      _shiftsStream = staffService.getShiftsStream(selectedBranchId: selectedBranchId, branchIds: filterBranchIds);
+      _attendanceStream = staffService.getTodayAttendanceStream(selectedBranchId: selectedBranchId, branchIds: filterBranchIds);
+
+      _lastFilterBranchIds = List.from(filterBranchIds);
+      _lastSelectedBranchId = selectedBranchId;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
@@ -29,6 +63,9 @@ class _StaffManagementScreenLargeState extends State<StaffManagementScreenLarge>
     final textTheme = Theme.of(context).textTheme;
     const primaryColor = Colors.deepPurple;
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
+    // Initialize/Update stable streams
+    _updateStreams(filterBranchIds, branchFilter.selectedBranchId, staffService);
 
     return Container(
       color: Colors.grey[50],
@@ -41,8 +78,10 @@ class _StaffManagementScreenLargeState extends State<StaffManagementScreenLarge>
             const SizedBox(height: 32),
             _MetricBentoGrid(
               primaryColor: primaryColor, 
-              branchIds: filterBranchIds, 
-              selectedBranchId: branchFilter.selectedBranchId
+              activeStaffStream: _activeStaffStream!,
+              totalStaffStream: _totalStaffStream!,
+              clockedInTodayStream: _clockedInTodayStream!,
+              shiftsTodayStream: _shiftsTodayStream!,
             ),
             const SizedBox(height: 32),
             Row(
@@ -58,14 +97,15 @@ class _StaffManagementScreenLargeState extends State<StaffManagementScreenLarge>
                         searchQuery: _searchQuery,
                         primaryColor: primaryColor,
                         staffService: staffService,
+                        staffStream: _staffStream!,
+                        attendanceStream: _attendanceStream!,
                         onSearchChanged: (q) => setState(() => _searchQuery = q),
                       ),
                       const SizedBox(height: 32),
                       _ShiftSchedulingSection(
                         primaryColor: primaryColor, 
                         staffService: staffService, 
-                        branchIds: filterBranchIds,
-                        selectedBranchId: branchFilter.selectedBranchId,
+                        shiftsStream: _shiftsStream!,
                         userEmail: userScope.userEmail
                       ),
                     ],
@@ -76,9 +116,7 @@ class _StaffManagementScreenLargeState extends State<StaffManagementScreenLarge>
                   flex: 4,
                   child: _AttendanceSidebar(
                     primaryColor: primaryColor, 
-                    staffService: staffService, 
-                    branchIds: filterBranchIds,
-                    selectedBranchId: branchFilter.selectedBranchId
+                    attendanceStream: _attendanceStream!,
                   ),
                 ),
               ],
@@ -101,17 +139,24 @@ class _StaffManagementScreenLargeState extends State<StaffManagementScreenLarge>
             Text('Manage your team, shifts, and attendance across all branches.', style: textTheme.bodyMedium?.copyWith(color: Colors.grey[600], fontWeight: FontWeight.w500)),
           ],
         ),
-        ElevatedButton.icon(
-          onPressed: () => _showAddStaffDialog(context, staffService, userScope),
-          icon: const Icon(Icons.person_add, size: 16),
-          label: const Text('ADD STAFF'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primaryColor, foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            elevation: 2,
-            textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const BranchFilterSelector(padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
+            const SizedBox(width: 16),
+            ElevatedButton.icon(
+              onPressed: () => _showAddStaffDialog(context, staffService, userScope),
+              icon: const Icon(Icons.person_add, size: 16),
+              label: const Text('ADD STAFF'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryColor, foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 2,
+                textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -129,32 +174,40 @@ class _StaffManagementScreenLargeState extends State<StaffManagementScreenLarge>
 // =============================================================================
 class _MetricBentoGrid extends StatelessWidget {
   final Color primaryColor;
-  final List<String> branchIds;
-  final String? selectedBranchId;
-  const _MetricBentoGrid({required this.primaryColor, required this.branchIds, this.selectedBranchId});
+  final Stream<int> activeStaffStream;
+  final Stream<int> totalStaffStream;
+  final Stream<int> clockedInTodayStream;
+  final Stream<int> shiftsTodayStream;
+
+  const _MetricBentoGrid({
+    required this.primaryColor, 
+    required this.activeStaffStream,
+    required this.totalStaffStream,
+    required this.clockedInTodayStream,
+    required this.shiftsTodayStream,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final staffService = context.read<StaffService>();
     return GridView.count(
       shrinkWrap: true,
-      crossAxisCount: 4, crossAxisSpacing: 16, mainAxisSpacing: 16, childAspectRatio: 2.2,
+      crossAxisCount: 4, crossAxisSpacing: 16, mainAxisSpacing: 16, childAspectRatio: 2.1,
       physics: const NeverScrollableScrollPhysics(),
       children: [
         _StreamMetricCard(
-          stream: staffService.getTotalActiveStaffCount(branchIds),
-          totalStream: staffService.getTotalStaffCount(branchIds),
+          stream: activeStaffStream,
+          totalStream: totalStaffStream,
           label: 'Active Staff', icon: Icons.groups, primaryColor: primaryColor,
           formatValue: (active, total) => '$active',
           formatSub: (active, total) => ' / $total',
         ),
         _StreamMetricCard(
-          stream: staffService.getClockedInTodayCount(selectedBranchId: selectedBranchId, branchIds: branchIds),
+          stream: clockedInTodayStream,
           label: 'Clocked In Today', icon: Icons.login, primaryColor: primaryColor,
           formatValue: (v, _) => '$v', statusLabel: 'LIVE', statusColor: Colors.green,
         ),
         _StreamMetricCard(
-          stream: staffService.getTodayShiftCount(selectedBranchId: selectedBranchId, branchIds: branchIds),
+          stream: shiftsTodayStream,
           label: 'Shifts Today', icon: Icons.schedule, primaryColor: primaryColor,
           formatValue: (v, _) => '$v', statusLabel: 'SCHEDULED', statusColor: Colors.blue,
         ),
@@ -167,7 +220,7 @@ class _MetricBentoGrid extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey[200]!),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))]),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Text(label.toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.grey, letterSpacing: 1.5)),
         Text(value, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.black87)),
@@ -215,7 +268,7 @@ class _StreamMetricCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey[200]!),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))]),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: Stack(children: [
         Positioned(top: 0, right: 0, child: Icon(icon, color: primaryColor.withValues(alpha: 0.05), size: 48)),
         Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -245,13 +298,23 @@ class _StaffDirectoryTable extends StatelessWidget {
   final String searchQuery;
   final Color primaryColor;
   final StaffService staffService;
+  final Stream<QuerySnapshot> staffStream;
+  final Stream<QuerySnapshot> attendanceStream;
   final ValueChanged<String> onSearchChanged;
 
-  const _StaffDirectoryTable({required this.userScope, required this.branchFilter, required this.searchQuery, required this.primaryColor, required this.staffService, required this.onSearchChanged});
+  const _StaffDirectoryTable({
+    required this.userScope, 
+    required this.branchFilter, 
+    required this.searchQuery, 
+    required this.primaryColor, 
+    required this.staffService, 
+    required this.staffStream,
+    required this.attendanceStream,
+    required this.onSearchChanged
+  });
 
   @override
   Widget build(BuildContext context) {
-    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
     return Container(
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey[200]!)),
       child: Column(children: [
@@ -276,7 +339,7 @@ class _StaffDirectoryTable extends StatelessWidget {
           ]),
         ),
         StreamBuilder<QuerySnapshot>(
-          stream: staffService.getStaffStream(branchIds: filterBranchIds, selectedBranchId: branchFilter.selectedBranchId),
+          stream: staffStream,
           builder: (context, snapshot) {
             if (snapshot.hasError) return Padding(padding: const EdgeInsets.all(24), child: Text('Error: ${snapshot.error}'));
             if (!snapshot.hasData) return const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()));
@@ -297,12 +360,28 @@ class _StaffDirectoryTable extends StatelessWidget {
               return const Padding(padding: EdgeInsets.all(32), child: Center(child: Text('No staff members found.', style: TextStyle(color: Colors.grey))));
             }
 
-            return Table(
-              columnWidths: const {0: FlexColumnWidth(2.5), 1: FlexColumnWidth(2), 2: FlexColumnWidth(1.8), 3: FlexColumnWidth(1.5), 4: FixedColumnWidth(100)},
-              children: [
-                _buildTableHeader(),
-                ...docs.map((doc) => _buildTableRow(context, doc.data() as Map<String, dynamic>, doc.id)),
-              ],
+            return StreamBuilder<QuerySnapshot>(
+              stream: attendanceStream,
+              builder: (context, attendanceSnapshot) {
+                final Map<String, String> attendanceStatus = {};
+                if (attendanceSnapshot.hasData) {
+                  for (var doc in attendanceSnapshot.data!.docs) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final sId = data['staffId'] as String? ?? data['staffEmail'] as String? ?? '';
+                    if (sId.isNotEmpty && data['clockOut'] == null) {
+                      attendanceStatus[sId] = 'ClockIn';
+                    }
+                  }
+                }
+
+                return Table(
+                  columnWidths: const {0: FlexColumnWidth(2.5), 1: FlexColumnWidth(2), 2: FlexColumnWidth(1.8), 3: FlexColumnWidth(1.5), 4: FixedColumnWidth(140)},
+                  children: [
+                    _buildTableHeader(),
+                    ...docs.map((doc) => _buildTableRow(context, doc.data() as Map<String, dynamic>, doc.id, attendanceStatus[doc.id] ?? 'ClockOut')),
+                  ],
+                );
+              }
             );
           },
         ),
@@ -320,11 +399,12 @@ class _StaffDirectoryTable extends StatelessWidget {
     );
   }
 
-  TableRow _buildTableRow(BuildContext context, Map<String, dynamic> data, String id) {
+  TableRow _buildTableRow(BuildContext context, Map<String, dynamic> data, String id, [String attendanceStatus = 'ClockOut']) {
     final status = data['isActive'] == true ? 'Active' : 'Inactive';
     final role = data['role'] ?? 'Staff';
     final branches = (data['branchIds'] as List?)?.join(', ') ?? '-';
     final phone = data['phone'] ?? '-';
+    final isClockedIn = attendanceStatus == 'ClockIn';
 
     return TableRow(
       decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.grey[100]!))),
@@ -344,15 +424,36 @@ class _StaffDirectoryTable extends StatelessWidget {
           Text(_formatRole(role), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87), overflow: TextOverflow.ellipsis),
           Text(branches.toUpperCase(), style: TextStyle(fontSize: 9, color: primaryColor, fontWeight: FontWeight.w900), overflow: TextOverflow.ellipsis),
         ])),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20), child: Row(children: [
-          Container(width: 6, height: 6, decoration: BoxDecoration(color: data['isActive'] == true ? Colors.green : Colors.grey[300], shape: BoxShape.circle)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(status.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: data['isActive'] == true ? Colors.green : Colors.grey), overflow: TextOverflow.ellipsis)),
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(width: 8, height: 8, decoration: BoxDecoration(color: isClockedIn ? Colors.green : Colors.grey[400], shape: BoxShape.circle)),
+            const SizedBox(width: 6),
+            Text(isClockedIn ? 'CLOCKED IN' : 'CLOCKED OUT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: isClockedIn ? Colors.green : Colors.grey)),
+          ]),
+          const SizedBox(height: 4),
+          Row(children: [
+            Container(width: 6, height: 6, decoration: BoxDecoration(color: data['isActive'] == true ? Colors.blue : Colors.grey[300], shape: BoxShape.circle)),
+            const SizedBox(width: 4),
+            Text(status.toUpperCase(), style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: data['isActive'] == true ? Colors.blue : Colors.grey)),
+          ]),
         ])),
         Padding(padding: const EdgeInsets.all(16), child: Text(phone, style: const TextStyle(fontSize: 12, color: Colors.black87))),
         Padding(padding: const EdgeInsets.all(8), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          IconButton(icon: Icon(Icons.edit_square, size: 18, color: Colors.grey[400]), onPressed: () => _showEditDialog(context, data, id)),
-          IconButton(icon: Icon(Icons.delete_outline, size: 18, color: Colors.red[300]), onPressed: () => _confirmDelete(context, id, data['name'] ?? 'this staff member')),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.access_time, size: 18, color: Colors.blue), 
+            onPressed: () => _showManualClockInOutDialog(context, data, id)
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.edit_square, size: 18, color: Colors.grey[400]), 
+            onPressed: () => _showEditDialog(context, data, id)
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.delete_outline, size: 18, color: Colors.red[300]), 
+            onPressed: () => _confirmDelete(context, id, data['name'] ?? 'this staff member')
+          ),
         ])),
       ],
     );
@@ -392,6 +493,89 @@ class _StaffDirectoryTable extends StatelessWidget {
       ],
     ));
   }
+
+  void _showManualClockInOutDialog(BuildContext context, Map<String, dynamic> staffData, String staffId) {
+    final name = staffData['name'] ?? 'Staff Member';
+    final branchIds = List<String>.from(staffData['branchIds'] ?? []);
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StreamBuilder<QuerySnapshot>(
+          stream: staffService.getTodayAttendanceStream(
+            branchIds: branchIds,
+            staffId: staffId,
+          ),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const AlertDialog(
+                content: SizedBox(height: 100, child: Center(child: CircularProgressIndicator())),
+              );
+            }
+
+            DocumentSnapshot? activeRecord;
+            for (var doc in snapshot.data!.docs) {
+              final data = doc.data() as Map<String, dynamic>;
+              if (data['clockOut'] == null) {
+                activeRecord = doc;
+                break;
+              }
+            }
+
+            final isClockedIn = activeRecord != null;
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Text(isClockedIn ? 'Clock OUT $name' : 'Clock IN $name'),
+              content: Text(
+                isClockedIn
+                    ? 'This staff member is currently clocked in. Do you want to manually clock them out?'
+                    : 'This staff member is not currently clocked in. Do you want to manually clock them in?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    try {
+                      if (isClockedIn) {
+                        await staffService.clockOut(activeRecord!.id, notes: 'Manually clocked out by manager');
+                      } else {
+                        await staffService.clockIn(
+                          staffId: staffId,
+                          staffEmail: staffData['email'] ?? '',
+                          staffName: name,
+                          branchIds: branchIds,
+                        );
+                      }
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(isClockedIn ? '✅ $name clocked out' : '✅ $name clocked in'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                        );
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: isClockedIn ? Colors.red : Colors.green),
+                  child: Text(isClockedIn ? 'Clock Out' : 'Clock In'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
 // =============================================================================
@@ -400,10 +584,14 @@ class _StaffDirectoryTable extends StatelessWidget {
 class _ShiftSchedulingSection extends StatelessWidget {
   final Color primaryColor;
   final StaffService staffService;
-  final List<String> branchIds;
-  final String? selectedBranchId;
+  final Stream<QuerySnapshot> shiftsStream;
   final String userEmail;
-  const _ShiftSchedulingSection({required this.primaryColor, required this.staffService, required this.branchIds, this.selectedBranchId, required this.userEmail});
+  const _ShiftSchedulingSection({
+    required this.primaryColor, 
+    required this.staffService, 
+    required this.shiftsStream,
+    required this.userEmail
+  });
 
   static const _days = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
@@ -432,7 +620,7 @@ class _ShiftSchedulingSection extends StatelessWidget {
         ),
         const Divider(height: 1),
         StreamBuilder<QuerySnapshot>(
-          stream: staffService.getShiftsStream(selectedBranchId: selectedBranchId, branchIds: branchIds),
+          stream: shiftsStream,
           builder: (context, snapshot) {
             if (snapshot.hasError) return Padding(padding: const EdgeInsets.all(24), child: Text('Error: ${snapshot.error}'));
             if (!snapshot.hasData) return const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()));
@@ -442,18 +630,21 @@ class _ShiftSchedulingSection extends StatelessWidget {
               return const Padding(padding: EdgeInsets.all(32), child: Center(child: Text('No shifts scheduled for these branches.', style: TextStyle(color: Colors.grey))));
             }
 
-            // Group shifts by staffEmail
+            // Group shifts by staffId
             final Map<String, Map<int, Map<String, dynamic>>> grouped = {};
             final Map<String, String> staffNames = {};
+            final Map<String, String> staffEmails = {};
             final Map<String, List<String>> staffBranches = {};
             for (final doc in shifts) {
               final data = doc.data() as Map<String, dynamic>;
+              final sId = data['staffId'] as String? ?? data['staffEmail'] as String? ?? 'unknown';
               final email = data['staffEmail'] as String? ?? '';
               final day = data['dayOfWeek'] as int? ?? 1;
-              staffNames[email] = data['staffName'] as String? ?? email;
-              staffBranches[email] = List<String>.from(data['branchIds'] ?? []);
-              grouped.putIfAbsent(email, () => {});
-              grouped[email]![day] = {...data, '_docId': doc.id};
+              staffNames[sId] = data['staffName'] as String? ?? email;
+              staffEmails[sId] = email;
+              staffBranches[sId] = List<String>.from(data['branchIds'] ?? []);
+              grouped.putIfAbsent(sId, () => {});
+              grouped[sId]![day] = {...data, '_docId': doc.id};
             }
 
             return Table(children: [
@@ -474,7 +665,7 @@ class _ShiftSchedulingSection extends StatelessWidget {
                     child: Text(staffNames[entry.key] ?? entry.key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.black87))),
                   ...List.generate(7, (i) {
                     final dayData = entry.value[i + 1];
-                    return _shiftCell(context, dayData, entry.key, staffNames[entry.key] ?? '', staffBranches[entry.key] ?? [], i + 1);
+                    return _shiftCell(context, dayData, entry.key, staffNames[entry.key] ?? '', staffEmails[entry.key] ?? '', staffBranches[entry.key] ?? [], i + 1);
                   }),
                 ],
               )),
@@ -493,7 +684,7 @@ class _ShiftSchedulingSection extends StatelessWidget {
     ]);
   }
 
-  Widget _shiftCell(BuildContext context, Map<String, dynamic>? data, String staffEmail, String staffName, List<String> staffBranches, int dayOfWeek) {
+  Widget _shiftCell(BuildContext context, Map<String, dynamic>? data, String staffId, String staffName, String staffEmail, List<String> staffBranches, int dayOfWeek) {
     final isOff = data?['isOff'] == true;
     final hasShift = data != null;
     final label = !hasShift ? '—' : isOff ? 'OFF' : '${data['startTime'] ?? ''} - ${data['endTime'] ?? ''}';
@@ -504,9 +695,9 @@ class _ShiftSchedulingSection extends StatelessWidget {
     return Padding(padding: const EdgeInsets.all(4), child: InkWell(
       onTap: () {
         if (hasShift) {
-          _showEditShiftDialog(context, data!, data['_docId']);
+          _showEditShiftDialog(context, data!, data['_docId'], staffService, userEmail);
         } else {
-          _showAddShiftDialogForCell(context, staffEmail, staffName, staffBranches, dayOfWeek);
+          _showAddShiftDialogForCell(context, staffId, staffEmail, staffName, staffBranches, dayOfWeek);
         }
       },
       child: Container(
@@ -518,19 +709,26 @@ class _ShiftSchedulingSection extends StatelessWidget {
   }
 
   void _showAddShiftDialog(BuildContext context) {
-    showDialog(context: context, builder: (ctx) => _ShiftFormDialog(staffService: staffService, branchIds: branchIds, userEmail: userEmail));
+    // Note: This dialog might need its own stable stream if it gets complex,
+    // but usually, a one-off dialog opening is fine. 
+    // For now, keeping it simple as it doesn't use snapshots() in its build.
+    final branchFilter = context.read<BranchFilterService>();
+    final userScope = context.read<UserScopeService>();
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    showDialog(context: context, builder: (ctx) => _ShiftFormDialog(staffService: staffService, branchIds: filterBranchIds, userEmail: userEmail));
   }
 
-  void _showAddShiftDialogForCell(BuildContext context, String staffEmail, String staffName, List<String> staffBranches, int dayOfWeek) {
+  void _showAddShiftDialogForCell(BuildContext context, String staffId, String staffEmail, String staffName, List<String> staffBranches, int dayOfWeek) {
     showDialog(context: context, builder: (ctx) => _ShiftFormDialog(
       staffService: staffService, branchIds: staffBranches, userEmail: userEmail,
-      prefilledEmail: staffEmail, prefilledName: staffName, prefilledDay: dayOfWeek,
+      staffId: staffId, prefilledEmail: staffEmail, prefilledName: staffName, prefilledDay: dayOfWeek,
     ));
   }
 
-  void _showEditShiftDialog(BuildContext context, Map<String, dynamic> data, String docId) {
+  void _showEditShiftDialog(BuildContext context, Map<String, dynamic> data, String docId, StaffService staffService, String userEmail) {
     showDialog(context: context, builder: (ctx) => _ShiftFormDialog(
       staffService: staffService, branchIds: List<String>.from(data['branchIds'] ?? []), userEmail: userEmail,
+      staffId: data['staffId'], // Ensure staffId was stored in the shift doc
       existingShift: data, shiftDocId: docId,
     ));
   }
@@ -541,10 +739,8 @@ class _ShiftSchedulingSection extends StatelessWidget {
 // =============================================================================
 class _AttendanceSidebar extends StatelessWidget {
   final Color primaryColor;
-  final StaffService staffService;
-  final List<String> branchIds;
-  final String? selectedBranchId;
-  const _AttendanceSidebar({required this.primaryColor, required this.staffService, required this.branchIds, this.selectedBranchId});
+  final Stream<QuerySnapshot> attendanceStream;
+  const _AttendanceSidebar({required this.primaryColor, required this.attendanceStream});
 
   @override
   Widget build(BuildContext context) {
@@ -566,7 +762,7 @@ class _AttendanceSidebar extends StatelessWidget {
         ]),
         const SizedBox(height: 24),
         StreamBuilder<QuerySnapshot>(
-          stream: staffService.getTodayAttendanceStream(selectedBranchId: selectedBranchId, branchIds: branchIds),
+          stream: attendanceStream,
           builder: (context, snapshot) {
             if (snapshot.hasError) return Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red, fontSize: 12));
             if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
@@ -755,13 +951,24 @@ class _ShiftFormDialog extends StatefulWidget {
   final StaffService staffService;
   final List<String> branchIds;
   final String userEmail;
+  final String? staffId; // The staff identifier (doc ID)
   final String? prefilledEmail;
   final String? prefilledName;
   final int? prefilledDay;
   final Map<String, dynamic>? existingShift;
   final String? shiftDocId;
 
-  const _ShiftFormDialog({required this.staffService, required this.branchIds, required this.userEmail, this.prefilledEmail, this.prefilledName, this.prefilledDay, this.existingShift, this.shiftDocId});
+  const _ShiftFormDialog({
+    required this.staffService, 
+    required this.branchIds, 
+    required this.userEmail, 
+    this.staffId,
+    this.prefilledEmail, 
+    this.prefilledName, 
+    this.prefilledDay, 
+    this.existingShift, 
+    this.shiftDocId,
+  });
 
   @override State<_ShiftFormDialog> createState() => _ShiftFormDialogState();
 }
@@ -770,6 +977,7 @@ class _ShiftFormDialogState extends State<_ShiftFormDialog> {
   final _formKey = GlobalKey<FormState>();
   final _emailC = TextEditingController();
   final _nameC = TextEditingController();
+  String? _selectedStaffId;
   int _dayOfWeek = 1;
   String _startTime = '08:00';
   String _endTime = '16:00';
@@ -788,6 +996,7 @@ class _ShiftFormDialogState extends State<_ShiftFormDialog> {
     super.initState();
     if (isEditing) {
       final d = widget.existingShift!;
+      _selectedStaffId = d['staffId'];
       _emailC.text = d['staffEmail'] ?? '';
       _nameC.text = d['staffName'] ?? '';
       _dayOfWeek = d['dayOfWeek'] ?? 1;
@@ -797,6 +1006,7 @@ class _ShiftFormDialogState extends State<_ShiftFormDialog> {
       _isOff = d['isOff'] ?? false;
       _selectedBranches = List<String>.from(d['branchIds'] ?? []);
     } else {
+      _selectedStaffId = null; // Will be set by dropdown
       _emailC.text = widget.prefilledEmail ?? '';
       _nameC.text = widget.prefilledName ?? '';
       _dayOfWeek = widget.prefilledDay ?? 1;
@@ -813,9 +1023,33 @@ class _ShiftFormDialogState extends State<_ShiftFormDialog> {
       title: Text(isEditing ? 'Edit Shift' : 'Add Shift'),
       content: SizedBox(width: 400, child: SingleChildScrollView(child: Form(key: _formKey, child: Column(mainAxisSize: MainAxisSize.min, children: [
         if (!isEditing && widget.prefilledEmail == null) ...[
-          TextFormField(controller: _emailC, decoration: const InputDecoration(labelText: 'Staff Email', isDense: true), validator: (v) => v!.isEmpty ? 'Required' : null),
-          const SizedBox(height: 12),
-          TextFormField(controller: _nameC, decoration: const InputDecoration(labelText: 'Staff Name', isDense: true), validator: (v) => v!.isEmpty ? 'Required' : null),
+          StreamBuilder<QuerySnapshot>(
+            stream: widget.staffService.getStaffStream(branchIds: widget.branchIds),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) return const Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator());
+              final staffList = snapshot.data!.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
+              final selectedEmail = _emailC.text.isEmpty ? null : _emailC.text;
+              return DropdownButtonFormField<String>(
+                decoration: const InputDecoration(labelText: 'Select Staff Member', isDense: true),
+                value: staffList.any((s) => s['id'] == _selectedStaffId) ? _selectedStaffId : null,
+                items: staffList.map((s) => DropdownMenuItem(
+                  value: s['id'] as String,
+                  child: Text('${s['name']} (${s['email']})'),
+                )).toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    final selected = staffList.firstWhere((s) => s['id'] == val);
+                    setState(() {
+                      _selectedStaffId = val;
+                      _emailC.text = selected['email'] ?? '';
+                      _nameC.text = selected['name'] ?? 'Unknown';
+                    });
+                  }
+                },
+                validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+              );
+            },
+          ),
           const SizedBox(height: 12),
         ],
         DropdownButtonFormField<int>(value: _dayOfWeek, decoration: const InputDecoration(labelText: 'Day of Week', isDense: true),
@@ -881,11 +1115,26 @@ class _ShiftFormDialogState extends State<_ShiftFormDialog> {
     setState(() => _saving = true);
     try {
       if (isEditing) {
-        await widget.staffService.updateShift(widget.shiftDocId!, {'startTime': _startTime, 'endTime': _endTime, 'shiftType': _shiftType, 'isOff': _isOff, 'branchIds': _selectedBranches});
+        await widget.staffService.updateShift(widget.shiftDocId!, {
+          'startTime': _startTime, 
+          'endTime': _endTime, 
+          'shiftType': _shiftType, 
+          'isOff': _isOff, 
+          'branchIds': _selectedBranches,
+          // If we allow changing staff during edit, we'd add staffId/staffEmail here
+        });
       } else {
         await widget.staffService.addShift(
-          staffEmail: _emailC.text.trim(), staffName: _nameC.text.trim(), branchIds: _selectedBranches,
-          dayOfWeek: _dayOfWeek, startTime: _startTime, endTime: _endTime, shiftType: _shiftType, isOff: _isOff, createdBy: widget.userEmail,
+          staffId: _selectedStaffId!,
+          staffEmail: _emailC.text.trim(), 
+          staffName: _nameC.text.trim(), 
+          branchIds: _selectedBranches,
+          dayOfWeek: _dayOfWeek, 
+          startTime: _startTime, 
+          endTime: _endTime, 
+          shiftType: _shiftType, 
+          isOff: _isOff, 
+          createdBy: widget.userEmail,
         );
       }
       if (mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isEditing ? '✅ Shift updated' : '✅ Shift added'), backgroundColor: Colors.green)); }

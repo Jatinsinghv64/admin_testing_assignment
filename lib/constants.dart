@@ -10,6 +10,7 @@ class AppConstants {
   static const String collectionMenuItems = 'menu_items';
   static const String collectionMenuCategories = 'menu_categories';
   static const String collectionCoupons = 'coupons';
+  static const String collectionTimingTemplates = 'timingTemplates';
 
   // --- New Collections (System 1-4) ---
   static const String collectionIngredients = 'ingredients';

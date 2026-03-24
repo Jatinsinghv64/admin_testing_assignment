@@ -17,6 +17,7 @@ import 'RestaurantTimingScreen.dart';
 import '../utils/responsive_helper.dart';
 import 'pos/PosScreen.dart';
 import 'pos/KitchenDisplayScreen.dart';
+import '../Widgets/MyTimeClockWidget.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -745,6 +746,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return AppBar(
       title: Text(appBarTitle),
       actions: [
+        const MyTimeClockWidget(),
         // ✅ Global branch selector
         _buildGlobalBranchSelector(),
         Padding(

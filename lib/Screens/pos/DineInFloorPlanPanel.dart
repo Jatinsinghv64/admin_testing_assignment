@@ -120,7 +120,7 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
           // ── Floor Plan Grid ──
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _getActiveTableOrdersStream(context),
+              stream: _getActiveTableOrdersStream(context, effectiveBranchIds),
               builder: (context, ordersSnapshot) {
                 final occupiedTableIds = <String>{};
                 if (ordersSnapshot.hasData) {
@@ -134,7 +134,7 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                 }
 
                 return StreamBuilder(
-                  stream: _getTablesStream(context),
+                  stream: _getTablesStream(context, effectiveBranchIds),
                   builder: (context, AsyncSnapshot snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting &&
                         !snapshot.hasData) {
@@ -318,22 +318,12 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
     );
   }
 
-  Stream? _getTablesStream(BuildContext context) {
+  Stream? _getTablesStream(BuildContext context, List<String> branchIds) {
     try {
-      final pos = context.read<PosService>();
-      final branchId = pos.activeBranchId ?? '';
-      
-      if (branchId.isEmpty) {
-        final userScope = context.read<UserScopeService>();
-        final branchFilter = context.read<BranchFilterService>();
-        final filtered = branchFilter.getFilterBranchIds(userScope.branchIds);
-        if (filtered.isEmpty) return null;
-        return FirebaseFirestore.instance.collection('Branch').doc(filtered.first).snapshots();
-      }
-
+      if (branchIds.isEmpty) return null;
       return FirebaseFirestore.instance
           .collection('Branch')
-          .doc(branchId)
+          .doc(branchIds.first)
           .snapshots();
     } catch (e) {
       return null;
@@ -341,25 +331,13 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>>? _getActiveTableOrdersStream(
-      BuildContext context) {
+      BuildContext context, List<String> branchIds) {
     try {
-      final pos = context.read<PosService>();
-      final branchId = pos.activeBranchId ?? '';
-      
-      final List<String> targetBranchIds;
-      if (branchId.isNotEmpty) {
-        targetBranchIds = [branchId];
-      } else {
-        final userScope = context.read<UserScopeService>();
-        final branchFilter = context.read<BranchFilterService>();
-        targetBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
-      }
-
-      if (targetBranchIds.isEmpty) return null;
+      if (branchIds.isEmpty) return null;
 
       return FirebaseFirestore.instance
           .collection(AppConstants.collectionOrders)
-          .where('branchIds', arrayContainsAny: targetBranchIds)
+          .where('branchIds', arrayContainsAny: branchIds)
           .where('Order_type', isEqualTo: 'dine_in')
           .where('status', whereIn: [
         AppConstants.statusPending,
@@ -418,18 +396,27 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                 children: [
                   TextField(
                     controller: nameController,
-                    decoration: const InputDecoration(labelText: 'Table Name/Number'),
+                    decoration: const InputDecoration(
+                      labelText: 'Display Name',
+                      hintText: 'Table 1, Window Seat, etc.',
+                    ),
                   ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: seatsController,
-                    decoration: const InputDecoration(labelText: 'Number of Seats'),
+                    decoration: const InputDecoration(
+                      labelText: 'Number of Seats',
+                      hintText: 'Enter seat capacity',
+                    ),
                     keyboardType: TextInputType.number,
                   ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: zoneController,
-                    decoration: const InputDecoration(labelText: 'Zone/Floor'),
+                    decoration: const InputDecoration(
+                      labelText: 'Zone / Floor',
+                      hintText: 'Main Floor, Rooftop, etc.',
+                    ),
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(

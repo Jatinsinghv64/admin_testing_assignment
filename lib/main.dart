@@ -114,14 +114,18 @@ void main() async {
       // ✅ Initialize Firebase App Check for security
       try {
         debugPrint('🚀 [DIAGNOSTIC] Initializing Firebase App Check...');
-        await FirebaseAppCheck.instance.activate(
-          androidProvider: kDebugMode
-              ? AndroidProvider.debug
-              : AndroidProvider.playIntegrity,
-          appleProvider:
-              kDebugMode ? AppleProvider.debug : AppleProvider.appAttest,
-        );
-        debugPrint('✅ [DIAGNOSTIC] Firebase App Check initialized');
+        if (!kIsWeb) {
+          await FirebaseAppCheck.instance.activate(
+            androidProvider: kDebugMode
+                ? AndroidProvider.debug
+                : AndroidProvider.playIntegrity,
+            appleProvider:
+                kDebugMode ? AppleProvider.debug : AppleProvider.appAttest,
+          );
+          debugPrint('✅ [DIAGNOSTIC] Firebase App Check initialized');
+        } else {
+          debugPrint('ℹ️ [DIAGNOSTIC] App Check skipped for Web (needs ReCaptcha configuration)');
+        }
       } catch (e) {
         debugPrint('⚠️ [DIAGNOSTIC] App Check not configured: $e');
       }

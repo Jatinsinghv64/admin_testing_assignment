@@ -659,6 +659,113 @@ class _PromoSaleAddEditScreenState extends State<PromoSaleAddEditScreen> {
     );
   }
 
+  Future<void> _selectDateTime(BuildContext context, bool isStart) async {
+    final DateTime initialDate = isStart ? _startDate : _endDate;
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Colors.deepPurple,
+              onPrimary: Colors.white,
+              onSurface: Colors.black,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (pickedDate != null) {
+      final TimeOfDay? pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(initialDate),
+        builder: (context, child) {
+          return Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: const ColorScheme.light(
+                primary: Colors.deepPurple,
+                onPrimary: Colors.white,
+                onSurface: Colors.black,
+              ),
+            ),
+            child: child!,
+          );
+        },
+      );
+
+      if (pickedTime != null) {
+        setState(() {
+          final newDateTime = DateTime(
+            pickedDate.year,
+            pickedDate.month,
+            pickedDate.day,
+            pickedTime.hour,
+            pickedTime.minute,
+          );
+          if (isStart) {
+            _startDate = newDateTime;
+          } else {
+            _endDate = newDateTime;
+          }
+        });
+      }
+    }
+  }
+
+  Widget _buildDateTimePickerField(String label, DateTime value, bool isStart) {
+    final String formattedDate =
+        '${value.day}/${value.month}/${value.year} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+
+    return InkWell(
+      onTap: () => _selectDateTime(context, isStart),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey[300]!),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(
+                  isStart ? Icons.calendar_today : Icons.event,
+                  size: 16,
+                  color: Colors.deepPurple,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  formattedDate,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -996,38 +1103,18 @@ class _PromoSaleAddEditScreenState extends State<PromoSaleAddEditScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () async {
-                              final d = await showDatePicker(
-                                context: context,
-                                initialDate: _startDate,
-                                firstDate: DateTime(2020),
-                                lastDate: DateTime(2030),
-                              );
-                              if (d != null) setState(() => _startDate = d);
-                            },
-                            icon: const Icon(Icons.calendar_today, size: 16),
-                            label: Text(
-                              'Start: ${_startDate.toString().split(' ')[0]}',
-                            ),
+                          child: _buildDateTimePickerField(
+                            'Start Date & Time',
+                            _startDate,
+                            true,
                           ),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () async {
-                              final d = await showDatePicker(
-                                context: context,
-                                initialDate: _endDate,
-                                firstDate: DateTime(2020),
-                                lastDate: DateTime(2030),
-                              );
-                              if (d != null) setState(() => _endDate = d);
-                            },
-                            icon: const Icon(Icons.event, size: 16),
-                            label: Text(
-                              'End: ${_endDate.toString().split(' ')[0]}',
-                            ),
+                          child: _buildDateTimePickerField(
+                            'End Date & Time',
+                            _endDate,
+                            false,
                           ),
                         ),
                       ],

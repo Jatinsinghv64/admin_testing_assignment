@@ -288,153 +288,168 @@ class _AssignmentDetailPaneState extends State<_AssignmentDetailPane> {
 
   @override
   Widget build(BuildContext context) {
-    final data = widget.orderDoc.data() as Map<String, dynamic>;
-    final orderIdShort =
-        '#${(data['dailyOrderNumber'] ?? widget.orderDoc.id.substring(0, 8)).toString().toUpperCase()}';
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('Orders')
+          .doc(widget.orderDoc.id)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final doc = snapshot.data ?? widget.orderDoc;
+        final data = doc.data() as Map<String, dynamic>? ?? {};
+        final orderIdShort =
+            '#${(data['dailyOrderNumber'] ?? doc.id.substring(0, 8)).toString().toUpperCase()}';
 
-    // Determine branch for rider query
-    String? orderBranchId;
-    if (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty) {
-      orderBranchId = data['branchIds'][0].toString();
-    }
-    final targetBranchId = orderBranchId ?? (widget.userScope.branchIds.isNotEmpty ? widget.userScope.branchIds.first : '');
+        // Determine branch for rider query
+        String? orderBranchId;
+        if (data['branchIds'] is List &&
+            (data['branchIds'] as List).isNotEmpty) {
+          orderBranchId = data['branchIds'][0].toString();
+        }
+        final targetBranchId = orderBranchId ??
+            (widget.userScope.branchIds.isNotEmpty
+                ? widget.userScope.branchIds.first
+                : '');
 
-    return Column(
-      children: [
-        // Top Header
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
-          ),
-          child: Row(
-            children: [
-              IconButton(
-                  onPressed: widget.onClose, icon: const Icon(Icons.close)),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Order $orderIdShort',
-                      style: const TextStyle(
-                          fontSize: 24, fontWeight: FontWeight.bold)),
-                  Text('Manual Assignment Mode',
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600])),
-                ],
+        return Column(
+          children: [
+            // Top Header
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
               ),
-              const Spacer(),
-              if (_isCancelling)
-                const CircularProgressIndicator()
-              else
-                OutlinedButton.icon(
-                  onPressed: _handleCancelOrder,
-                  icon: const Icon(Icons.cancel, size: 18),
-                  label: const Text('Cancel Order'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: const BorderSide(color: Colors.red),
-                  ),
-                ),
-            ],
-          ),
-        ),
-
-        // Content
-        Expanded(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Order Info Column
-              Expanded(
-                flex: 2,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
+              child: Row(
+                children: [
+                  IconButton(
+                      onPressed: widget.onClose, icon: const Icon(Icons.close)),
+                  const SizedBox(width: 12),
+                  Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildInfoSection('Customer Details', [
-                        _buildInfoRow(Icons.person, 'Name',
-                            data['customerName'] ?? 'N/A'),
-                        _buildInfoRow(Icons.phone, 'Phone',
-                            data['customerPhone'] ?? 'N/A'),
-                        _buildInfoRow(Icons.location_on, 'Address',
-                            _formatAddress(data['deliveryAddress'])),
-                      ]),
-                      const SizedBox(height: 24),
-                      _buildInfoSection('Order Details', [
-                        _buildInfoRow(Icons.receipt, 'Total Amount',
-                            'QAR ${(data['totalAmount'] as num?)?.toStringAsFixed(2) ?? "0.00"}'),
-                        _buildInfoRow(Icons.payment, 'Payment',
-                            data['paymentMethod'] ?? 'N/A'),
-                        _buildInfoRow(
-                            Icons.note, 'Notes', data['orderNotes'] ?? 'None'),
-                      ]),
-                      const SizedBox(height: 24),
-                      // Reason Box
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.shade50,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.orange.shade200),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Why Manual Assignment?',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.orange.shade900)),
-                            const SizedBox(height: 4),
-                            Text(
-                                data['assignmentNotes'] ??
-                                    'No specific reason provided.',
-                                style:
-                                    TextStyle(color: Colors.orange.shade900)),
-                          ],
-                        ),
-                      )
+                      Text('Order $orderIdShort',
+                          style: const TextStyle(
+                              fontSize: 24, fontWeight: FontWeight.bold)),
+                      Text('Manual Assignment Mode',
+                          style:
+                              TextStyle(fontSize: 14, color: Colors.grey[600])),
                     ],
                   ),
-                ),
+                  const Spacer(),
+                  if (_isCancelling)
+                    const CircularProgressIndicator()
+                  else
+                    OutlinedButton.icon(
+                      onPressed: _handleCancelOrder,
+                      icon: const Icon(Icons.cancel, size: 18),
+                      label: const Text('Cancel Order'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
+                      ),
+                    ),
+                ],
               ),
+            ),
 
-              // Rider Selection Column (The "meat" of this screen)
-              Container(width: 1, color: Colors.grey[200]),
-              Expanded(
-                flex: 3,
-                child: Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      color: Colors.grey[50],
-                      child: const Row(
+            // Content
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Order Info Column
+                  Expanded(
+                    flex: 2,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.sports_motorsports,
-                              color: Colors.deepPurple),
-                          SizedBox(width: 12),
-                          Text('Available Riders',
-                              style: TextStyle(
-                                  fontSize: 18, fontWeight: FontWeight.bold)),
+                          _buildInfoSection('Customer Details', [
+                            _buildInfoRow(Icons.person, 'Name',
+                                data['customerName'] ?? 'N/A'),
+                            _buildInfoRow(Icons.phone, 'Phone',
+                                data['customerPhone'] ?? 'N/A'),
+                            _buildInfoRow(Icons.location_on, 'Address',
+                                _formatAddress(data['deliveryAddress'])),
+                          ]),
+                          const SizedBox(height: 24),
+                          _buildInfoSection('Order Details', [
+                            _buildInfoRow(Icons.receipt, 'Total Amount',
+                                'QAR ${(data['totalAmount'] as num?)?.toStringAsFixed(2) ?? "0.00"}'),
+                            _buildInfoRow(Icons.payment, 'Payment',
+                                data['paymentMethod'] ?? 'N/A'),
+                            _buildInfoRow(Icons.note, 'Notes',
+                                data['orderNotes'] ?? 'None'),
+                          ]),
+                          const SizedBox(height: 24),
+                          // Reason Box
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.orange.shade200),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Why Manual Assignment?',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.orange.shade900)),
+                                const SizedBox(height: 4),
+                                Text(
+                                    data['assignmentNotes'] ??
+                                        'No specific reason provided.',
+                                    style: TextStyle(
+                                        color: Colors.orange.shade900)),
+                              ],
+                            ),
+                          )
                         ],
                       ),
                     ),
-                    Expanded(
-                      child: _RiderSelectionList(
-                        branchId: targetBranchId ?? '',
-                        onAssign: (riderId) =>
-                            _handleAssign(riderId, targetBranchId),
-                      ),
+                  ),
+
+                  // Rider Selection Column (The "meat" of this screen)
+                  Container(width: 1, color: Colors.grey[200]),
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          color: Colors.grey[50],
+                          child: const Row(
+                            children: [
+                              Icon(Icons.sports_motorsports,
+                                  color: Colors.deepPurple),
+                              SizedBox(width: 12),
+                              Text('Available Riders',
+                                  style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: _RiderSelectionList(
+                            branchId: targetBranchId ?? '',
+                            onAssign: (riderId) =>
+                                _handleAssign(riderId, targetBranchId),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 

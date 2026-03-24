@@ -97,16 +97,17 @@ class StaffService {
   }
 
   /// Get shifts for a specific staff member.
-  Stream<QuerySnapshot> getShiftsForStaff(String staffEmail) {
+  Stream<QuerySnapshot> getShiftsForStaff(String staffId) {
     return _db
         .collection('shifts')
-        .where('staffEmail', isEqualTo: staffEmail)
+        .where('staffId', isEqualTo: staffId)
         .orderBy('dayOfWeek')
         .snapshots();
   }
 
   /// Add a shift.
   Future<void> addShift({
+    required String staffId,
     required String staffEmail,
     required String staffName,
     required List<String> branchIds,
@@ -120,7 +121,7 @@ class StaffService {
     // Check for existing shift on same day for same staff 
     final existing = await _db
         .collection('shifts')
-        .where('staffEmail', isEqualTo: staffEmail)
+        .where('staffId', isEqualTo: staffId)
         .where('dayOfWeek', isEqualTo: dayOfWeek)
         .get();
 
@@ -138,6 +139,7 @@ class StaffService {
     }
 
     await _db.collection('shifts').add({
+      'staffId': staffId,
       'staffEmail': staffEmail,
       'staffName': staffName,
       'branchIds': branchIds,
@@ -169,11 +171,15 @@ class StaffService {
   // ---------------------------------------------------------------------------
 
   /// Stream today's attendance records, optionally filtered by branch.
-  Stream<QuerySnapshot> getTodayAttendanceStream({String? selectedBranchId, List<String>? branchIds}) {
+  Stream<QuerySnapshot> getTodayAttendanceStream({String? selectedBranchId, List<String>? branchIds, String? staffId}) {
     final today = _todayString();
     Query query = _db
         .collection('attendance')
         .where('date', isEqualTo: today);
+
+    if (staffId != null && staffId.isNotEmpty) {
+      query = query.where('staffId', isEqualTo: staffId);
+    }
 
     if (selectedBranchId != null && selectedBranchId.isNotEmpty) {
       query = query.where('branchIds', arrayContains: selectedBranchId);
@@ -187,6 +193,7 @@ class StaffService {
 
   /// Clock in a staff member.
   Future<void> clockIn({
+    required String staffId,
     required String staffEmail,
     required String staffName,
     required List<String> branchIds,
@@ -195,15 +202,16 @@ class StaffService {
     final today = _todayString();
     final now = DateTime.now();
 
-    // Check if already clocked in today
+    // Check if already clocked in today (active session)
     final existing = await _db
         .collection('attendance')
-        .where('staffEmail', isEqualTo: staffEmail)
+        .where('staffId', isEqualTo: staffId)
         .where('date', isEqualTo: today)
+        .where('clockOut', isNull: true)
         .get();
 
     if (existing.docs.isNotEmpty) {
-      throw Exception('$staffName is already clocked in today.');
+      throw Exception('$staffName is already clocked in.');
     }
 
     // Determine status
@@ -221,6 +229,7 @@ class StaffService {
     }
 
     await _db.collection('attendance').add({
+      'staffId': staffId,
       'staffEmail': staffEmail,
       'staffName': staffName,
       'branchIds': branchIds,
@@ -275,6 +284,7 @@ class StaffService {
     if (selectedBranchId != null && selectedBranchId.isNotEmpty) {
       query = query.where('branchIds', arrayContains: selectedBranchId);
     } else if (branchIds != null && branchIds.isNotEmpty) {
+      // Use arrayContainsAny for multi-branch filtering
       query = query.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
     }
 

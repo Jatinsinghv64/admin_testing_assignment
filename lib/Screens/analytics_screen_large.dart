@@ -6,6 +6,7 @@ import 'package:syncfusion_flutter_charts/charts.dart';
 import '../utils/responsive_helper.dart';
 import '../Widgets/BranchFilterService.dart';
 import '../main.dart'; // UserScopeService
+import '../constants.dart';
 
 class AnalyticsScreenLarge extends StatefulWidget {
   const AnalyticsScreenLarge({super.key});
@@ -68,14 +69,26 @@ class _AnalyticsScreenLargeState extends State<AnalyticsScreenLarge> {
             
             // 2. Order Type Filter
             if (_orderTypeFilter != 'All') {
-              final type = data['Order_type']?.toString().toLowerCase() ?? '';
-              if (!type.contains(_orderTypeFilter.toLowerCase())) return false;
+              final normalizedDocType = AppConstants.normalizeOrderType(data['Order_type']?.toString());
+              final normalizedFilter = AppConstants.normalizeOrderType(_orderTypeFilter);
+              if (normalizedDocType != normalizedFilter) return false;
             }
             
             // 3. Status Filter
             if (_statusFilter != 'All') {
-              final status = data['status']?.toString().toLowerCase() ?? '';
-              if (!status.contains(_statusFilter.toLowerCase())) return false;
+              final rawStatus = data['status']?.toString() ?? '';
+              final normalizedDocStatus = AppConstants.normalizeStatus(rawStatus).toLowerCase();
+              if (_statusFilter == 'Completed') {
+                const completedStatuses = {
+                  AppConstants.statusDelivered, // 'delivered'
+                  AppConstants.statusPaid,      // 'paid'
+                  AppConstants.statusCollected, // 'collected'
+                };
+                if (!completedStatuses.contains(normalizedDocStatus)) return false;
+              } else {
+                final normalizedFilter = _statusFilter.toLowerCase();
+                if (normalizedDocStatus != normalizedFilter) return false;
+              }
             }
             
             return true;
@@ -159,7 +172,7 @@ class _AnalyticsScreenLargeState extends State<AnalyticsScreenLarge> {
         _buildDropdown(
           label: 'Order Type',
           value: _orderTypeFilter,
-          items: ['All', 'Delivery', 'Take Away', 'Dine-in']
+          items: ['All', 'Delivery', 'Takeaway', 'Dine-in']
               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
               .toList(),
           onChanged: (val) => setState(() => _orderTypeFilter = val!),
@@ -168,7 +181,7 @@ class _AnalyticsScreenLargeState extends State<AnalyticsScreenLarge> {
         _buildDropdown(
           label: 'Status',
           value: _statusFilter,
-          items: ['All', 'Delivered', 'Cancelled', 'Pending']
+          items: ['All', 'Pending', 'Preparing', 'Ready', 'Completed', 'Cancelled']
               .map((e) => DropdownMenuItem(value: e, child: Text(e)))
               .toList(),
           onChanged: (val) => setState(() => _statusFilter = val!),
@@ -289,7 +302,8 @@ class _AnalyticsScreenLargeState extends State<AnalyticsScreenLarge> {
     for (var doc in orders) {
       final data = doc.data() as Map<String, dynamic>;
       totalRevenue += (data['totalAmount'] as num?)?.toDouble() ?? 0;
-      if (data['status'] == 'Cancelled' || data['status'] == 'Failed') cancelledOrders++;
+      final status = (data['status']?.toString() ?? '').toLowerCase();
+      if (status == 'cancelled' || status == 'failed') cancelledOrders++;
     }
 
     double aov = totalOrders > 0 ? totalRevenue / totalOrders : 0;
@@ -467,10 +481,10 @@ class _AnalyticsScreenLargeState extends State<AnalyticsScreenLarge> {
     int delivery = 0, takeaway = 0, dinein = 0;
     for (var doc in orders) {
       final data = doc.data() as Map<String, dynamic>;
-      final type = data['Order_type']?.toString().toLowerCase() ?? '';
-      if (type.contains('delivery')) delivery++;
-      else if (type.contains('takeaway')) takeaway++;
-      else dinein++;
+      final type = AppConstants.normalizeOrderType(data['Order_type']?.toString());
+      if (type == AppConstants.orderTypeDelivery) delivery++;
+      else if (type == AppConstants.orderTypeTakeaway || type == AppConstants.orderTypePickup) takeaway++;
+      else if (type == AppConstants.orderTypeDineIn) dinein++;
     }
     int total = orders.length;
 

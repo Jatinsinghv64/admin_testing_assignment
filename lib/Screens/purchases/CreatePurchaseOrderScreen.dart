@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -64,11 +65,13 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     final userScope = context.read<UserScopeService>();
     final branchFilter = context.read<BranchFilterService>();
     final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
-    final branchId = userScope.branchIds.isNotEmpty
-        ? userScope.branchIds.first
-        : (branchIds.firstOrNull ?? '');
+    
+    // If branchIds is empty, we still try to generate, 
+    // but we'll try again if it's still generating.
     final po = await _service.generatePoNumber(branchIds);
-    if (mounted) setState(() => _poNumber = po);
+    if (mounted) {
+      setState(() => _poNumber = po);
+    }
   }
 
   @override
@@ -76,9 +79,11 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
     final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
-    final branchId = userScope.branchIds.isNotEmpty
-        ? userScope.branchIds.first
-        : (branchIds.firstOrNull ?? '');
+    
+    // ✅ RE-TRIGGER GENERATION IF IT FAILED DURING DIDCHANGEDEPENDENCIES
+    if (_poNumber.isEmpty && branchIds.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _preparePoNumber());
+    }
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -660,6 +665,16 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
       (acc, r) => acc + ((r['lineTotal'] as num).toDouble()),
     );
 
+    if (_poNumber.isEmpty || _poNumber == 'Generating...') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Purchase order number is still generating. Please wait.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isSaving = true);
     try {
       await _service.createPurchaseOrder(
@@ -687,9 +702,16 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(status == 'submitted'
-                ? 'Purchase order submitted'
-                : 'Purchase order saved as draft'),
+                ? 'Purchase order $_poNumber submitted'
+                : 'Purchase order $_poNumber saved as draft'),
             backgroundColor: Colors.green,
+            action: SnackBarAction(
+              label: 'COPY ID',
+              textColor: Colors.white,
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: _poNumber));
+              },
+            ),
           ),
         );
       }

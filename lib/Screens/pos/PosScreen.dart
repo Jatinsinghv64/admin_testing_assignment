@@ -67,6 +67,9 @@ class _PosScreenState extends State<PosScreen> {
   Widget build(BuildContext context) {
     final selectedBranchId =
         context.watch<BranchFilterService>().selectedBranchId;
+    final userScope = context.watch<UserScopeService>();
+    final branchFilter = context.watch<BranchFilterService>();
+
     final watcherBranchId = selectedBranchId != null &&
             selectedBranchId != BranchFilterService.allBranchesValue
         ? selectedBranchId
@@ -79,11 +82,16 @@ class _PosScreenState extends State<PosScreen> {
         children: [
           _buildPosHeader(context),
           Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              switchInCurve: Curves.easeInOut,
-              switchOutCurve: Curves.easeInOut,
-              child: _buildCurrentView(context),
+            child: _buildBranchCheckWrapper(
+              context,
+              userScope,
+              branchFilter,
+              (activeBranchId) => AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                switchInCurve: Curves.easeInOut,
+                switchOutCurve: Curves.easeInOut,
+                child: _buildCurrentView(context, activeBranchId),
+              ),
             ),
           ),
         ],
@@ -211,7 +219,7 @@ class _PosScreenState extends State<PosScreen> {
     });
   }
 
-  Widget _buildCurrentView(BuildContext context) {
+  Widget _buildCurrentView(BuildContext context, String activeBranchId) {
     switch (_viewMode) {
       case PosViewMode.delivery:
         return DeliveryOrdersPanel(
@@ -226,12 +234,12 @@ class _PosScreenState extends State<PosScreen> {
           },
         );
       case PosViewMode.pos:
-        return _buildPosBody(context);
+        return _buildPosBody(context, activeBranchId);
     }
   }
 
   // ── POS Body (Split pane) ──────────────────────────────────────
-  Widget _buildPosBody(BuildContext context) {
+  Widget _buildPosBody(BuildContext context, String activeBranchId) {
     final userScope = Provider.of<UserScopeService>(context);
     final branchFilter = Provider.of<BranchFilterService>(context);
     final effectiveBranchIds =
@@ -272,39 +280,35 @@ class _PosScreenState extends State<PosScreen> {
                       'Category'
           };
 
-          return _buildBranchCheckWrapper(context, userScope, branchFilter,
-              (activeBranchId) {
-            return Row(
-              key: const ValueKey('pos'),
-              children: [
-                // ── Left: Products Panel (65%) ──
-                Expanded(
-                  flex: 65,
-                  child: Row(
-                    children: [
-                      _buildCategorySidebar(
-                          context, categories, activeBranchId),
-                      const VerticalDivider(width: 1),
-                      Expanded(
-                          child: _buildProductGrid(
-                              context, categoryMap, activeBranchId)),
-                    ],
-                  ),
+          return Row(
+            key: const ValueKey('pos'),
+            children: [
+              // ── Left: Products Panel (65%) ──
+              Expanded(
+                flex: 65,
+                child: Row(
+                  children: [
+                    _buildCategorySidebar(context, categories, activeBranchId),
+                    const VerticalDivider(width: 1),
+                    Expanded(
+                        child: _buildProductGrid(
+                            context, categoryMap, activeBranchId)),
+                  ],
                 ),
-                // ── Right: Cart Panel (35%) ──
-                const VerticalDivider(width: 1),
-                Expanded(
-                  flex: 35,
-                  child: PosCartPanel(
-                    onOrderSubmit: () => _submitOrder(context, activeBranchId),
-                    onPaymentTap: () =>
-                        _openPaymentDialog(context, activeBranchId),
-                    isSubmittingOrder: _isSubmittingOrder,
-                  ),
+              ),
+              // ── Right: Cart Panel (35%) ──
+              const VerticalDivider(width: 1),
+              Expanded(
+                flex: 35,
+                child: PosCartPanel(
+                  onOrderSubmit: () => _submitOrder(context, activeBranchId),
+                  onPaymentTap: () =>
+                      _openPaymentDialog(context, activeBranchId),
+                  isSubmittingOrder: _isSubmittingOrder,
                 ),
-              ],
-            );
-          });
+              ),
+            ],
+          );
         });
   }
 

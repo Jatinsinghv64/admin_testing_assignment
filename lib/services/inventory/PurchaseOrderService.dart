@@ -144,8 +144,12 @@ class PurchaseOrderService {
     final yyyyMm = '${now.year}${now.month.toString().padLeft(2, '0')}';
     final prefix = 'PO-$yyyyMm-';
 
-    final latest = await _poCol
-        .where('branchIds', arrayContainsAny: branchIds.take(10).toList())
+    Query<Map<String, dynamic>> query = _poCol;
+    if (branchIds.isNotEmpty) {
+      query = query.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+    }
+    
+    final latest = await query
         .orderBy('createdAt', descending: true)
         .limit(50)
         .get();

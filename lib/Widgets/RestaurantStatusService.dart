@@ -22,7 +22,7 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
   final _closingPopupController = StreamController<bool>.broadcast();
   Stream<bool> get closingPopupStream => _closingPopupController.stream;
 
-  bool _popupShownToday = false;
+  DateTime? _lastPopupShownTime;
 
   // --- STATE VARIABLES ---
   bool _isManualOpen = false;
@@ -109,7 +109,7 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
         _timezone = data['timezone'] ?? 'UTC';
         _workingHours = Map<String, dynamic>.from(data['workingHours'] ?? {});
 
-        // Note: We do NOT reset _popupShownToday here to avoid loops.
+        // Note: We do NOT reset popup tracking here as it's tied to the closing event.
       } else {
         _isManualOpen = false;
       }
@@ -137,9 +137,9 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
 
       if (_isScheduleOpen != openNow) {
         _isScheduleOpen = openNow;
-        // Only reset popup flag if the schedule effectively changes (e.g. new shift started)
+        // Only reset popup tracking if the schedule effectively changes (e.g. new shift started)
         if (openNow) {
-          _popupShownToday = false;
+          _lastPopupShownTime = null;
         }
         notifyListeners();
       }
@@ -186,7 +186,7 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
 
       // Reset popup logic: If user extended time (difference > 5 mins), allow popup again later
       if (difference.inMinutes > 5) {
-        _popupShownToday = false;
+        _lastPopupShownTime = null;
       }
 
       // Update Banner (Show if within threshold)
@@ -201,8 +201,8 @@ class RestaurantStatusService with ChangeNotifier, WidgetsBindingObserver {
       }
 
       // Trigger Popup (Show if within popup threshold)
-      if (difference <= _closingPopupThreshold && difference.inSeconds > 0 && !_popupShownToday) {
-        _popupShownToday = true;
+      if (difference <= _closingPopupThreshold && difference.inSeconds > 0 && _lastPopupShownTime != closingTime) {
+        _lastPopupShownTime = closingTime;
         _closingPopupController.add(true);
       }
     }

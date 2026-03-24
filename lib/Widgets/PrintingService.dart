@@ -173,6 +173,7 @@ class PrintingService {
             'qty': qty,
             'price': price,
             'originalPrice': originalPrice > price ? originalPrice : 0.0,
+            'addons': (m['addons'] as List<dynamic>? ?? []),
           };
         }).toList();
         
@@ -462,6 +463,18 @@ class PrintingService {
                                           pw.CrossAxisAlignment.start,
                                       children: [
                                         pw.Text(item['name'], style: fontReg),
+                                        // ── NEW: Display Add-ons ──
+                                        if ((item['addons'] as List).isNotEmpty)
+                                          ... (item['addons'] as List).map((addon) {
+                                            final a = Map<String, dynamic>.from(addon as Map);
+                                            return pw.Padding(
+                                              padding: const pw.EdgeInsets.only(left: 4, top: 1),
+                                              child: pw.Text(
+                                                "+ ${a['name']} (${AppConstants.currencySymbol}${((a['price'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)})",
+                                                style: fontSmall.copyWith(color: PdfColors.grey700),
+                                              ),
+                                            );
+                                          }),
                                         // Show Unit Price
                                         pw.Row(children: [
                                           pw.Text(
@@ -683,6 +696,7 @@ class PrintingService {
             'qty': int.tryParse(
                     (m['quantity'] ?? m['qty'] ?? '1').toString()) ??
                 1,
+            'addons': (m['addons'] as List<dynamic>? ?? []),
           };
         }).toList();
 
@@ -767,9 +781,22 @@ class PrintingService {
                                   .MainAxisAlignment.spaceBetween,
                               children: [
                                 pw.Expanded(
-                                    child: pw.Text(
-                                        item['name'].toString(),
-                                        style: fontLarge)),
+                                  child: pw.Column(
+                                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                    children: [
+                                      pw.Text(item['name'].toString(), style: fontLarge),
+                                      if ((item['addons'] as List).isNotEmpty)
+                                        ... (item['addons'] as List).map((addon) {
+                                          final a = Map<String, dynamic>.from(addon as Map);
+                                          return pw.Text(
+                                            "  + ${a['name']}",
+                                            style: fontMedBold.copyWith(color: PdfColors.grey800),
+                                          );
+                                        }),
+                                    ],
+                                  ),
+                                ),
+
                                 pw.Text('x${item['qty']}',
                                     style: fontLarge.copyWith(
                                         fontSize: 16)),

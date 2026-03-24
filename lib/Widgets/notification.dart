@@ -1,14 +1,34 @@
+// lib/Widgets/notification.dart
 import 'dart:async';
 import 'dart:collection'; // For Queue
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vibration/vibration.dart';
 
 import '../main.dart'; // Imports UserScopeService
 import 'PrintingService.dart';
 import 'RiderAssignment.dart';
+
+class OrderItem {
+  final String name;
+  final int quantity;
+  final String price;
+  final String? originalPrice;
+  final String? discountedPrice;
+  final String? note;
+
+  const OrderItem({
+    required this.name,
+    required this.quantity,
+    required this.price,
+    this.originalPrice,
+    this.discountedPrice,
+    this.note,
+  });
+}
 
 class OrderNotificationService with ChangeNotifier {
   static const String _soundKey = 'notification_sound_enabled';
@@ -190,14 +210,14 @@ class OrderNotificationService with ChangeNotifier {
     if (_isDialogOpen || _orderQueue.isEmpty) return;
 
     final String nextOrderId = _orderQueue.removeFirst();
-    
+
     // ✅ NEW: Check if order is from POS to suppress popup and start auto-accept timer
     try {
       final orderSnap = await FirebaseFirestore.instance
           .collection('Orders')
           .doc(nextOrderId)
           .get();
-          
+
       if (orderSnap.exists) {
         final data = orderSnap.data() as Map<String, dynamic>;
         final String source = data['source']?.toString().toLowerCase() ?? '';
@@ -205,10 +225,10 @@ class OrderNotificationService with ChangeNotifier {
 
         if (!showPopup) {
           debugPrint("🚫 Skipping popup for order $nextOrderId (Source: $source)");
-          
+
           // Start 15-second auto-accept timer for POS orders
           _startPosAutoAcceptTimer(nextOrderId);
-          
+
           // Process next in queue
           _processOrderQueue(scopeService);
           return;
@@ -275,7 +295,7 @@ class OrderNotificationService with ChangeNotifier {
               });
             },
             onAccept: () async {
-               try {
+              try {
                 // ✅ Support both email and phone users
                 String acceptedBy = scopeService.userIdentifier.isNotEmpty
                     ? scopeService.userIdentifier
@@ -325,8 +345,8 @@ class OrderNotificationService with ChangeNotifier {
                 debugPrint("❌ CRITICAL: Failed to accept order $orderId: $e");
                 if (context.mounted) {
                   String msg = e.toString().contains("MissingPluginException")
-                    ? "Plugin error: Please restart the app completely."
-                    : e.toString().replaceAll("Exception:", "").trim();
+                      ? "Plugin error: Please restart the app completely."
+                      : e.toString().replaceAll("Exception:", "").trim();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text(msg), backgroundColor: Colors.red),
                   );
@@ -335,7 +355,7 @@ class OrderNotificationService with ChangeNotifier {
               }
             },
             onReject: (reason) async {
-               try {
+              try {
                 await RiderAssignmentService.cancelAutoAssignment(orderId);
                 // ✅ Support both email and phone users
                 String rejectedBy = scopeService.userIdentifier.isNotEmpty
@@ -395,14 +415,6 @@ class OrderNotificationService with ChangeNotifier {
                     'acceptedAt': FieldValue.serverTimestamp(),
                   });
                 });
-
-                if (context.mounted) {
-                  // Only show snackbar if we actually did something?
-                  // Ideally we can't easily know if transaction aborted cleanly or updated inside here
-                  // without returning a value.
-                  // But safely assuming if no specific error thrown, it went through OR was skipped.
-                  // We will let the StreamListener dismiss the UI.
-                }
               } catch (e) {
                 debugPrint("❌ Auto-accept transaction failed: $e");
               }
@@ -475,6 +487,11 @@ class NewOrderDialogState extends State<NewOrderDialog>
     return 'N/A';
   }
 
+  String get sourcePlatform {
+    final src = _orderData?['source']?.toString().toUpperCase() ?? 'APP';
+    return src.isEmpty ? 'APP' : src;
+  }
+
   List<Map<String, dynamic>> get items {
     try {
       final list = _orderData?['items'];
@@ -484,8 +501,9 @@ class NewOrderDialogState extends State<NewOrderDialog>
           return {
             'name': itemMap['name']?.toString() ?? 'Item',
             'qty': int.tryParse(itemMap['quantity']?.toString() ?? '1') ?? 1,
-            'price':
-                double.tryParse(itemMap['price']?.toString() ?? '0') ?? 0.0,
+            'price': double.tryParse(itemMap['price']?.toString() ?? '0') ?? 0.0,
+            'discountedPrice': itemMap['discountedPrice'],
+            'finalPrice': itemMap['finalPrice'],
           };
         }).toList();
       }
@@ -497,10 +515,38 @@ class NewOrderDialogState extends State<NewOrderDialog>
 
   double get totalAmount =>
       double.tryParse(_orderData?['totalAmount']?.toString() ?? '0') ?? 0.0;
+
+  double get subTotal {
+    double sum = 0;
+    for (var item in items) {
+      double price = double.tryParse(item['price']?.toString() ?? '0') ?? 0.0;
+      int qty = item['qty'] as int? ?? 0;
+      sum += price * qty;
+    }
+    return sum;
+  }
+
+  double get discountTotal {
+    double totalD = 0;
+    for (var item in items) {
+      final double price = double.tryParse(item['price']?.toString() ?? '0') ?? 0.0;
+      final double? dPrice = (item['discountedPrice'] ?? item['finalPrice']) != null 
+          ? double.tryParse((item['discountedPrice'] ?? item['finalPrice']).toString()) 
+          : null;
+      
+      if (dPrice != null && dPrice < price) {
+        int qty = item['qty'] as int? ?? 0;
+        totalD += (price - dPrice) * qty;
+      }
+    }
+    return totalD;
+  }
+
+  double get deliveryFee =>
+      double.tryParse((_orderData?['riderPaymentAmount'] ?? _orderData?['deliveryFee'])?.toString() ?? '0') ?? 0.0;
   String get specialInstructions =>
       _orderData?['specialInstructions']?.toString() ?? '';
 
-  // Duplicate initState removed
   StreamSubscription? _orderSubscription;
 
   @override
@@ -536,8 +582,6 @@ class NewOrderDialogState extends State<NewOrderDialog>
       if (status != 'pending' && status != 'pending_payment') {
         if (mounted && !_isClosing) {
           _isClosing = true;
-          // If accepted by someone else, close silently or with toast
-          // But check who accepted it?
           final acceptedBy = data['acceptedBy'] ?? 'another user';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -555,8 +599,6 @@ class NewOrderDialogState extends State<NewOrderDialog>
           _isLoading = false;
         });
 
-        // Initialize countdown only once or on changes?
-        // We only need to start once.
         if (_timer == null) {
           _initializeCountdown();
           startTimer();
@@ -570,9 +612,6 @@ class NewOrderDialogState extends State<NewOrderDialog>
   }
 
   bool _isUserAuthorized(Map<String, dynamic> data) {
-    // ✅ FIX: SuperAdmins should only see orders for their assigned branchIds,
-    // not ALL orders. Removed the isSuperAdmin bypass.
-
     List<dynamic> orderBranchIds = [];
     if (data['branchIds'] is List && (data['branchIds'] as List).isNotEmpty) {
       orderBranchIds = data['branchIds'];
@@ -645,16 +684,14 @@ class NewOrderDialogState extends State<NewOrderDialog>
       try {
         final hasVibrator = await Vibration.hasVibrator() ?? false;
         if (hasVibrator) {
-          // Instead of repeat: 0 (which can be hard to cancel), 
-          // we use a finite pattern and a timer to pulse it.
           _vibrationTimer?.cancel();
           _vibrationTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
-             try {
-               await Vibration.vibrate(pattern: [500, 1000, 500, 1000]);
-             } catch (e) {
-               debugPrint("⚠️ Periodic vibration error: $e");
-               timer.cancel();
-             }
+            try {
+              await Vibration.vibrate(pattern: [500, 1000, 500, 1000]);
+            } catch (e) {
+              debugPrint("⚠️ Periodic vibration error: $e");
+              timer.cancel();
+            }
           });
           // Initial vibration
           await Vibration.vibrate(pattern: [500, 1000, 500, 1000]);
@@ -689,17 +726,8 @@ class NewOrderDialogState extends State<NewOrderDialog>
       if (_countdown <= 0) {
         timer.cancel();
 
-        // ✅ LOGIC UPDATE: Even if stale, we stop alarm but assume admin sees it.
-        // However, user specifically asked for "No action after 60s -> Auto Accept"
-        // So we trigger _handleAutoAction() in both cases or just non-stale?
-        // Usually, stale orders shouldn't be auto-accepted blindly,
-        // BUT to fulfill the request "no action after 60s time will auto accept":
-
         if (_isStale) {
           _stopAlarm();
-          // Optional: You can choose to auto-accept stale orders too,
-          // but usually you just stop ringing.
-          // Currently, I'll stick to auto-accepting FRESH orders that timed out.
         } else {
           _handleAutoAction();
         }
@@ -711,7 +739,6 @@ class NewOrderDialogState extends State<NewOrderDialog>
 
   void _handleAutoAction() {
     _stopAlarm();
-    // ✅ This triggers the onAutoAccept callback defined in the parent class
     widget.onAutoAccept();
     if (mounted) Navigator.of(context).pop();
   }
@@ -736,7 +763,6 @@ class NewOrderDialogState extends State<NewOrderDialog>
     if (reason != null && mounted && !_isClosing) {
       _isClosing = true;
       setState(() => _isProcessing = true);
-      // Cancel subscription BEFORE updating to prevent race condition
       await _orderSubscription?.cancel();
       await widget.onReject(reason);
       if (mounted) Navigator.of(context).pop();
@@ -749,7 +775,6 @@ class NewOrderDialogState extends State<NewOrderDialog>
     setState(() => _isProcessing = true);
 
     await _stopAlarm();
-    // Cancel subscription BEFORE updating to prevent race condition
     await _orderSubscription?.cancel();
     try {
       await widget.onAccept();
@@ -757,7 +782,6 @@ class NewOrderDialogState extends State<NewOrderDialog>
     } catch (e) {
       _isClosing = false;
       setState(() => _isProcessing = false);
-      // Re-subscribe if accept failed so user can try again
       _startListeningToOrder();
     }
   }
@@ -780,237 +804,906 @@ class NewOrderDialogState extends State<NewOrderDialog>
 
   @override
   Widget build(BuildContext context) {
+    bool isLargeScreen = MediaQuery.of(context).size.width > 600;
+
     return PopScope(
       canPop: false,
-      child: Dialog(
+      child: _isLoading
+          ? Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         elevation: 10,
         backgroundColor: Colors.white,
         insetPadding: const EdgeInsets.all(16),
-        child: _isLoading
-            ? Container(
-                padding: const EdgeInsets.all(30),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_errorMessage == null)
-                      const CircularProgressIndicator(),
-                    const SizedBox(height: 20),
-                    Text(_errorMessage ?? "Loading Order...",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: _errorMessage != null
-                                ? Colors.red
-                                : Colors.black)),
-                  ],
-                ),
-              )
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // HEADER
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 16),
-                    decoration: BoxDecoration(
-                      color: _getHeaderColor(),
-                      borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(20),
-                          topRight: Radius.circular(20)),
-                    ),
-                    child: Row(
-                      children: [
-                        if (_isProcessing)
-                          const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2))
-                        else
-                          const Icon(Icons.notifications_active,
-                              color: Colors.white, size: 28),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'NEW ${orderType.toUpperCase()}',
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 18),
-                              ),
-                              Text(
-                                'Order #$orderNumber',
-                                style: const TextStyle(
-                                    color: Colors.white70, fontSize: 14),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                              color: _isStale ? Colors.red : Colors.white24,
-                              borderRadius: BorderRadius.circular(20)),
-                          child: Text(
-                            _isStale ? 'LATE' : '$_countdown s',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold),
-                          ),
-                        )
-                      ],
-                    ),
-                  ),
+        child: Container(
+          padding: const EdgeInsets.all(30),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_errorMessage == null)
+                const CircularProgressIndicator(),
+              const SizedBox(height: 20),
+              Text(_errorMessage ?? "Loading Order...",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: _errorMessage != null
+                          ? Colors.red
+                          : Colors.black)),
+            ],
+          ),
+        ),
+      )
+          : isLargeScreen
+          ? _buildLargeScreenDialog(context)
+          : _buildSmallScreenDialog(context),
+    );
+  }
 
-                  // BODY
-                  Flexible(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
+  Widget _buildLargeScreenDialog(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final primaryColor = colorScheme.primary;
+
+    List<OrderItem> mappedItems = items.map((item) {
+      final double price = double.tryParse(item['price']?.toString() ?? '0') ?? 0.0;
+      final double? dPrice = (item['discountedPrice'] ?? item['finalPrice']) != null 
+          ? double.tryParse((item['discountedPrice'] ?? item['finalPrice']).toString()) 
+          : null;
+      
+      final bool hasDiscount = dPrice != null && dPrice < price;
+
+      return OrderItem(
+        name: item['name'].toString(),
+        quantity: item['qty'] as int,
+        price: 'QAR ${item['price']}',
+        originalPrice: hasDiscount ? 'QAR ${item['price']}' : null,
+        discountedPrice: hasDiscount ? 'QAR $dPrice' : null,
+        note: null,
+      );
+    }).toList();
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      child: Container(
+        width: 500,
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colorScheme.primary.withOpacity(0.2)),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 15,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: primaryColor,
+                          borderRadius: BorderRadius.circular(8),
+                          boxShadow: [
+                            BoxShadow(
+                              color: primaryColor.withOpacity(0.4),
+                              blurRadius: 15,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.shopping_bag,
+                          color: colorScheme.onPrimary,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.person,
-                                  color: Colors.grey, size: 20),
+                              Text(
+                                'NEW ORDER',
+                                style: GoogleFonts.inter(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.5,
+                                  color: primaryColor,
+                                ),
+                              ),
                               const SizedBox(width: 8),
-                              Expanded(
-                                  child: Text(customerName,
-                                      style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold))),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: primaryColor.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  orderNumber,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: primaryColor,
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
-                          if (orderType.toLowerCase() == 'delivery') ...[
-                            const SizedBox(height: 8),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Icon(Icons.location_on,
-                                    color: Colors.grey, size: 20),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                    child: Text(address,
-                                        style: const TextStyle(
-                                            fontSize: 14,
-                                            color: Colors.black87),
-                                        maxLines: 2)),
-                              ],
+                          Text(
+                            'Incoming Transmission',
+                            style: GoogleFonts.inter(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.5,
+                              color: primaryColor.withOpacity(0.7),
                             ),
-                          ],
-                          const Divider(height: 24),
-                          ...items
-                              .map((item) => Padding(
-                                    padding: const EdgeInsets.only(bottom: 8.0),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                              color: Colors.grey[200],
-                                              borderRadius:
-                                                  BorderRadius.circular(4)),
-                                          child: Text('${item['qty']}x',
-                                              style: const TextStyle(
-                                                  fontWeight: FontWeight.bold)),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                            child: Text(item['name'],
-                                                style: const TextStyle(
-                                                    fontSize: 15))),
-                                        Text('QAR ${item['price']}',
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.bold)),
-                                      ],
-                                    ),
-                                  ))
-                              .toList(),
-                          if (specialInstructions.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                  color: Colors.yellow[50],
-                                  borderRadius: BorderRadius.circular(8),
-                                  border:
-                                      Border.all(color: Colors.yellow[200]!)),
-                              child: Text("Note: $specialInstructions",
-                                  style: const TextStyle(
-                                      color: Colors.brown,
-                                      fontStyle: FontStyle.italic)),
-                            )
-                          ],
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text("Total Amount",
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold)),
-                              Text("QAR ${totalAmount.toStringAsFixed(2)}",
-                                  style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.green)),
-                            ],
                           ),
                         ],
                       ),
-                    ),
+                    ],
                   ),
-
-                  // ACTIONS
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed:
-                                _isProcessing ? null : _handleRejectPress,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.red,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              side: const BorderSide(color: Colors.red),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10)),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.timer,
+                            color: _isStale ? Colors.red : primaryColor,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _isStale ? 'LATE' : '${_countdown}s',
+                            style: GoogleFonts.inter(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5,
+                              color: _isStale ? Colors.red : primaryColor,
                             ),
-                            child: const Text("REJECT"),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      if (!_isStale)
+                        SizedBox(
+                          width: 100,
+                          child: LinearProgressIndicator(
+                            value: _countdown / 60,
+                            backgroundColor: primaryColor.withOpacity(0.2),
+                            color: primaryColor,
+                            minHeight: 4,
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: ElevatedButton(
-                            onPressed:
-                                _isProcessing ? null : _handleAcceptPress,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                              elevation: 5,
-                            ),
-                            child: const Text("ACCEPT ORDER",
-                                style: TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, thickness: 0.5),
+
+            // Customer Details
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'CUSTOMER IDENTITY',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        customerName,
+                        style: GoogleFonts.inter(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                          color: colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.location_on,
+                            size: 16,
+                            color: colorScheme.onSurfaceVariant,
                           ),
+                          const SizedBox(width: 4),
+                          Text(
+                            address,
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: colorScheme.outline.withOpacity(0.1)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'SOURCE PLATFORM',
+                          style: GoogleFonts.inter(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.bolt,
+                              size: 16,
+                              color: colorScheme.primary,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              sourcePlatform,
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: colorScheme.primary,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
                 ],
               ),
+            ),
+            const Divider(height: 1, thickness: 0.5),
+
+            // Items List
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'PAYLOAD MANIFEST',
+                    style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 200),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: mappedItems
+                            .map(
+                              (item) => Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 32,
+                                      height: 32,
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                        border: Border.all(
+                                          color: colorScheme.outline.withOpacity(0.1),
+                                        ),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        '${item.quantity}x',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w900,
+                                          color: colorScheme.primary,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.name,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700,
+                                            color: colorScheme.onSurface,
+                                          ),
+                                        ),
+                                        if (item.note != null)
+                                          Text(
+                                            item.note!,
+                                            style: GoogleFonts.inter(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w600,
+                                              letterSpacing: 0.5,
+                                              color: colorScheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    if (item.originalPrice != null)
+                                      Text(
+                                        item.originalPrice!,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: colorScheme.onSurfaceVariant.withOpacity(0.5),
+                                          decoration: TextDecoration.lineThrough,
+                                        ),
+                                      ),
+                                    Text(
+                                      item.discountedPrice ?? item.price,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        color: item.discountedPrice != null 
+                                            ? Colors.green 
+                                            : colorScheme.onSurface,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                            .toList(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'SUBTOTAL',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      Text(
+                        'QAR ${subTotal.toStringAsFixed(2)}',
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (discountTotal > 0) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'DISCOUNT',
+                          style: GoogleFonts.inter(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                            color: Colors.green,
+                          ),
+                        ),
+                        Text(
+                          '- QAR ${discountTotal.toStringAsFixed(2)}',
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.green,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (deliveryFee > 0) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'DELIVERY FEE',
+                          style: GoogleFonts.inter(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        Text(
+                          'QAR ${deliveryFee.toStringAsFixed(2)}',
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: colorScheme.onSurface,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            // Note section if specialInstructions exists
+            if (specialInstructions.isNotEmpty) ...[
+              Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 0),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                        color: Colors.yellow[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.yellow[200]!)),
+                    child: Text("Note: $specialInstructions",
+                        style: GoogleFonts.inter(
+                            color: Colors.brown,
+                            fontStyle: FontStyle.italic)),
+                  )
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Total Section
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: colorScheme.outline.withOpacity(0.1), width: 0.5),
+                  bottom: BorderSide(color: colorScheme.outline.withOpacity(0.1), width: 0.5),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'TOTAL RECEIVABLE',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      Text(
+                        'Includes delivery',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          color: colorScheme.onSurfaceVariant.withOpacity(0.6),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    'QAR ${totalAmount.toStringAsFixed(2)}',
+                    style: GoogleFonts.inter(
+                      fontSize: 32,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.5,
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Action Buttons
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isProcessing ? null : _handleRejectPress,
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: colorScheme.outline.withOpacity(0.1)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.close, size: 18, color: colorScheme.onSurfaceVariant),
+                          const SizedBox(width: 8),
+                          Text(
+                            'REJECT',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _isProcessing ? null : _handleAcceptPress,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: colorScheme.primary,
+                        foregroundColor: colorScheme.onPrimary,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        elevation: 0,
+                        shadowColor: colorScheme.primary.withOpacity(0.3),
+                      ),
+                      child: _isProcessing
+                          ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(color: colorScheme.onPrimary, strokeWidth: 2),
+                      )
+                          : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            size: 18,
+                            color: colorScheme.onPrimary,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'ACCEPT ORDER',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                              color: colorScheme.onPrimary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  Widget _buildSmallScreenDialog(BuildContext context) {
+    return Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        elevation: 10,
+        backgroundColor: Colors.white,
+        insetPadding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // HEADER
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: BoxDecoration(
+                color: _getHeaderColor(),
+                borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(20),
+                    topRight: Radius.circular(20)),
+              ),
+              child: Row(
+                children: [
+                  if (_isProcessing)
+                    const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
+                  else
+                    const Icon(Icons.notifications_active,
+                        color: Colors.white, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'NEW ${orderType.toUpperCase()}',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18),
+                        ),
+                        Text(
+                          'Order #$orderNumber',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: _isStale ? Colors.red : Colors.white24,
+                        borderRadius: BorderRadius.circular(20)),
+                    child: Text(
+                      _isStale ? 'LATE' : '$_countdown s',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  )
+                ],
+              ),
+            ),
+
+            // BODY
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.person,
+                            color: Colors.grey, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                            child: Text(customerName,
+                                style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold))),
+                      ],
+                    ),
+                    if (orderType.toLowerCase() == 'delivery') ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.location_on,
+                              color: Colors.grey, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Text(address,
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.black87),
+                                  maxLines: 2)),
+                        ],
+                      ),
+                    ],
+                    const Divider(height: 24),
+                    ...items
+                        .map((item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: Colors.grey[200],
+                                borderRadius:
+                                BorderRadius.circular(4)),
+                            child: Text('${item['qty']}x',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                              child: Text(item['name'],
+                                  style: const TextStyle(
+                                      fontSize: 15))),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if ((item['discountedPrice'] ?? item['finalPrice']) != null && 
+                                  double.tryParse((item['discountedPrice'] ?? item['finalPrice']).toString())! < double.tryParse(item['price'].toString())!)
+                                Text(
+                                  'QAR ${item['price']}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                    decoration: TextDecoration.lineThrough,
+                                  ),
+                                ),
+                              Text(
+                                'QAR ${item['discountedPrice'] ?? item['finalPrice'] ?? item['price']}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: (item['discountedPrice'] ?? item['finalPrice']) != null && 
+                                      double.tryParse((item['discountedPrice'] ?? item['finalPrice']).toString())! < double.tryParse(item['price'].toString())!
+                                      ? Colors.green 
+                                      : Colors.black,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ))
+                        .toList(),
+                    if (specialInstructions.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                            color: Colors.yellow[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border:
+                            Border.all(color: Colors.yellow[200]!)),
+                        child: Text("Note: $specialInstructions",
+                            style: const TextStyle(
+                                color: Colors.brown,
+                                fontStyle: FontStyle.italic)),
+                      )
+                    ],
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text("Subtotal",
+                            style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.black54)),
+                        Text("QAR ${subTotal.toStringAsFixed(2)}",
+                            style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.black87)),
+                      ],
+                    ),
+                    if (discountTotal > 0) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text("Discount",
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.green)),
+                          Text("- QAR ${discountTotal.toStringAsFixed(2)}",
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.green)),
+                        ],
+                      ),
+                    ],
+                    if (deliveryFee > 0) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text("Delivery Fee",
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.black54)),
+                          Text("QAR ${deliveryFee.toStringAsFixed(2)}",
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.black87)),
+                        ],
+                      ),
+                    ],
+                    const Divider(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text("Total Amount",
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold)),
+                        Text("QAR ${totalAmount.toStringAsFixed(2)}",
+                            style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // ACTIONS
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed:
+                      _isProcessing ? null : _handleRejectPress,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: const BorderSide(color: Colors.red),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text("REJECT"),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      onPressed:
+                      _isProcessing ? null : _handleAcceptPress,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        elevation: 5,
+                      ),
+                      child: const Text("ACCEPT ORDER",
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ));
   }
 }
 
@@ -1155,7 +1848,7 @@ class _CancellationReasonDialogState extends State<CancellationReasonDialog> {
                     }).toList(),
                     AnimatedCrossFade(
                       firstChild:
-                          const SizedBox(width: double.infinity, height: 0),
+                      const SizedBox(width: double.infinity, height: 0),
                       secondChild: Padding(
                         padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
                         child: TextField(
@@ -1172,7 +1865,7 @@ class _CancellationReasonDialogState extends State<CancellationReasonDialog> {
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
                               borderSide:
-                                  const BorderSide(color: Colors.red, width: 2),
+                              const BorderSide(color: Colors.red, width: 2),
                             ),
                           ),
                           maxLines: 2,
@@ -1207,13 +1900,13 @@ class _CancellationReasonDialogState extends State<CancellationReasonDialog> {
                     child: ElevatedButton(
                       onPressed: isValid
                           ? () {
-                              String finalReason = _selectedReason!;
-                              if (finalReason == 'Other') {
-                                finalReason =
-                                    _otherReasonController.text.trim();
-                              }
-                              Navigator.of(context).pop(finalReason);
-                            }
+                        String finalReason = _selectedReason!;
+                        if (finalReason == 'Other') {
+                          finalReason =
+                              _otherReasonController.text.trim();
+                        }
+                        Navigator.of(context).pop(finalReason);
+                      }
                           : null,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red,

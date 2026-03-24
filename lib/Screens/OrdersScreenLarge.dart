@@ -12,6 +12,10 @@ import '../Widgets/CancellationDialog.dart';
 import '../Widgets/TimeUtils.dart';
 import '../main.dart';
 import '../constants.dart';
+import 'pos/pos_payment_dialog.dart';
+import '../services/pos/pos_models.dart';
+import '../services/pos/pos_service.dart';
+
 
 // ─── Theme Colors ───
 const _kPrimary = Colors.deepPurple;
@@ -439,6 +443,63 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
   bool _isLoading = false;
   bool _isProcessingRefund = false;
 
+  Future<void> _processPayment(DocumentSnapshot order, Map<String, dynamic> data) async {
+    final branchIds = data['branchIds'] is List 
+        ? List<String>.from(data['branchIds']) 
+        : [data['branchId']?.toString() ?? ''];
+    
+    final totalAmount = (data['totalAmount'] as num? ?? 0).toDouble();
+
+    final PosPayment? payment = await showDialog<PosPayment>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PosPaymentDialog(
+        totalAmount: 0, // Since we are not adding new items
+        existingTableTotal: totalAmount,
+        existingOrders: [order],
+        branchIds: branchIds,
+        returnPaymentOnly: true,
+        onPaymentComplete: (orderId) {
+          // Note: returnPaymentOnly: true makes the dialog pop with PoSPayment return value
+          // so this callback is not strictly required for the logic but required by constructor.
+        },
+      ),
+    );
+
+
+    if (payment != null && mounted) {
+      try {
+        setState(() => _isLoading = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Processing payment...'), duration: Duration(seconds: 1)),
+        );
+        
+        final userScope = Provider.of<UserScopeService>(context, listen: false);
+        await OrderService().markOrderAsPaidWithPayment(
+          context,
+          order.id,
+          payment,
+          currentUserEmail: userScope.userEmail,
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Order marked as paid successfully!'), backgroundColor: Colors.green),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    }
+
+  }
+
   Future<void> _updateStatus(String newStatus, {String? reason}) async {
     if (_isLoading) return;
     setState(() => _isLoading = true);
@@ -535,163 +596,215 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final data = widget.order.data() as Map<String, dynamic>? ?? {};
-    final status = data['status']?.toString() ?? 'pending';
-    final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
-    final orderNum = OrderNumberHelper.getDisplayNumber(data, orderId: widget.order.id);
-    final rawTs = (data['timestamp'] as Timestamp?)?.toDate();
-    final ts = rawTs != null ? TimeUtils.getRestaurantTime(rawTs) : null;
-    final total = (data['totalAmount'] as num? ?? 0).toDouble();
-    final subtotal = (data['subtotal'] as num? ?? 0).toDouble();
-    final deliveryFee = (data['riderPaymentAmount'] as num? ??
-            data['deliveryFee'] as num? ??
-            data['deliveryCharge'] as num? ?? 0)
-        .toDouble();
-    final orderType = (data['Order_type'] ?? 'delivery').toString();
-    final specialInstructions = (data['specialInstructions'] ?? '').toString();
-    final statusColor = StatusUtils.getColor(status);
-    final bool isDelivery = AppConstants.isDeliveryOrder(orderType);
-    final bool isDineIn = AppConstants.isDineInOrder(orderType);
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection(AppConstants.collectionOrders)
+          .doc(widget.order.id)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final doc = snapshot.data ?? widget.order;
+        final data = doc.data() as Map<String, dynamic>? ?? {};
+        final status = data['status']?.toString() ?? 'pending';
+        final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
+        final orderNum =
+            OrderNumberHelper.getDisplayNumber(data, orderId: widget.order.id);
+        final rawTs = (data['timestamp'] as Timestamp?)?.toDate();
+        final ts = rawTs != null ? TimeUtils.getRestaurantTime(rawTs) : null;
+        final total = (data['totalAmount'] as num? ?? 0).toDouble();
+        final subtotal = (data['subtotal'] as num? ?? 0).toDouble();
+        final deliveryFee = (data['riderPaymentAmount'] as num? ??
+                data['deliveryFee'] as num? ??
+                data['deliveryCharge'] as num? ?? 0)
+            .toDouble();
+        final orderType = (data['Order_type'] ?? 'delivery').toString();
+        final specialInstructions =
+            (data['specialInstructions'] ?? '').toString();
+        final statusColor = StatusUtils.getColor(status);
+        final bool isDelivery = AppConstants.isDeliveryOrder(orderType);
+        final bool isDineIn = AppConstants.isDineInOrder(orderType);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(left: BorderSide(color: Colors.grey.shade200)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(-2, 0))],
-      ),
-      child: Column(
-        children: [
-          // ── Panel Header ──
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.grey.shade200))),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(left: BorderSide(color: Colors.grey.shade200)),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(-2, 0))
+            ],
+          ),
+          child: Column(
+            children: [
+              // ── Panel Header ──
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                    border: Border(
+                        bottom: BorderSide(color: Colors.grey.shade200))),
+                child: Column(
                   children: [
-                    Text('Order #$orderNum',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    IconButton(
-                        onPressed: widget.onClose,
-                        icon: Icon(Icons.close, color: Colors.grey.shade400)),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Order #$orderNum',
+                            style: const TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.bold)),
+                        IconButton(
+                            onPressed: widget.onClose,
+                            icon:
+                                Icon(Icons.close, color: Colors.grey.shade400)),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: statusColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                  shape: BoxShape.circle, color: statusColor)),
+                          const SizedBox(width: 6),
+                          Text(
+                              StatusUtils.getDisplayText(status,
+                                  orderType: orderType),
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: statusColor)),
+                        ]),
+                      ),
+                      const Spacer(),
+                      if (ts != null)
+                        Text(DateFormat('MMM d, hh:mm a').format(ts),
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey.shade500)),
+                    ]),
+                    const SizedBox(height: 12),
+                    // Print KOT + Receipt buttons
+                    Row(children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () =>
+                              PrintingService.printKOT(context, doc),
+                          icon: const Icon(Icons.print, size: 16),
+                          label: const Text('Print KOT',
+                              style: TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.bold)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _kPrimary,
+                            side: BorderSide(color: _kPrimary.withOpacity(0.3)),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () =>
+                              PrintingService.printReceipt(context, doc),
+                          icon: const Icon(Icons.receipt_long, size: 16),
+                          label: const Text('Receipt',
+                              style: TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.bold)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.grey.shade700,
+                            side: BorderSide(color: Colors.grey.shade300),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ),
+                    ]),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Row(children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Container(width: 6, height: 6,
-                          decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor)),
-                      const SizedBox(width: 6),
-                      Text(StatusUtils.getDisplayText(status, orderType: orderType),
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: statusColor)),
-                    ]),
-                  ),
-                  const Spacer(),
-                  if (ts != null)
-                    Text(DateFormat('MMM d, hh:mm a').format(ts),
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                ]),
-                const SizedBox(height: 12),
-                // Print KOT + Receipt buttons
-                Row(children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => PrintingService.printKOT(context, widget.order),
-                      icon: const Icon(Icons.print, size: 16),
-                      label: const Text('Print KOT', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _kPrimary,
-                        side: BorderSide(color: _kPrimary.withOpacity(0.3)),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => PrintingService.printReceipt(context, widget.order),
-                      icon: const Icon(Icons.receipt_long, size: 16),
-                      label: const Text('Receipt', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.grey.shade700,
-                        side: BorderSide(color: Colors.grey.shade300),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                ]),
-              ],
-            ),
-          ),
-          // ── Scrollable Body ──
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Refund Section
-                  _buildRefundSection(data),
-                  // Customer Info
-                  _sectionTitle('Customer Details'),
-                  const SizedBox(height: 10),
-                  _buildCustomerInfo(data, orderType),
-                  const SizedBox(height: 20),
-                  // Items
-                  _sectionTitle('Itemized Order'),
-                  const SizedBox(height: 10),
-                  ...items.map((item) => _buildItemRow(item)),
-                  const SizedBox(height: 20),
-                  // Special Instructions
-                  if (specialInstructions.isNotEmpty) ...[
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.05),
-                        border: Border.all(color: Colors.orange.withOpacity(0.2)),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Icon(Icons.info_outline, color: Colors.orange, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            const Text('INSTRUCTIONS',
-                                style: TextStyle(
-                                    fontSize: 10, fontWeight: FontWeight.bold, color: Colors.orange)),
-                            const SizedBox(height: 4),
-                            Text('"$specialInstructions"',
-                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontStyle: FontStyle.italic)),
-                          ]),
-                        ),
-                      ]),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-                  // Payment Summary
-                  _sectionTitle('Payment Summary'),
-                  const SizedBox(height: 10),
-                  _summaryRow('Subtotal', subtotal),
-                  if (deliveryFee > 0) _summaryRow('Delivery Fee', deliveryFee),
-                  Divider(height: 20, color: Colors.grey.shade200),
-                  _summaryRow('Total', total, isTotal: true),
-                ],
               ),
-            ),
+              // ── Scrollable Body ──
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Refund Section
+                      _buildRefundSection(data),
+                      // Customer Info
+                      _sectionTitle('Customer Details'),
+                      const SizedBox(height: 10),
+                      _buildCustomerInfo(data, orderType),
+                      const SizedBox(height: 20),
+                      // Items
+                      _sectionTitle('Itemized Order'),
+                      const SizedBox(height: 10),
+                      ...items.map((item) => _buildItemRow(item)),
+                      const SizedBox(height: 20),
+                      // Special Instructions
+                      if (specialInstructions.isNotEmpty) ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withOpacity(0.05),
+                            border: Border.all(
+                                color: Colors.orange.withOpacity(0.2)),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(Icons.info_outline,
+                                    color: Colors.orange, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text('INSTRUCTIONS',
+                                            style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.orange)),
+                                        const SizedBox(height: 4),
+                                        Text('"$specialInstructions"',
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey.shade600,
+                                                fontStyle: FontStyle.italic)),
+                                      ]),
+                                ),
+                              ]),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                      // Payment Summary
+                      _sectionTitle('Payment Summary'),
+                      const SizedBox(height: 10),
+                      _summaryRow('Subtotal', subtotal),
+                      if (deliveryFee > 0)
+                        _summaryRow('Delivery Fee', deliveryFee),
+                      Divider(height: 20, color: Colors.grey.shade200),
+                      _summaryRow('Total', total, isTotal: true),
+                    ],
+                  ),
+                ),
+              ),
+              // ── Footer Actions ──
+              _buildActionFooter(
+                  context, data, status, orderType, isDelivery, isDineIn, total),
+            ],
           ),
-          // ── Footer Actions ──
-          _buildActionFooter(context, data, status, orderType, isDelivery, isDineIn, total),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -930,13 +1043,14 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
         if (_isLoading)
           const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator(color: _kPrimary, strokeWidth: 2)))
         else
-          _buildActionButtons(status, isDelivery, isDineIn, isPickup, isTakeaway, riderId, isAutoAssigning, needsManualAssignment),
+          _buildActionButtons(data, status, isDelivery, isDineIn, isPickup, isTakeaway, riderId, isAutoAssigning, needsManualAssignment),
       ]),
     );
   }
 
-  Widget _buildActionButtons(String status, bool isDelivery, bool isDineIn, bool isPickup,
+  Widget _buildActionButtons(Map<String, dynamic> data, String status, bool isDelivery, bool isDineIn, bool isPickup,
       bool isTakeaway, String riderId, bool isAutoAssigning, bool needsManualAssignment) {
+
     final List<Widget> buttons = [];
 
     // Accept Order
@@ -961,14 +1075,24 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
           buttons.add(_actionBtn('Collected', Icons.shopping_bag_outlined, Colors.green.shade700,
               () => _updateStatus(AppConstants.statusCollected)));
         } else if (isTakeaway) {
-          buttons.add(_actionBtn('Mark Paid', Icons.payments, Colors.blue.shade700,
-              () => _updateStatus(AppConstants.statusPaid)));
+          final isPaidStatus = status == AppConstants.statusPaid || status == AppConstants.statusCollected;
+          final needsRobustPayment = (isDineIn || isTakeaway) && !isPaidStatus;
+
+          buttons.add(_actionBtn('Mark Paid', Icons.payments, Colors.blue.shade700, () {
+            if (needsRobustPayment) {
+              _processPayment(widget.order, data);
+            } else {
+              _updateStatus(AppConstants.statusPaid);
+            }
+          }));
         }
       }
       if (status == AppConstants.statusServed && isDineIn) {
-        buttons.add(_actionBtn('Mark Paid', Icons.payments, Colors.blue.shade700,
-            () => _updateStatus(AppConstants.statusPaid)));
+        buttons.add(_actionBtn('Mark Paid', Icons.payments, Colors.blue.shade700, () {
+          _processPayment(widget.order, data);
+        }));
       }
+
       if (needsManualAssignment) {
         buttons.add(_actionBtn(
             isDineIn ? 'Mark Served' : (isPickup ? 'Collected' : 'Mark Paid'),

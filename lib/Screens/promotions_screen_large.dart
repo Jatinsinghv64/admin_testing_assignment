@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 import '../Models/promo_models.dart';
 import '../main.dart';
 import '../Widgets/BranchFilterService.dart';
+import '../Widgets/BranchFilterSelector.dart';
 import 'ComboMealsScreen.dart'; // For ComboMealAddEditScreen
 import 'PromoSalesScreen.dart'; // For PromoSaleAddEditScreen
 import 'CouponsScreen.dart'; // For CouponDialog
+import '../constants.dart';
 
 class PromotionsScreenLarge extends StatefulWidget {
   const PromotionsScreenLarge({super.key});
@@ -22,6 +24,140 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
   dynamic _selectedPromoData;
   List<String> _editingBranchIds = [];
   final TextEditingController _searchController = TextEditingController();
+  
+  // Editor Controllers
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _nameArController = TextEditingController();
+  final TextEditingController _descController = TextEditingController();
+  final TextEditingController _descArController = TextEditingController();
+  final TextEditingController _codeController = TextEditingController();
+  final TextEditingController _valueController = TextEditingController();
+  final TextEditingController _minSubtotalController = TextEditingController();
+  final TextEditingController _maxDiscountController = TextEditingController();
+  final TextEditingController _maxUsesController = TextEditingController();
+  final TextEditingController _priorityController = TextEditingController();
+  final TextEditingController _targetTypeController = TextEditingController();
+  final TextEditingController _imageUrlController = TextEditingController();
+
+  bool _isSaving = false;
+
+  // Stable stream references
+  Stream<QuerySnapshot>? _orderKPIStream;
+  Stream<QuerySnapshot>? _comboKPIStream;
+  Stream<QuerySnapshot>? _saleKPIStream;
+  Stream<QuerySnapshot>? _couponKPIStream;
+  Stream<QuerySnapshot>? _inventoryStream;
+
+  List<String>? _lastKPIBranchIds;
+  List<String>? _lastInventoryBranchIds;
+  String? _lastInventoryCategory;
+  String? _lastInventoryFilter;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _nameController.dispose();
+    _nameArController.dispose();
+    _descController.dispose();
+    _descArController.dispose();
+    _imageUrlController.dispose();
+    _codeController.dispose();
+    _valueController.dispose();
+    _minSubtotalController.dispose();
+    _maxDiscountController.dispose();
+    _maxUsesController.dispose();
+    _priorityController.dispose();
+    _targetTypeController.dispose();
+    super.dispose();
+  }
+
+  void _loadPromoData(Map<String, dynamic> data) {
+    _selectedPromoData = data;
+    _nameController.text = (data['name'] ?? data['title'] ?? '').toString();
+    _nameArController.text = (data['nameAr'] ?? data['title_ar'] ?? '').toString();
+    _descController.text = (data['description'] ?? '').toString();
+    _descArController.text = (data['description_ar'] ?? data['descriptionAr'] ?? '').toString();
+    _codeController.text = (data['code'] ?? '').toString();
+    _valueController.text = (data['value'] ?? data['discountValue'] ?? data['comboPrice'] ?? 0).toString();
+    _minSubtotalController.text = (data['min_subtotal'] ?? data['minOrderValue'] ?? 0).toString();
+    _maxDiscountController.text = (data['max_discount'] ?? data['maxDiscountCap'] ?? 0).toString();
+    _maxUsesController.text = (data['maxUsesPerUser']?.toString() ?? '');
+    _priorityController.text = (data['priority']?.toString() ?? '0');
+    _targetTypeController.text = (data['targetType'] ?? 'all').toString();
+    _imageUrlController.text = (data['imageUrl'] ?? '').toString();
+    _editingBranchIds = List<String>.from(data['branchIds'] ?? data['branchids'] ?? []);
+  }
+
+  Future<void> _updateProperty(String field, dynamic value) async {
+    if (_selectedPromoId == null) return;
+    String collection = _selectedCategory == 'combos' ? 'combos' : (_selectedCategory == 'sales' ? 'promoSales' : AppConstants.collectionCoupons);
+    
+    setState(() => _isSaving = true);
+    try {
+      await FirebaseFirestore.instance.collection(collection).doc(_selectedPromoId).update({
+        field: value,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+      // Update local state to keep UI in sync without waiting for stream
+      setState(() {
+        _selectedPromoData[field] = value;
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error updating $field: $e')));
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
+  void _updateKPIStreams(List<String> filterBranchIds) {
+    final bool branchIdsChanged = _lastKPIBranchIds == null || 
+        _lastKPIBranchIds!.length != filterBranchIds.length ||
+        !_lastKPIBranchIds!.every((id) => filterBranchIds.contains(id));
+
+    if (branchIdsChanged) {
+      Query orderQuery = FirebaseFirestore.instance.collection(AppConstants.collectionOrders).orderBy('timestamp', descending: true).limit(500);
+      if (filterBranchIds.isNotEmpty) {
+        orderQuery = orderQuery.where('branchIds', arrayContainsAny: filterBranchIds);
+      }
+      _orderKPIStream = orderQuery.snapshots();
+      _comboKPIStream = FirebaseFirestore.instance.collection('combos').where('isActive', isEqualTo: true).snapshots();
+      _saleKPIStream = FirebaseFirestore.instance.collection('promoSales').where('isActive', isEqualTo: true).snapshots();
+      _couponKPIStream = FirebaseFirestore.instance.collection(AppConstants.collectionCoupons).where('active', isEqualTo: true).snapshots();
+      
+      _lastKPIBranchIds = List.from(filterBranchIds);
+    }
+  }
+
+  void _updateInventoryStream(List<String> filterBranchIds) {
+    final bool branchIdsChanged = _lastInventoryBranchIds == null || 
+        _lastInventoryBranchIds!.length != filterBranchIds.length ||
+        !_lastInventoryBranchIds!.every((id) => filterBranchIds.contains(id));
+    
+    final bool categoryChanged = _lastInventoryCategory != _selectedCategory;
+    final bool filterChanged = _lastInventoryFilter != _selectedFilter;
+
+    if (branchIdsChanged || categoryChanged || filterChanged) {
+      String collection = 'combos';
+      if (_selectedCategory == 'sales') collection = 'promoSales';
+      if (_selectedCategory == 'coupons') collection = AppConstants.collectionCoupons;
+
+      Query query = FirebaseFirestore.instance.collection(collection);
+
+      if (filterBranchIds.isNotEmpty) {
+        // Industry Grade: All promotion types now use branchIds array
+        // NOTE: We move this to client-side filtering to handle both 'branchIds' and 'branchids' variations
+        // query = query.where('branchIds', arrayContainsAny: filterBranchIds);
+      }
+
+      // Query simplified: Combine branch filter only (to avoid composite index requirements)
+      // Status filtering (Active/Scheduled/Archived) is moved entirely to client-side
+      _inventoryStream = query.snapshots();
+
+      _lastInventoryBranchIds = List.from(filterBranchIds);
+      _lastInventoryCategory = _selectedCategory;
+      _lastInventoryFilter = _selectedFilter;
+    }
+  }
 
   void _launchCampaign() {
     if (_selectedCategory == 'combos') {
@@ -60,6 +196,9 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
     final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
     final textTheme = Theme.of(context).textTheme;
 
+    _updateKPIStreams(filterBranchIds);
+    _updateInventoryStream(filterBranchIds);
+
     return Scaffold(
       backgroundColor: appBackground,
       body: Column(
@@ -93,22 +232,17 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
   }
 
   Widget _buildKPISection(List<String> filterBranchIds, TextTheme textTheme) {
-    Query orderQuery = FirebaseFirestore.instance.collection('orders').orderBy('timestamp', descending: true).limit(500);
-    if (filterBranchIds.isNotEmpty) {
-      orderQuery = orderQuery.where('branchId', whereIn: filterBranchIds);
-    }
-
-    return StreamBuilder(
-      stream: orderQuery.snapshots(),
+    return StreamBuilder<QuerySnapshot>(
+      stream: _orderKPIStream,
       builder: (context, orderSnapshot) {
-        return StreamBuilder(
-          stream: FirebaseFirestore.instance.collection('combos').where('isActive', isEqualTo: true).snapshots(),
+        return StreamBuilder<QuerySnapshot>(
+          stream: _comboKPIStream,
           builder: (context, comboSnapshot) {
-            return StreamBuilder(
-              stream: FirebaseFirestore.instance.collection('promoSales').where('isActive', isEqualTo: true).snapshots(),
+            return StreamBuilder<QuerySnapshot>(
+              stream: _saleKPIStream,
               builder: (context, salesSnapshot) {
-                return StreamBuilder(
-                  stream: FirebaseFirestore.instance.collection('coupons').where('active', isEqualTo: true).snapshots(),
+                return StreamBuilder<QuerySnapshot>(
+                  stream: _couponKPIStream,
                   builder: (context, couponSnapshot) {
                     int activePromos = (comboSnapshot.data?.docs.length ?? 0) +
                         (salesSnapshot.data?.docs.length ?? 0) +
@@ -173,6 +307,7 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
           _buildHeaderTab('Archived'),
           const Spacer(),
           _buildSearchBar(),
+          const BranchFilterSelector(),
           const SizedBox(width: 24),
           _buildLaunchBtn(),
         ],
@@ -425,35 +560,8 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
   }
 
   Widget _buildStreamedTable(List<String> filterBranchIds) {
-    String collection = 'combos';
-    if (_selectedCategory == 'sales') collection = 'promoSales';
-    if (_selectedCategory == 'coupons') collection = 'coupons';
-
-    Query query = FirebaseFirestore.instance.collection(collection);
-
-    // Filter by branch
-    if (filterBranchIds.isNotEmpty) {
-      if (collection == 'coupons') {
-        if (filterBranchIds.length == 1) {
-          query = query.where('branchIds', arrayContains: filterBranchIds.first);
-        } else {
-          query = query.where('branchIds', arrayContainsAny: filterBranchIds);
-        }
-      } else {
-        query = query.where('branchIds', arrayContainsAny: filterBranchIds);
-      }
-    }
-
-    // Filter by status (Active/Archived/Scheduled)
-    String statusField = collection == 'coupons' ? 'active' : 'isActive';
-    if (_selectedFilter == 'Active') {
-      query = query.where(statusField, isEqualTo: true);
-    } else if (_selectedFilter == 'Archived') {
-      query = query.where(statusField, isEqualTo: false);
-    }
-
-    return StreamBuilder(
-      stream: query.snapshots(),
+    return StreamBuilder<QuerySnapshot>(
+      stream: _inventoryStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()));
@@ -469,17 +577,63 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
           final keyword = _searchController.text.toLowerCase();
           docs = docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            final name = (data['name'] ?? data['title'] ?? data['code'] ?? '').toString().toLowerCase();
-            return name.contains(keyword);
+            final name = (data['name'] ?? data['title'] ?? '').toString().toLowerCase();
+            final code = (data['code'] ?? '').toString().toLowerCase();
+            final desc = (data['description'] ?? '').toString().toLowerCase();
+            return name.contains(keyword) || code.contains(keyword) || desc.contains(keyword);
           }).toList();
         }
+
+        if (docs.isEmpty) return _buildEmptyState();
+
+        // --- Industry Grade Status Filtering (Client-side) ---
+        final now = DateTime.now();
+        final isCoupon = _selectedCategory == 'coupons';
+        final statusField = isCoupon ? 'active' : 'isActive';
+
+        docs = docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final bool isFieldActive = data[statusField] ?? false;
+          final start = data['valid_from'] ?? data['startDate'];
+          final end = data['valid_until'] ?? data['endDate'];
+          
+          DateTime? startTime;
+          if (start is Timestamp) startTime = start.toDate();
+          
+          DateTime? endTime;
+          if (end is Timestamp) endTime = end.toDate();
+
+          // --- Branch Filtering (Client-side to handle case variations) ---
+          if (filterBranchIds.isNotEmpty) {
+            final List bIds = data['branchIds'] as List? ?? data['branchids'] as List? ?? [];
+            if (!bIds.any((id) => filterBranchIds.contains(id.toString()))) {
+              return false;
+            }
+          }
+
+          if (_selectedFilter == 'Scheduled') {
+            // Scheduled: Field must be active AND start date must be in future
+            return isFieldActive && startTime != null && startTime.isAfter(now);
+          } else if (_selectedFilter == 'Active') {
+            // Active: Field must be active AND (no dates OR current time is within range)
+            bool isStarted = startTime == null || startTime.isBefore(now);
+            bool isNotEnded = endTime == null || endTime.isAfter(now);
+            return isFieldActive && isStarted && isNotEnded;
+          } else if (_selectedFilter == 'Archived') {
+            // Archived: Field is inactive OR end date has passed
+            bool isInactive = !isFieldActive;
+            bool isExpired = endTime != null && endTime.isBefore(now);
+            return isInactive || isExpired;
+          }
+          return true;
+        }).toList();
 
         if (docs.isEmpty) return _buildEmptyState();
 
         return Column(
           children: [
             _buildTableHeaderUI(),
-            ...docs.map((doc) => _buildTableRowUI(doc)).toList(),
+            ...docs.map((doc) => _buildTableRowUI(doc)),
           ],
         );
       },
@@ -507,7 +661,7 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
     return Expanded(
       flex: flex,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         child: Text(label.toUpperCase(), textAlign: align, style: const TextStyle(color: appTextVariant, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
       ),
     );
@@ -569,8 +723,7 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
       onTap: () {
         setState(() {
           _selectedPromoId = doc.id;
-          _selectedPromoData = data;
-          _editingBranchIds = List<String>.from(data['branchIds'] ?? data['branchids'] ?? []);
+          _loadPromoData(data);
         });
       },
       child: Container(
@@ -595,7 +748,7 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
 
   Widget _buildDetailsCell(String title, String sub, bool selected) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -609,7 +762,7 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
 
   Widget _buildPricingCell(String price, String savings) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -623,7 +776,7 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
 
   Widget _buildImpactCell(String label, String value, double progress) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -636,7 +789,7 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
           ),
           const SizedBox(height: 8),
           Container(
-            height: 4, width: 96,
+            height: 4, width: double.infinity,
             decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(2)),
             child: FractionallySizedBox(
               alignment: Alignment.centerLeft, widthFactor: progress,
@@ -650,14 +803,14 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
 
   Widget _buildTextCell(String text) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
       child: Text(text, style: const TextStyle(color: appTextVariant, fontSize: 12, fontWeight: FontWeight.w500)),
     );
   }
 
   Widget _buildStatusCell(bool active, QueryDocumentSnapshot doc) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
       child: InkWell(
         onTap: () {
           String collection = _selectedCategory == 'sales' ? 'promoSales' : (_selectedCategory == 'combos' ? 'combos' : 'coupons');
@@ -691,7 +844,7 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
   Widget _buildEditCell(QueryDocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
       child: IconButton(
         icon: const Icon(Icons.edit_outlined, color: appTextVariant, size: 18),
         onPressed: () => _editPromo(doc.id, data),
@@ -726,10 +879,8 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
   }
 
   Widget _buildPerformanceChart() {
-    Query orderQuery = FirebaseFirestore.instance.collection('orders').orderBy('timestamp', descending: true).limit(500);
-    
-    return StreamBuilder(
-      stream: orderQuery.snapshots(),
+    return StreamBuilder<QuerySnapshot>(
+      stream: _orderKPIStream,
       builder: (context, snapshot) {
         Map<String, int> dailyRedemptions = {};
         List<String> last7Days = [];
@@ -756,6 +907,9 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
           }
         }
 
+        final maxCount = dailyRedemptions.values.isEmpty ? 1 : dailyRedemptions.values.reduce((a, b) => a > b ? a : b);
+        final displayMax = maxCount < 5 ? 5 : maxCount;
+
         return Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(color: appSurface, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.grey[200]!)),
@@ -765,11 +919,11 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Daily Redemption Trends', style: TextStyle(color: appText, fontSize: 18, fontWeight: FontWeight.bold)),
+                   Text('Daily Redemption Trends', style: const TextStyle(color: appText, fontSize: 18, fontWeight: FontWeight.bold)),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(color: appPrimary.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                    child: const Text('LAST 7 DAYS', style: TextStyle(color: appPrimary, fontSize: 10, fontWeight: FontWeight.bold)),
+                    child: Text('PEAK: $maxCount', style: const TextStyle(color: appPrimary, fontSize: 10, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -778,49 +932,57 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
                 height: 200,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
-                  children: last7Days.map((key) {
-                    int count = dailyRedemptions[key] ?? 0;
-                    double heightFactor = (count / 10).clamp(0.05, 1.0); // Normalized to 10 redemptions max for visual
-                    return Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Tooltip(
-                          message: '$count redemptions',
-                          child: Container(
-                            height: 200 * heightFactor,
-                            decoration: BoxDecoration(
-                              color: appPrimary.withOpacity(0.4 + (heightFactor * 0.6)),
-                              borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+                  children: [
+                    ...last7Days.map((key) {
+                      int count = dailyRedemptions[key] ?? 0;
+                      double heightFactor = (count / displayMax).clamp(0.01, 1.0);
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Tooltip(
+                            message: '$count redemptions on $key',
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                if (count > 0) Text(count.toString(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: appPrimary)),
+                                const SizedBox(height: 4),
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 500),
+                                  height: 180 * heightFactor,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [appPrimary.withOpacity(0.8), appPrimary.withOpacity(0.4)],
+                                    ),
+                                    borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+                                    boxShadow: [
+                                      BoxShadow(color: appPrimary.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2)),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      ),
-                    );
-                  }).toList(),
+                      );
+                    }),
+                  ],
                 ),
               ),
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: last7Days
-                    .map((d) => Expanded(child: Text(d, textAlign: TextAlign.center, style: const TextStyle(color: appTextVariant, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.5))))
-                    .toList(),
+                children: [
+                  ...last7Days.map((d) => Expanded(
+                        child: Text(d.split(' ')[0], textAlign: TextAlign.center, style: const TextStyle(color: appTextVariant, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+                      )),
+                ],
               ),
             ],
           ),
         );
       },
-    );
-  }
-
-  Widget _buildChartTab(String label, bool isSelected) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: isSelected ? appPrimary : Colors.grey[100],
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(label.toUpperCase(), style: TextStyle(color: isSelected ? Colors.white : appTextVariant, fontSize: 10, fontWeight: FontWeight.bold)),
     );
   }
 
@@ -878,11 +1040,11 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
                 children: [
                   if (_selectedCategory == 'coupons') ...[
                     _buildEditorSection('Coupon Identity', [
-                      _buildInputField('Title (EN)', _selectedPromoData['title'] ?? ''),
-                      _buildInputField('Title (AR)', _selectedPromoData['title_ar'] ?? ''),
-                      _buildInputField('Coupon Code', _selectedPromoData['code'] ?? '', isHighlight: true),
-                      _buildInputField('Description (EN)', _selectedPromoData['description'] ?? ''),
-                      _buildInputField('Description (AR)', _selectedPromoData['description_ar'] ?? ''),
+                      _buildEditableField('Title (EN)', _nameController, onSaved: (v) => _updateProperty('title', v)),
+                      _buildEditableField('Title (AR)', _nameArController, onSaved: (v) => _updateProperty('title_ar', v)),
+                      _buildEditableField('Coupon Code', _codeController, isHighlight: true, onSaved: (v) => _updateProperty('code', v)),
+                      _buildEditableField('Description (EN)', _descController, maxLines: 3, onSaved: (v) => _updateProperty('description', v)),
+                      _buildEditableField('Description (AR)', _descArController, maxLines: 3, onSaved: (v) => _updateProperty('description_ar', v)),
                     ]),
                     const SizedBox(height: 32),
                     _buildEditorSection('Applicable Branches', [
@@ -895,77 +1057,110 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
                     _buildEditorSection('Discount Configuration', [
                       Row(
                         children: [
-                          Expanded(child: _buildInputField('Type', _selectedPromoData['type'] ?? 'percentage')),
+                          Expanded(child: _buildDropdownField('Type', _selectedPromoData['type'] ?? 'percentage', ['percentage', 'flat'], (v) => _updateProperty('type', v))),
                           const SizedBox(width: 12),
-                          Expanded(child: _buildPricingField('Value', _selectedPromoData['value'] ?? 0)),
+                          Expanded(child: _buildPricingField('Value', _valueController, onSaved: (v) => _updateProperty('value', double.tryParse(v) ?? 0))),
                         ],
                       ),
                       Row(
                         children: [
-                          Expanded(child: _buildPricingField('Min Subtotal', _selectedPromoData['min_subtotal'] ?? 0)),
+                          Expanded(child: _buildPricingField('Min Subtotal', _minSubtotalController, onSaved: (v) => _updateProperty('min_subtotal', double.tryParse(v) ?? 0))),
                           const SizedBox(width: 12),
-                          Expanded(child: _buildPricingField('Max Discount', _selectedPromoData['max_discount'] ?? 0)),
+                          Expanded(child: _buildPricingField('Max Discount', _maxDiscountController, onSaved: (v) => _updateProperty('max_discount', double.tryParse(v) ?? 0))),
                         ],
                       ),
                     ]),
                     const SizedBox(height: 32),
                     _buildEditorSection('Usage & Status', [
-                      _buildInputField('Max Uses Per User', _selectedPromoData['maxUsesPerUser']?.toString() ?? '∞'),
-                      _buildToggleField('Active Status', _selectedPromoData['active'] ?? true),
+                      _buildEditableField('Max Uses Per User', _maxUsesController, onSaved: (v) => _updateProperty('maxUsesPerUser', int.tryParse(v))),
+                      _buildToggleField('Active Status', _selectedPromoData['active'] ?? true, (v) => _updateProperty('active', v)),
                     ]),
                     const SizedBox(height: 32),
                     _buildEditorSection('Validity Period', [
-                      _buildInputField('Valid From', _formatTs(_selectedPromoData['valid_from'])),
-                      _buildInputField('Valid Until', _formatTs(_selectedPromoData['valid_until'])),
-                      _buildInputField('Created At', _formatTs(_selectedPromoData['created_at'])),
+                      _buildDatePickerField('Valid From', _selectedPromoData['valid_from'] ?? _selectedPromoData['startDate'], (v) {
+                        final field = _selectedCategory == 'sales' ? 'startDate' : 'valid_from';
+                        _updateProperty(field, v);
+                      }),
+                      _buildDatePickerField('Valid Until', _selectedPromoData['valid_until'] ?? _selectedPromoData['endDate'], (v) {
+                        final field = _selectedCategory == 'sales' ? 'endDate' : 'valid_until';
+                        _updateProperty(field, v);
+                      }),
                     ]),
                   ] else if (_selectedCategory == 'combos') ...[
                     _buildEditorSection('Combo Identity', [
-                      _buildInputField('Combo Name (EN)', _selectedPromoData['name'] ?? ''),
-                      _buildInputField('Combo Name (AR)', _selectedPromoData['nameAr'] ?? ''),
-                      _buildInputField('Description (EN)', _selectedPromoData['description'] ?? ''),
-                      _buildInputField('Description (AR)', _selectedPromoData['descriptionAr'] ?? ''),
+                      _buildEditableField('Combo Name (EN)', _nameController, onSaved: (v) => _updateProperty('name', v)),
+                      _buildEditableField('Combo Name (AR)', _nameArController, onSaved: (v) => _updateProperty('nameAr', v)),
+                      _buildEditableField('Description (EN)', _descController, maxLines: 3, onSaved: (v) => _updateProperty('description', v)),
+                      _buildEditableField('Description (AR)', _descArController, maxLines: 3, onSaved: (v) => _updateProperty('descriptionAr', v)),
                     ]),
                     const SizedBox(height: 32),
                     _buildEditorSection('Bundle Components', [
-                      ...(_selectedPromoData['itemIds'] as List? ?? []).map((id) => _buildRemovableItem(id)).toList(),
+                      ...(_selectedPromoData['itemNames'] as List? ?? _selectedPromoData['itemIds'] as List? ?? _selectedPromoData['targetItemIds'] as List? ?? []).map((name) => _buildRemovableItem(name.toString())).toList(),
                       _buildAddBtn('+ ADD MENU ITEM'),
                     ]),
                     const SizedBox(height: 32),
                     _buildEditorSection('Pricing & Availability', [
-                      _buildPricingField('Combo Price', _selectedPromoData['comboPrice'] ?? 0),
-                      _buildInputField('Max Qty Per Order', _selectedPromoData['maxQuantityPerOrder']?.toString() ?? '5'),
-                      _buildToggleField('Active Status', _selectedPromoData['isActive'] ?? true),
-                      _buildToggleField('Limited Time', _selectedPromoData['isLimitedTime'] ?? false),
+                      _buildPricingField('Combo Price', _valueController, onSaved: (v) => _updateProperty('comboPrice', double.tryParse(v) ?? 0)),
+                      _buildEditableField('Max Qty Per Order', _maxUsesController, onSaved: (v) => _updateProperty('maxQuantityPerOrder', int.tryParse(v))),
+                      _buildToggleField('Active Status', _selectedPromoData['isActive'] ?? true, (v) => _updateProperty('isActive', v)),
+                      _buildToggleField('Limited Time', _selectedPromoData['isLimitedTime'] ?? false, (v) => _updateProperty('isLimitedTime', v)),
                     ]),
                     const SizedBox(height: 32),
                     if (userScope.isSuperAdmin) 
                       _buildEditorSection('Branch Control (Super Admin)', [
                         _buildBranchMultiSelector(userScope.branchIds),
                       ]),
+                    if (_selectedPromoData['isLimitedTime'] == true) ...[
+                      const SizedBox(height: 32),
+                      _buildEditorSection('Combo Validity', [
+                        _buildDatePickerField('Start Date', _selectedPromoData['startDate'], (v) => _updateProperty('startDate', v)),
+                        _buildDatePickerField('End Date', _selectedPromoData['endDate'], (v) => _updateProperty('endDate', v)),
+                      ]),
+                    ],
                   ] else if (_selectedCategory == 'sales') ...[
                     _buildEditorSection('Sale Identity', [
-                      _buildInputField('Sale Name (EN)', _selectedPromoData['name'] ?? ''),
-                      _buildInputField('Sale Name (AR)', _selectedPromoData['nameAr'] ?? ''),
-                      _buildInputField('Description (EN)', _selectedPromoData['description'] ?? ''),
+                      _buildEditableField('Sale Name (EN)', _nameController, onSaved: (v) => _updateProperty('name', v)),
+                      _buildEditableField('Sale Name (AR)', _nameArController, onSaved: (v) => _updateProperty('nameAr', v)),
+                      _buildEditableField('Description (EN)', _descController, maxLines: 3, onSaved: (v) => _updateProperty('description', v)),
+                      _buildEditableField('Description (AR)', _descArController, maxLines: 3, onSaved: (v) => _updateProperty('descriptionAr', v)),
+                      _buildEditableField('Banner Image URL', _imageUrlController, onSaved: (v) => _updateProperty('imageUrl', v)),
                     ]),
                     const SizedBox(height: 32),
                     _buildEditorSection('Discount Config', [
                       Row(
                         children: [
-                          Expanded(child: _buildInputField('Type', _selectedPromoData['discountType'] ?? 'percentage')),
+                          Expanded(child: _buildDropdownField('Type', _selectedPromoData['discountType'] ?? 'percentage', ['percentage', 'flat'], (v) => _updateProperty('discountType', v))),
                           const SizedBox(width: 12),
-                          Expanded(child: _buildPricingField('Value', _selectedPromoData['discountValue'] ?? 0)),
+                          Expanded(child: _buildPricingField('Value', _valueController, onSaved: (v) => _updateProperty('discountValue', double.tryParse(v) ?? 0))),
                         ],
                       ),
-                      _buildInputField('Target Type', _selectedPromoData['targetType'] ?? 'all'),
+                      _buildDropdownField('Target Type', _selectedPromoData['targetType'] ?? 'all', ['all', 'category', 'specific_items'], (v) => _updateProperty('targetType', v)),
+                    ]),
+                    if (_selectedPromoData['targetType'] == 'specific_items') ...[
+                      const SizedBox(height: 32),
+                      _buildEditorSection('Bundle Components', [
+                        ...(_selectedPromoData['itemNames'] as List? ?? _selectedPromoData['itemIds'] as List? ?? _selectedPromoData['targetItemIds'] as List? ?? []).map((name) => _buildRemovableItem(name.toString())).toList(),
+                        _buildAddBtn('+ ADD MENU ITEM'),
+                      ]),
+                    ] else if (_selectedPromoData['targetType'] == 'category') ...[
+                      const SizedBox(height: 32),
+                      _buildEditorSection('Target Categories', [
+                        ...(_selectedPromoData['targetCategoryIds'] as List? ?? []).map((id) => _buildRemovableCategory(id.toString())).toList(),
+                        _buildAddCategoryBtn('+ ADD CATEGORY'),
+                      ]),
+                    ],
+                    const SizedBox(height: 32),
+                    _buildEditorSection('Sale Period', [
+                      _buildDatePickerField('Start Date', _selectedPromoData['startDate'] ?? _selectedPromoData['valid_from'], (v) => _updateProperty('startDate', v)),
+                      _buildDatePickerField('End Date', _selectedPromoData['endDate'] ?? _selectedPromoData['valid_until'], (v) => _updateProperty('endDate', v)),
                     ]),
                     const SizedBox(height: 32),
                     _buildEditorSection('Rules & Constraints', [
-                      _buildPricingField('Min Order Value', _selectedPromoData['minOrderValue'] ?? 0),
-                      _buildPricingField('Max Discount Cap', _selectedPromoData['maxDiscountCap'] ?? 0),
-                      _buildToggleField('Stackable with Coupons', _selectedPromoData['stackableWithCoupons'] ?? false),
-                      _buildInputField('Priority', _selectedPromoData['priority']?.toString() ?? '0'),
+                      _buildPricingField('Min Order Value', _minSubtotalController, onSaved: (v) => _updateProperty('minOrderValue', double.tryParse(v) ?? 0)),
+                      _buildPricingField('Max Discount Cap', _maxDiscountController, onSaved: (v) => _updateProperty('maxDiscountCap', double.tryParse(v) ?? 0)),
+                      _buildToggleField('Active Status', _selectedPromoData['isActive'] ?? true, (v) => _updateProperty('isActive', v)),
+                      _buildToggleField('Stackable with Coupons', _selectedPromoData['stackableWithCoupons'] ?? false, (v) => _updateProperty('stackableWithCoupons', v)),
+                      _buildEditableField('Priority', _priorityController, onSaved: (v) => _updateProperty('priority', int.tryParse(v))),
                     ]),
                     const SizedBox(height: 32),
                     if (userScope.isSuperAdmin) 
@@ -974,7 +1169,8 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
                       ]),
                   ],
                   const SizedBox(height: 48),
-                  _buildEditorFooter(userScope.isSuperAdmin, filterBranchIds),
+                  if (_isSaving) const Center(child: CircularProgressIndicator()) 
+                  else _buildEditorFooter(userScope.isSuperAdmin, filterBranchIds),
                   const SizedBox(height: 48),
                 ],
               ),
@@ -996,10 +1192,10 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
     );
   }
 
-  Widget _buildInputField(String label, String value, {bool isHighlight = false}) {
+  Widget _buildEditableField(String label, TextEditingController controller, {bool isHighlight = false, int maxLines = 1, bool readOnly = false, required Function(String) onSaved}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: isHighlight ? appPrimary.withOpacity(0.05) : Colors.grey[50],
@@ -1016,10 +1212,59 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
               if (isHighlight) const Icon(Icons.verified, color: appPrimary, size: 14),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(value, style: TextStyle(color: isHighlight ? appPrimary : appText, fontSize: 14, fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal)),
+           IgnorePointer(
+            ignoring: readOnly,
+            child: TextField(
+              controller: controller,
+              maxLines: maxLines,
+              readOnly: readOnly,
+              style: TextStyle(color: isHighlight ? appPrimary : appText, fontSize: 14, fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal),
+              decoration: const InputDecoration(border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.symmetric(vertical: 8)),
+              onSubmitted: onSaved,
+              onEditingComplete: () => onSaved(controller.text),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildDropdownField(String label, String value, List<String> options, Function(String) onChanged) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: appTextVariant, fontSize: 10, fontWeight: FontWeight.bold)),
+          DropdownButton<String>(
+            value: options.contains(value) ? value : options.first,
+            items: options.map((o) => DropdownMenuItem(value: o, child: Text(o, style: const TextStyle(fontSize: 13)))).toList(),
+            onChanged: (v) => onChanged(v!),
+            isExpanded: true,
+            underline: const SizedBox(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDatePickerField(String label, dynamic value, Function(Timestamp) onSelected) {
+    final DateTime date = (value is Timestamp) ? value.toDate() : DateTime.now();
+    return InkWell(
+      onTap: () async {
+        final pickedDate = await showDatePicker(context: context, initialDate: date, firstDate: DateTime(2020), lastDate: DateTime(2030));
+        if (pickedDate != null) {
+          final pickedTime = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(date));
+          if (pickedTime != null) {
+            final finalDate = DateTime(pickedDate.year, pickedDate.month, pickedDate.day, pickedTime.hour, pickedTime.minute);
+            onSelected(Timestamp.fromDate(finalDate));
+          }
+        }
+      },
+      child: _buildEditableField(label, TextEditingController(text: _formatTs(value)), readOnly: true, onSaved: (_) {}),
     );
   }
 
@@ -1035,11 +1280,13 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: tags.map((t) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.grey[200]!)),
-        child: Text(t.toString(), style: const TextStyle(color: appTextVariant, fontSize: 10, fontWeight: FontWeight.bold)),
-      )).toList(),
+      children: [
+        ...tags.map((t) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.grey[200]!)),
+          child: Text(t.toString(), style: const TextStyle(color: appTextVariant, fontSize: 10, fontWeight: FontWeight.bold)),
+        )),
+      ],
     );
   }
 
@@ -1051,25 +1298,155 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(name, style: const TextStyle(color: appText, fontSize: 12)),
-          const Icon(Icons.delete_outline, color: appTextVariant, size: 16),
+          Expanded(child: Text(name, style: const TextStyle(color: appText, fontSize: 12), overflow: TextOverflow.ellipsis)),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: appTextVariant, size: 16),
+            onPressed: () {
+              final items = List<String>.from(_selectedPromoData['itemNames'] ?? _selectedPromoData['itemIds'] ?? _selectedPromoData['targetItemIds'] ?? []);
+              items.remove(name);
+              String field = _selectedPromoData.containsKey('itemNames') ? 'itemNames' : (_selectedPromoData.containsKey('itemIds') ? 'itemIds' : 'targetItemIds');
+              _updateProperty(field, items);
+            },
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildAddBtn(String label) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(border: Border.all(color: appPrimary.withOpacity(0.3)), borderRadius: BorderRadius.circular(8)),
-      child: Text(label, textAlign: TextAlign.center, style: const TextStyle(color: appPrimary, fontSize: 10, fontWeight: FontWeight.bold)),
+    return InkWell(
+      onTap: _showItemPicker,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(border: Border.all(color: appPrimary.withOpacity(0.3)), borderRadius: BorderRadius.circular(8)),
+        child: Text(label, textAlign: TextAlign.center, style: const TextStyle(color: appPrimary, fontSize: 10, fontWeight: FontWeight.bold)),
+      ),
     );
   }
 
-  Widget _buildPricingField(String label, dynamic value) {
+  void _showItemPicker() async {
+    // Basic item picker for this demo/upgrade. In a full app, this would be a search dialog.
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Menu Item'),
+        content: SizedBox(
+          width: 300,
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection(AppConstants.collectionMenuItems).limit(20).snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) return const CircularProgressIndicator();
+              return ListView.builder(
+                shrinkWrap: true,
+                itemCount: snapshot.data!.docs.length,
+                itemBuilder: (context, i) {
+                  final name = snapshot.data!.docs[i]['name'].toString();
+                  return ListTile(
+                    title: Text(name),
+                    onTap: () => Navigator.pop(context, name),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    if (result != null && _selectedPromoId != null) {
+      final items = List<String>.from(_selectedPromoData['itemNames'] ?? _selectedPromoData['itemIds'] ?? _selectedPromoData['targetItemIds'] ?? []);
+      if (!items.contains(result)) {
+        items.add(result);
+        String field = _selectedPromoData.containsKey('itemNames') ? 'itemNames' : (_selectedPromoData.containsKey('itemIds') ? 'itemIds' : 'targetItemIds');
+        _updateProperty(field, items);
+      }
+    }
+  }
+
+  Widget _buildRemovableCategory(String categoryId) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[200]!)),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(child: Text('Category ID: $categoryId', style: const TextStyle(color: appText, fontSize: 12), overflow: TextOverflow.ellipsis)),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: appTextVariant, size: 16),
+            onPressed: () {
+              final cats = List<String>.from(_selectedPromoData['targetCategoryIds'] ?? []);
+              cats.remove(categoryId);
+              _updateProperty('targetCategoryIds', cats);
+            },
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAddCategoryBtn(String label) {
+    return InkWell(
+      onTap: _showCategoryPicker,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(border: Border.all(color: appPrimary.withOpacity(0.3)), borderRadius: BorderRadius.circular(8)),
+        child: Text(label, textAlign: TextAlign.center, style: const TextStyle(color: appPrimary, fontSize: 10, fontWeight: FontWeight.bold)),
+      ),
+    );
+  }
+
+  void _showCategoryPicker() async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Category'),
+        content: SizedBox(
+          width: 300,
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection(AppConstants.collectionMenuCategories).snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) return const CircularProgressIndicator();
+              return ListView.builder(
+                shrinkWrap: true,
+                itemCount: snapshot.data!.docs.length,
+                itemBuilder: (context, i) {
+                  final name = snapshot.data!.docs[i]['name'].toString();
+                  final id = snapshot.data!.docs[i].id;
+                  return ListTile(
+                    title: Text(name),
+                    subtitle: Text(id),
+                    onTap: () => Navigator.pop(context, id),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    if (result != null && _selectedPromoId != null) {
+      final cats = List<String>.from(_selectedPromoData['targetCategoryIds'] ?? []);
+      if (!cats.contains(result)) {
+        cats.add(result);
+        _updateProperty('targetCategoryIds', cats);
+      }
+    }
+  }
+
+  Widget _buildPricingField(String label, TextEditingController controller, {required Function(String) onSaved}) {
     return Container(
       padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1080,7 +1457,15 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
             children: [
               const Text('QAR', style: TextStyle(color: appPrimary, fontSize: 14, fontWeight: FontWeight.w900)),
               const SizedBox(width: 8),
-              Text(value.toString(), style: const TextStyle(color: appText, fontSize: 24, fontWeight: FontWeight.w900)),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: appText, fontSize: 24, fontWeight: FontWeight.w900),
+                  decoration: const InputDecoration(border: InputBorder.none, isDense: true),
+                  onSubmitted: onSaved,
+                ),
+              ),
             ],
           ),
         ],
@@ -1088,52 +1473,106 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
     );
   }
 
-  Widget _buildToggleField(String label, bool value) {
+  Widget _buildToggleField(String label, bool value, Function(bool) onChanged) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: appText, fontSize: 13, fontWeight: FontWeight.w500)),
-          Container(
-            width: 32, height: 16,
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(color: appPrimary, borderRadius: BorderRadius.circular(8)),
-            child: Align(alignment: Alignment.centerRight, child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle))),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: appPrimary,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildEditorFooter(bool isSuperAdmin, List<String> currentBranches) {
+  Widget _buildEditorFooter(bool isSuperAdmin, List<String> userAssignedBranches) {
     return Column(
       children: [
         ElevatedButton(
           onPressed: () async {
             if (_selectedPromoId == null) return;
-            String collection = _selectedCategory == 'combos' ? 'combos' : (_selectedCategory == 'sales' ? 'promoSales' : 'coupons');
-            String nameField = _selectedCategory == 'coupons' ? 'title' : 'name';
             
-            Map<String, dynamic> updates = {
-              nameField: _selectedPromoData[nameField],
-              if (_selectedPromoData['description'] != null) 'description': _selectedPromoData['description'],
-              if (_selectedCategory == 'combos' && _selectedPromoData['comboPrice'] != null) 'comboPrice': _selectedPromoData['comboPrice'],
+            // Build the update map by collecting values from controllers
+            final nameField = _selectedCategory == 'coupons' ? 'title' : 'name';
+            final Map<String, dynamic> updates = {
+              nameField: _nameController.text,
+              if (_selectedCategory == 'coupons') 'title_ar': _nameArController.text,
+              if (_selectedCategory != 'coupons') 'nameAr': _nameArController.text,
+              'description': _descController.text,
+              // Description Arabic has different names in different models
+              if (_selectedCategory == 'coupons') 'description_ar': _descArController.text,
+              if (_selectedCategory != 'coupons') 'descriptionAr': _descArController.text,
+              if (_selectedCategory == 'coupons') 'code': _codeController.text,
+              if (_selectedCategory == 'combos') 'comboPrice': double.tryParse(_valueController.text) ?? 0.0,
+              if (_selectedCategory == 'sales') 'discountValue': double.tryParse(_valueController.text) ?? 0.0,
+              if (_selectedCategory == 'coupons') 'value': double.tryParse(_valueController.text) ?? 0.0,
+              
+              // ✅ ADDED MISSING FIELDS FOR SAVING
+              if (_selectedCategory == 'coupons') 'min_subtotal': double.tryParse(_minSubtotalController.text) ?? 0.0,
+              if (_selectedCategory != 'coupons') 'minOrderValue': double.tryParse(_minSubtotalController.text) ?? 0.0,
+              if (_selectedCategory == 'coupons') 'max_discount': double.tryParse(_maxDiscountController.text) ?? 0.0,
+              if (_selectedCategory != 'coupons') 'maxDiscountCap': double.tryParse(_maxDiscountController.text) ?? 0.0,
+              'maxUsesPerUser': int.tryParse(_maxUsesController.text) ?? 0,
+              'priority': int.tryParse(_priorityController.text) ?? 0,
+              'active': _selectedPromoData['active'] ?? true, // For coupons
+              'isActive': _selectedPromoData['isActive'] ?? true, // For combos/sales
+
+              // ✅ CATEGORY SPECIFIC FIELDS
+              if (_selectedCategory == 'sales') 'discountType': _selectedPromoData['discountType'] ?? 'percentage',
+              if (_selectedCategory == 'sales') 'targetType': _targetTypeController.text,
+              if (_selectedCategory == 'sales') 'imageUrl': _imageUrlController.text,
+              if (_selectedCategory == 'sales') 'stackableWithCoupons': _selectedPromoData['stackableWithCoupons'] ?? false,
+              if (_selectedCategory == 'combos') 'isLimitedTime': _selectedPromoData['isLimitedTime'] ?? false,
+              if (_selectedCategory == 'coupons') 'type': _selectedPromoData['type'] ?? 'percentage',
+
+              // ✅ HANDLE DATE FIELD VARIATIONS
+              if (_selectedCategory == 'sales' || _selectedCategory == 'combos') 'startDate': _selectedPromoData['startDate'] ?? _selectedPromoData['valid_from'],
+              if (_selectedCategory == 'sales' || _selectedCategory == 'combos') 'endDate': _selectedPromoData['endDate'] ?? _selectedPromoData['valid_until'],
+              if (_selectedCategory == 'coupons') 'valid_from': _selectedPromoData['valid_from'] ?? _selectedPromoData['startDate'],
+              if (_selectedCategory == 'coupons') 'valid_until': _selectedPromoData['valid_until'] ?? _selectedPromoData['endDate'],
+              
+              // ✅ HANDLE BRANCH FIELD VARIATIONS
+              if (_selectedCategory == 'sales' || _selectedCategory == 'combos') 'branchids': _editingBranchIds,
+              'branchIds': _editingBranchIds,
+              
+              'lastUpdated': FieldValue.serverTimestamp(),
             };
 
-            // RBAC Branch Selection
+            // Branch Assignment RBAC
             if (isSuperAdmin) {
               updates['branchIds'] = _editingBranchIds;
             } else {
-              // Non-super-admins can only save to their currently filtered branch (if single) or existing branches
-              // For simplicity, we use the active branch filter
-              if (currentBranches.isNotEmpty) {
-                updates['branchIds'] = currentBranches;
+              // Non-super-admins enforce their assigned branches for consistency
+              if (userAssignedBranches.isNotEmpty && (_editingBranchIds.isEmpty)) {
+                 updates['branchIds'] = userAssignedBranches;
+              } else {
+                 updates['branchIds'] = _editingBranchIds;
               }
             }
             
-            await FirebaseFirestore.instance.collection(collection).doc(_selectedPromoId).update(updates);
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Campaign synchronized with localized settings')));
+            setState(() => _isSaving = true);
+            try {
+              String collection = _selectedCategory == 'combos' ? 'combos' : (_selectedCategory == 'sales' ? 'promoSales' : AppConstants.collectionCoupons);
+              await FirebaseFirestore.instance.collection(collection).doc(_selectedPromoId).update(updates);
+              
+              // Sync local state
+              setState(() {
+                updates.forEach((key, value) {
+                   _selectedPromoData[key] = value;
+                });
+              });
+              
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Campaign updates saved successfully')));
+            } catch (e) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));
+            } finally {
+              setState(() => _isSaving = false);
+            }
           },
           style: ElevatedButton.styleFrom(
             backgroundColor: appPrimary,
@@ -1142,18 +1581,30 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             elevation: 0,
           ),
-          child: const Text('Save Bundle Updates', style: TextStyle(fontWeight: FontWeight.bold)),
+          child: const Text('Save Campaign Updates', style: TextStyle(fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 12),
         _buildSecondaryBtn('Archive Campaign', () async {
           if (_selectedPromoId == null) return;
-          String collection = _selectedCategory == 'combos' ? 'combos' : (_selectedCategory == 'sales' ? 'promoSales' : 'coupons');
           String field = _selectedCategory == 'coupons' ? 'active' : 'isActive';
-          await FirebaseFirestore.instance.collection(collection).doc(_selectedPromoId).update({field: false});
-          setState(() {
-            _selectedPromoId = null;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Campaign archived successfully')));
+          
+          final confirm = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Archive Campaign?'),
+              content: const Text('This will hide the campaign from customers and move it to the Archived tab.'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCEL')),
+                ElevatedButton(onPressed: () => Navigator.pop(context, true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text('ARCHIVE')),
+              ],
+            ),
+          );
+
+          if (confirm == true) {
+            await _updateProperty(field, false);
+            setState(() => _selectedPromoId = null);
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Campaign archived successfully')));
+          }
         }),
       ],
     );
@@ -1172,29 +1623,57 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
     );
   }
 
-  Widget _buildBranchMultiSelector(List<String> allBranches) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: allBranches.map((id) {
-        final isSelected = _editingBranchIds.contains(id);
-        return FilterChip(
-          label: Text(id, style: TextStyle(fontSize: 10, color: isSelected ? Colors.white : appText, fontWeight: FontWeight.bold)),
-          selected: isSelected,
-          onSelected: (val) {
-            setState(() {
-              if (val) {
-                _editingBranchIds.add(id);
-              } else {
-                _editingBranchIds.remove(id);
-              }
-            });
-          },
-          selectedColor: appPrimary,
-          checkmarkColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        );
-      }).toList(),
+  Widget _buildBranchMultiSelector(List<String> userAssignedBranches) {
+    final bool allSelected = userAssignedBranches.isNotEmpty && userAssignedBranches.every((id) => _editingBranchIds.contains(id));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Assigned Branches', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: appTextVariant)),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  if (allSelected) {
+                    _editingBranchIds.clear();
+                  } else {
+                    _editingBranchIds = List.from(userAssignedBranches);
+                  }
+                });
+              },
+              child: Text(allSelected ? 'CLEAR ALL' : 'SELECT ALL', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: appPrimary)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ...userAssignedBranches.map((id) {
+              final isSelected = _editingBranchIds.contains(id);
+              return FilterChip(
+                label: Text(id, style: TextStyle(fontSize: 10, color: isSelected ? Colors.white : appText, fontWeight: FontWeight.bold)),
+                selected: isSelected,
+                onSelected: (val) {
+                  setState(() {
+                    if (val) {
+                      _editingBranchIds.add(id);
+                    } else {
+                      _editingBranchIds.remove(id);
+                    }
+                  });
+                },
+                selectedColor: appPrimary,
+                checkmarkColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              );
+            }),
+          ],
+        ),
+      ],
     );
   }
 }

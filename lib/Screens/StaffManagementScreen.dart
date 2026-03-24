@@ -23,6 +23,36 @@ class StaffManagementScreen extends StatefulWidget {
 class _StaffManagementScreenState extends State<StaffManagementScreen> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // Stable stream references
+  Stream<QuerySnapshot>? _staffStream;
+  Stream<DocumentSnapshot>? _myProfileStream;
+
+  List<String>? _lastFilterBranchIds;
+  String? _lastSelectedBranchId;
+  String? _lastMyEmail;
+
+  void _updateStreams(UserScopeService userScope, BranchFilterService branchFilter) {
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    
+    final bool branchIdsChanged = _lastFilterBranchIds == null || 
+        _lastFilterBranchIds!.length != filterBranchIds.length ||
+        !_lastFilterBranchIds!.every((id) => filterBranchIds.contains(id));
+    
+    final bool selectionChanged = _lastSelectedBranchId != branchFilter.selectedBranchId;
+    final bool emailChanged = _lastMyEmail != userScope.userEmail;
+
+    if (branchIdsChanged || selectionChanged) {
+      _staffStream = _getStaffQuery(userScope, branchFilter);
+      _lastFilterBranchIds = List.from(filterBranchIds);
+      _lastSelectedBranchId = branchFilter.selectedBranchId;
+    }
+
+    if (emailChanged && userScope.userEmail != null) {
+      _myProfileStream = _db.collection('staff').doc(userScope.userEmail).snapshots();
+      _lastMyEmail = userScope.userEmail;
+    }
+  }
+
   // Track if we had permission initially (to avoid flash during scope reload)
   bool? _hadPermissionOnInit;
 
@@ -109,6 +139,8 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
     }
 
     // Update cached permission state
+    _updateStreams(userScope, branchFilter);
+
     return ResponsiveLayout(
       mobile: _buildMobileLayout(context, userScope, branchFilter),
       desktop: const StaffManagementScreenLarge(),
@@ -151,7 +183,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
         ],
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _getStaffQuery(userScope, branchFilter),
+        stream: _staffStream,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -168,10 +200,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
               // 1. My Profile Section (Always Visible)
               SliverToBoxAdapter(
                 child: StreamBuilder<DocumentSnapshot>(
-                  stream: _db
-                      .collection('staff')
-                      .doc(userScope.userEmail)
-                      .snapshots(),
+                  stream: _myProfileStream,
                   builder: (context, snapshot) {
                     if (!snapshot.hasData || !snapshot.data!.exists)
                       return const SizedBox.shrink();
@@ -608,6 +637,7 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
   String _selectedRole = 'branch_admin';
   bool _isActive = true;
   List<String> _selectedBranches = [];
+  late Stream<QuerySnapshot> _branchStream;
 
   // Email validation regex
   static final _emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
@@ -625,6 +655,7 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
   @override
   void initState() {
     super.initState();
+    _branchStream = FirebaseFirestore.instance.collection('Branch').snapshots();
     if (widget.isEditing && widget.currentData != null) {
       _nameController.text = widget.currentData!['name'] ?? '';
       _emailController.text = widget.currentData!['email'] ?? '';
@@ -789,9 +820,7 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('Branch')
-                        .snapshots(),
+                    stream: _branchStream,
                     builder: (context, snapshot) {
                       if (!snapshot.hasData)
                         return const Center(child: CircularProgressIndicator());

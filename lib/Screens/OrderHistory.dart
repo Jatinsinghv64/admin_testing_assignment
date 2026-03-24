@@ -28,6 +28,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   DateTime? _startDate;
   DateTime? _endDate;
   String _searchQuery = '';
+  String _orderTypeFilter = 'All'; // New filter
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -78,7 +79,16 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
       List<String> statusList = [];
       if (_statusFilter == 'All') {
-        statusList = ['delivered', 'cancelled', 'refunded', 'pending'];
+        // Expand All to include all terminal statuses for various order types
+        statusList = [
+          AppConstants.statusDelivered,
+          AppConstants.statusCancelled,
+          AppConstants.statusRefunded,
+          AppConstants.statusPending,
+          AppConstants.statusPaid,
+          AppConstants.statusCollected,
+          AppConstants.statusPickedUp,
+        ];
       } else {
         statusList = [_statusFilter.toLowerCase()];
       }
@@ -87,6 +97,12 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
       if (_sourceFilter != 'All') {
         query = query.where('Order_source', isEqualTo: _sourceFilter.toUpperCase());
+      }
+      
+      // Add Order Type filtering
+      if (_orderTypeFilter != 'All') {
+        final normalizedType = AppConstants.normalizeOrderType(_orderTypeFilter);
+        query = query.where('Order_type', isEqualTo: normalizedType);
       }
 
       query = query.orderBy('timestamp', descending: true);
@@ -153,22 +169,31 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     }
     
     double total = 0;
-    int deliveredCount = 0;
+    int successfulCount = 0;
+    
+    // Define successful statuses
+    final successStatuses = [
+      AppConstants.statusDelivered,
+      AppConstants.statusPaid,
+      AppConstants.statusCollected,
+    ];
     
     for (var doc in filtered) {
       final data = doc.data() as Map<String, dynamic>;
       final amount = (data['totalAmount'] as num?)?.toDouble() ?? 0.0;
       total += amount;
-      if (data['status']?.toString().toLowerCase() == 'delivered') {
-        deliveredCount++;
+      
+      final currentStatus = data['status']?.toString().toLowerCase() ?? '';
+      if (successStatuses.any((s) => s.toLowerCase() == currentStatus)) {
+        successfulCount++;
       }
     }
     
     setState(() {
       _totalSalesMTD = total;
-      _successfulDeliveries = deliveredCount;
+      _successfulDeliveries = successfulCount;
       _avgOrderValue = _orders.isNotEmpty ? total / _orders.length : 0;
-      _fulfillmentRate = _orders.isNotEmpty ? (deliveredCount / _orders.length) * 100 : 0;
+      _fulfillmentRate = _orders.isNotEmpty ? (successfulCount / _orders.length) * 100 : 0;
     });
   }
 
@@ -414,10 +439,10 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       childAspectRatio: isSmallZenith ? 2.8 : 2.0,
       physics: const NeverScrollableScrollPhysics(),
       children: [
-        _buildKPICard('Total Sales (MTD)', 'QAR ${_totalSalesMTD.toStringAsFixed(0)}', '+12.4%', Icons.payments, primaryColor),
-        _buildKPICard('Avg Order Value', 'QAR ${_avgOrderValue.toStringAsFixed(2)}', '+2.1%', Icons.shopping_bag, Colors.orange),
-        _buildKPICard('Fulfillment Rate', '${_fulfillmentRate.toStringAsFixed(1)}%', 'Stable', Icons.verified, primaryColor),
-        _buildKPICard('Successful Deliveries', _successfulDeliveries.toString(), '↑ 412', Icons.local_shipping, Colors.green),
+        _buildKPICard('Total Sales', 'QAR ${_totalSalesMTD.toStringAsFixed(0)}', '', Icons.payments, primaryColor),
+        _buildKPICard('Avg Order Value', 'QAR ${_avgOrderValue.toStringAsFixed(2)}', '', Icons.shopping_bag, Colors.orange),
+        _buildKPICard('Fulfillment Rate', '${_fulfillmentRate.toStringAsFixed(1)}%', '', Icons.verified, primaryColor),
+        _buildKPICard('Successful Orders', _successfulDeliveries.toString(), '', Icons.local_shipping, Colors.green),
       ],
     );
   }
@@ -457,8 +482,10 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               textBaseline: TextBaseline.alphabetic,
               children: [
                 Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.black87)),
-                const SizedBox(width: 8),
-                Text(trend, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: accent)),
+                if (trend.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Text(trend, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: accent)),
+                ],
               ],
             ),
           ),
@@ -488,7 +515,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                     onPressed: () {
                       setState(() {
                         _startDate = null; _endDate = null;
-                        _statusFilter = 'All'; _sourceFilter = 'All';
+                        _statusFilter = 'All'; _sourceFilter = 'All'; _orderTypeFilter = 'All';
                       });
                       _resetAndFetchOrders();
                     },
@@ -499,6 +526,12 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               const SizedBox(height: 24),
               _buildFilterLabel('Date Range'),
               _buildDateFilterToggle(primaryColor),
+              const SizedBox(height: 20),
+              _buildFilterLabel('Order Type'),
+              _buildFilterChips(['All', 'Delivery', 'Takeaway', 'Pickup', 'Dine-in'], _orderTypeFilter, (val) {
+                setState(() => _orderTypeFilter = val);
+                _resetAndFetchOrders();
+              }, primaryColor),
               const SizedBox(height: 20),
               _buildFilterLabel('Branch Location'),
               Consumer<BranchFilterService>(
@@ -530,12 +563,10 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               }, primaryColor),
               const SizedBox(height: 20),
               _buildFilterLabel('Status Filter'),
-              _buildFilterCheckboxGroup(['All', 'Delivered', 'Cancelled', 'Refunded', 'Pending'], primaryColor),
+              _buildFilterCheckboxGroup(['All', 'Delivered', 'Paid', 'Collected', 'Cancelled', 'Refunded', 'Pending'], primaryColor),
             ],
           ),
         ),
-        const SizedBox(height: 24),
-        _buildInsightTip(primaryColor),
       ],
     );
   }
@@ -738,11 +769,18 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'delivered': return Colors.green;
-      case 'cancelled': return Colors.red;
-      case 'refunded': return Colors.orange;
-      case 'pending': return Colors.blue;
-      default: return Colors.grey;
+      case 'delivered':
+      case 'paid':
+      case 'collected':
+        return Colors.green;
+      case 'cancelled':
+        return Colors.red;
+      case 'refunded':
+        return Colors.orange;
+      case 'pending':
+        return Colors.blue;
+      default:
+        return Colors.grey;
     }
   }
 
@@ -776,8 +814,13 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
     final totalAmount = (data['totalAmount'] as num?)?.toDouble() ?? 0.0;
     final source = data['Order_source'] ?? (data['Order_type'] == 'delivery' ? 'APP' : 'POS');
-    final branch = (data['branchIds'] as List?)?.first ?? 'Downtown HQ';
-    final payment = data['paymentMethod'] ?? 'Visa •••• 4242';
+    
+    // Get branch name reliably
+    final branchService = context.read<BranchFilterService>();
+    final branchId = (data['branchIds'] as List?)?.first?.toString() ?? data['branchId']?.toString();
+    final branch = branchId != null ? branchService.getBranchName(branchId) : 'N/A';
+    
+    final payment = AppConstants.getPaymentDisplayText(data['paymentMethod']);
 
     return InkWell(
       onTap: () => _printOrder(id),
@@ -790,7 +833,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             // Order ID
             Expanded(
               flex: 15,
-              child: Text('#${id.substring(0,8).toUpperCase()}', 
+              child: Text(OrderNumberHelper.getDisplayNumber(data, orderId: id), 
                   style: TextStyle(fontWeight: FontWeight.w900, color: primaryColor, fontSize: 11, fontFamily: 'Monospace')),
             ),
             // Customer & Branch
@@ -862,7 +905,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                   children: [
                     Container(width: 6, height: 6, decoration: BoxDecoration(color: _getStatusColor(status), shape: BoxShape.circle)),
                     const SizedBox(width: 8),
-                    Text(status.toUpperCase(), style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: _getStatusColor(status))),
+                    Text(AppConstants.getStatusDisplayText(status), style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: _getStatusColor(status))),
                   ],
                 ),
               ),
@@ -1096,7 +1139,7 @@ class _OrderHistoryItem extends StatelessWidget {
                           color: _getStatusColor(status).withOpacity(0.5)),
                     ),
                     child: Text(
-                      status.toUpperCase(),
+                      AppConstants.getStatusDisplayText(status),
                       style: TextStyle(
                         color: _getStatusColor(status),
                         fontSize: 12,
@@ -1378,8 +1421,13 @@ class OrderDetailsDialog extends StatelessWidget {
                 const SizedBox(height: 24),
                 _buildSectionTitle('Order Info', Icons.info_outline),
                 const SizedBox(height: 8),
-                _buildDetailRow('Order ID', id),
-                _buildDetailRow('Branch IDs', (orderData['branchIds'] as List?)?.join(', ') ?? 'N/A'),
+                _buildDetailRow('Order Number', orderNumber),
+                _buildDetailRow('Branch', () {
+                  final branchService = context.read<BranchFilterService>();
+                  final branchIds = List<String>.from(orderData['branchIds'] ?? []);
+                  if (branchIds.isEmpty) return 'N/A';
+                  return branchIds.map((id) => branchService.getBranchName(id)).join(', ');
+                }()),
 
                 const SizedBox(height: 24),
                 SizedBox(
