@@ -1,5 +1,5 @@
 // lib/Widgets/ExportReportDialog.dart
-// Export Report Dialog — Date range, format (PDF/Excel), and report type selection
+// Export Report Dialog — Multi-select checkboxes for data sections, date range, format
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -8,13 +8,16 @@ import '../Widgets/BranchFilterService.dart';
 import '../services/ExportReportService.dart';
 
 class ExportReportDialog extends StatefulWidget {
-  const ExportReportDialog({super.key});
+  /// Pre-selected sections based on the context screen
+  final Set<String>? preSelectedSections;
 
-  /// Show the export report dialog
-  static Future<void> show(BuildContext context) {
+  const ExportReportDialog({super.key, this.preSelectedSections});
+
+  /// Show the export report dialog with optional context-aware pre-selections
+  static Future<void> show(BuildContext context, {Set<String>? preSelectedSections}) {
     return showDialog(
       context: context,
-      builder: (_) => const ExportReportDialog(),
+      builder: (_) => ExportReportDialog(preSelectedSections: preSelectedSections),
     );
   }
 
@@ -30,11 +33,31 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
   // Format
   String _format = 'pdf'; // 'pdf' or 'excel'
 
-  // Report type
-  String _reportType = 'sales_summary';
+  // Multi-select sections
+  late Set<String> _selectedSections;
 
   bool _isGenerating = false;
   String? _error;
+
+  static const List<Map<String, dynamic>> _allSections = [
+    {'key': 'sales_summary', 'label': 'Sales Summary', 'icon': Icons.summarize, 'desc': 'Orders, revenue, AOV'},
+    {'key': 'order_details', 'label': 'Order Details', 'icon': Icons.list_alt, 'desc': 'Line-by-line order listing'},
+    {'key': 'revenue_by_source', 'label': 'Revenue by Source', 'icon': Icons.pie_chart, 'desc': 'App, POS, Web breakdown'},
+    {'key': 'revenue_by_branch', 'label': 'Revenue by Branch', 'icon': Icons.business, 'desc': 'Branch-wise split'},
+    {'key': 'item_wise_sales', 'label': 'Item-wise Sales', 'icon': Icons.restaurant, 'desc': 'Top selling items'},
+    {'key': 'profit_margin', 'label': 'Profit & Margin', 'icon': Icons.trending_up, 'desc': 'Item-level cost & margin'},
+    {'key': 'inventory_stock', 'label': 'Inventory & Stock', 'icon': Icons.inventory_2, 'desc': 'Stock levels, low alerts'},
+    {'key': 'staff_summary', 'label': 'Staff Summary', 'icon': Icons.groups, 'desc': 'Team count & attendance'},
+    {'key': 'promotions_performance', 'label': 'Promotions', 'icon': Icons.campaign, 'desc': 'Active deals & usage'},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedSections = widget.preSelectedSections != null
+        ? Set<String>.from(widget.preSelectedSections!)
+        : {'sales_summary'}; // default
+  }
 
   DateTimeRange get _effectiveDateRange {
     if (_datePreset == 'custom' && _customRange != null) return _customRange!;
@@ -59,13 +82,17 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
     }
   }
 
-  final _reportTypes = const [
-    {'key': 'sales_summary', 'label': 'Sales Summary', 'icon': Icons.summarize},
-    {'key': 'order_details', 'label': 'Order Details', 'icon': Icons.list_alt},
-    {'key': 'revenue_by_source', 'label': 'Revenue by Source', 'icon': Icons.pie_chart},
-    {'key': 'revenue_by_branch', 'label': 'Revenue by Branch', 'icon': Icons.business},
-    {'key': 'item_wise_sales', 'label': 'Item-wise Sales', 'icon': Icons.restaurant},
-  ];
+  bool get _allSelected => _selectedSections.length == _allSections.length;
+
+  void _toggleAll() {
+    setState(() {
+      if (_allSelected) {
+        _selectedSections.clear();
+      } else {
+        _selectedSections = _allSections.map((s) => s['key'] as String).toSet();
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -77,149 +104,270 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 620),
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
+        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 720),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Fixed header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 24, 28, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.file_download_outlined, color: Colors.deepPurple),
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Text('Export Report', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close, size: 20),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Branch scope indicator
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Colors.deepPurple.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.deepPurple.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.file_download_outlined, color: Colors.deepPurple),
-                  ),
-                  const SizedBox(width: 14),
-                  const Expanded(
-                    child: Text('Export Report', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close, size: 20),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.store, size: 16, color: Colors.deepPurple),
+                        const SizedBox(width: 8),
+                        Text(branchLabel, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.deepPurple)),
+                      ],
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              // Branch scope indicator
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.deepPurple.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
+            ),
+            const SizedBox(height: 16),
+            // Scrollable content
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.store, size: 16, color: Colors.deepPurple),
-                    const SizedBox(width: 8),
-                    Text(branchLabel, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.deepPurple)),
+                    // Date range
+                    const Text('Date Range', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _buildPresetChip('Today', 'today'),
+                        _buildPresetChip('Yesterday', 'yesterday'),
+                        _buildPresetChip('This Week', 'this_week'),
+                        _buildPresetChip('This Month', 'this_month'),
+                        _buildPresetChip('Last Month', 'last_month'),
+                        _buildPresetChip('Custom', 'custom'),
+                      ],
+                    ),
+                    if (_datePreset == 'custom')
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final range = await showDateRangePicker(
+                              context: context,
+                              firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                              lastDate: DateTime.now(),
+                              initialDateRange: _customRange,
+                            );
+                            if (range != null) setState(() => _customRange = range);
+                          },
+                          icon: const Icon(Icons.calendar_today, size: 16),
+                          label: Text(
+                            _customRange != null
+                                ? '${_fmtDate(_customRange!.start)} – ${_fmtDate(_customRange!.end)}'
+                                : 'Select dates...',
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+
+                    // Report data sections (multi-select checkboxes)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Report Sections', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                        TextButton.icon(
+                          onPressed: _toggleAll,
+                          icon: Icon(
+                            _allSelected ? Icons.deselect : Icons.select_all,
+                            size: 16,
+                          ),
+                          label: Text(
+                            _allSelected ? 'Deselect All' : 'Select All',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.deepPurple,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${_selectedSections.length} of ${_allSections.length} selected',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 8),
+                    // Checkbox list
+                    ..._allSections.map((section) {
+                      final key = section['key'] as String;
+                      final isSelected = _selectedSections.contains(key);
+                      return _buildSectionCheckbox(
+                        key: key,
+                        label: section['label'] as String,
+                        desc: section['desc'] as String,
+                        icon: section['icon'] as IconData,
+                        isSelected: isSelected,
+                      );
+                    }),
+                    const SizedBox(height: 18),
+
+                    // Format toggle
+                    const Text('Format', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        _buildFormatToggle('PDF', 'pdf', Icons.picture_as_pdf),
+                        const SizedBox(width: 12),
+                        _buildFormatToggle('Excel', 'excel', Icons.table_chart),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
-
-              // Date range
-              const Text('Date Range', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+            ),
+            // Fixed footer
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 12, 28, 24),
+              child: Column(
                 children: [
-                  _buildPresetChip('Today', 'today'),
-                  _buildPresetChip('Yesterday', 'yesterday'),
-                  _buildPresetChip('This Week', 'this_week'),
-                  _buildPresetChip('This Month', 'this_month'),
-                  _buildPresetChip('Last Month', 'last_month'),
-                  _buildPresetChip('Custom', 'custom'),
-                ],
-              ),
-              if (_datePreset == 'custom')
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: OutlinedButton.icon(
-                    onPressed: () async {
-                      final range = await showDateRangePicker(
-                        context: context,
-                        firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                        lastDate: DateTime.now(),
-                        initialDateRange: _customRange,
-                      );
-                      if (range != null) setState(() => _customRange = range);
-                    },
-                    icon: const Icon(Icons.calendar_today, size: 16),
-                    label: Text(
-                      _customRange != null
-                          ? '${_fmtDate(_customRange!.start)} – ${_fmtDate(_customRange!.end)}'
-                          : 'Select dates...',
-                      style: const TextStyle(fontSize: 13),
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+                    ),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: (_isGenerating || _selectedSections.isEmpty) ? null : _generate,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepPurple,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.grey[300],
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: _isGenerating
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Icon(Icons.download_rounded),
+                      label: Text(
+                        _isGenerating
+                            ? 'Generating...'
+                            : _selectedSections.isEmpty
+                                ? 'Select at least 1 section'
+                                : 'Generate Report (${_selectedSections.length} sections)',
+                      ),
                     ),
                   ),
-                ),
-              const SizedBox(height: 18),
-
-              // Report type
-              const Text('Report Type', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _reportTypes.map((rt) {
-                  final selected = _reportType == rt['key'];
-                  return ChoiceChip(
-                    label: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(rt['icon'] as IconData, size: 16, color: selected ? Colors.white : Colors.deepPurple),
-                        const SizedBox(width: 6),
-                        Text(rt['label'] as String, style: TextStyle(fontSize: 12, color: selected ? Colors.white : Colors.black87)),
-                      ],
-                    ),
-                    selected: selected,
-                    selectedColor: Colors.deepPurple,
-                    onSelected: (_) => setState(() => _reportType = rt['key'] as String),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 18),
-
-              // Format toggle
-              const Text('Format', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  _buildFormatToggle('PDF', 'pdf', Icons.picture_as_pdf),
-                  const SizedBox(width: 12),
-                  _buildFormatToggle('Excel', 'excel', Icons.table_chart),
                 ],
               ),
-              const SizedBox(height: 20),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 13)),
-                ),
-
-              // Generate button
+  Widget _buildSectionCheckbox({
+    required String key,
+    required String label,
+    required String desc,
+    required IconData icon,
+    required bool isSelected,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () {
+          setState(() {
+            if (isSelected) {
+              _selectedSections.remove(key);
+            } else {
+              _selectedSections.add(key);
+            }
+          });
+        },
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.deepPurple.withOpacity(0.06) : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSelected ? Colors.deepPurple.withOpacity(0.3) : Colors.grey[200]!,
+            ),
+          ),
+          child: Row(
+            children: [
               SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton.icon(
-                  onPressed: _isGenerating ? null : _generate,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepPurple,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  icon: _isGenerating
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Icon(Icons.download_rounded),
-                  label: Text(_isGenerating ? 'Generating...' : 'Generate Report'),
+                width: 24,
+                height: 24,
+                child: Checkbox(
+                  value: isSelected,
+                  onChanged: (_) {
+                    setState(() {
+                      if (isSelected) {
+                        _selectedSections.remove(key);
+                      } else {
+                        _selectedSections.add(key);
+                      }
+                    });
+                  },
+                  activeColor: Colors.deepPurple,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Icon(icon, size: 18, color: isSelected ? Colors.deepPurple : Colors.grey[600]),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? Colors.deepPurple : Colors.black87,
+                    )),
+                    Text(desc, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                  ],
                 ),
               ),
             ],
@@ -288,6 +436,11 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
       return;
     }
 
+    if (_selectedSections.isEmpty) {
+      setState(() => _error = 'Please select at least one report section.');
+      return;
+    }
+
     setState(() { _isGenerating = true; _error = null; });
 
     try {
@@ -299,7 +452,7 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
         context: context,
         dateRange: _effectiveDateRange,
         format: _format,
-        reportType: _reportType,
+        selectedSections: _selectedSections,
         branchIds: branchIds,
         branchFilter: branchFilter,
         userScope: userScope,

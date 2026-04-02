@@ -15,7 +15,8 @@ import '../constants.dart';
 import 'pos/pos_payment_dialog.dart';
 import '../services/pos/pos_models.dart';
 import '../services/pos/pos_service.dart';
-
+import '../utils/responsive_helper.dart';
+import '../Widgets/ExportReportDialog.dart';
 
 // ─── Theme Colors ───
 const _kPrimary = Colors.deepPurple;
@@ -143,8 +144,31 @@ class _OrdersScreenLargeState extends State<OrdersScreenLarge>
             ),
           ),
           const Spacer(),
-          // Branch selector removed in favor of global BranchFilterService
+          _buildExportButton(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildExportButton() {
+    return ElevatedButton.icon(
+      onPressed: () {
+        ExportReportDialog.show(context, preSelectedSections: {
+          'order_details',
+          'sales_summary',
+        });
+      },
+      icon: const Icon(Icons.download_rounded, size: 18),
+      label: const Text('Export Report'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: _kPrimary,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: Colors.grey.shade300),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
       ),
     );
   }
@@ -1105,7 +1129,7 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
     }
 
     // Delivery flows
-    if (isDelivery) {
+    if (isDelivery && !ResponsiveHelper.isMobile(context)) {
       if ((status == AppConstants.statusPreparing || needsManualAssignment) &&
           !isAutoAssigning && (riderId.isEmpty)) {
         buttons.add(_actionBtn('Assign Driver', Icons.person_add, _kPrimary, _assignRiderManually));
@@ -1185,7 +1209,7 @@ class _RiderSelectionDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Query query = FirebaseFirestore.instance
-        .collection(AppConstants.collectionDrivers)
+        .collection(AppConstants.collectionStaff).where('staffType', isEqualTo: 'driver')
         .where('isAvailable', isEqualTo: true)
         .where('status', isEqualTo: 'online');
     if (currentBranchId != null && currentBranchId!.isNotEmpty) {

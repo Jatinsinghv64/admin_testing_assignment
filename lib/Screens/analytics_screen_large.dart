@@ -7,6 +7,8 @@ import '../utils/responsive_helper.dart';
 import '../Widgets/BranchFilterService.dart';
 import '../main.dart'; // UserScopeService
 import '../constants.dart';
+import '../Widgets/ExportReportDialog.dart';
+import '../services/staff/staff_service.dart';
 
 class AnalyticsScreenLarge extends StatefulWidget {
   const AnalyticsScreenLarge({super.key});
@@ -110,6 +112,8 @@ class _AnalyticsScreenLargeState extends State<AnalyticsScreenLarge> {
                 _buildLeaderboardsRow(allOrders, primaryColor),
                 const SizedBox(height: 32),
                 _buildLiveTransactionTable(allOrders, primaryColor),
+                const SizedBox(height: 32),
+                _buildPayrollExpensesReport(primaryColor, effectiveBranchIds),
               ],
             ),
           );
@@ -142,8 +146,39 @@ class _AnalyticsScreenLargeState extends State<AnalyticsScreenLarge> {
             ),
           ],
         ),
-        _buildDateRangePresets(primaryColor),
+        Row(
+          children: [
+            _buildExportButton(primaryColor),
+            const SizedBox(width: 16),
+            _buildDateRangePresets(primaryColor),
+          ],
+        ),
       ],
+    );
+  }
+
+  Widget _buildExportButton(Color primaryColor) {
+    return ElevatedButton.icon(
+      onPressed: () {
+        ExportReportDialog.show(context, preSelectedSections: {
+          'sales_summary',
+          'revenue_by_source',
+          'revenue_by_branch',
+          'item_wise_sales',
+        });
+      },
+      icon: const Icon(Icons.download_rounded, size: 18),
+      label: const Text('Export Report'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: appSurface,
+        foregroundColor: primaryColor,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.grey[200]!),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      ),
     );
   }
 
@@ -318,8 +353,8 @@ class _AnalyticsScreenLargeState extends State<AnalyticsScreenLarge> {
       childAspectRatio: 1.55, // Increased height
       children: [
         _buildKPICard('Total Orders', totalOrders.toString(), '+12.5%', primaryColor, Icons.shopping_cart, 0.75),
-        _buildKPICard('Revenue', '\$${totalRevenue.toStringAsFixed(0)}', '+8.2%', appTertiary, Icons.payments, 0.5),
-        _buildKPICard('Avg Order Value', '\$${aov.toStringAsFixed(2)}', 'Static', Colors.blue, Icons.speed, 0.65),
+        _buildKPICard('Revenue', 'QAR ${totalRevenue.toStringAsFixed(0)}', '+8.2%', appTertiary, Icons.payments, 0.5),
+        _buildKPICard('Avg Order Value', 'QAR ${aov.toStringAsFixed(2)}', 'Static', Colors.blue, Icons.speed, 0.65),
         _buildKPICard('Problem Rate', '${problemRate.toStringAsFixed(1)}%', '-2.4%', appError, Icons.report_problem, 0.2),
       ],
     );
@@ -689,12 +724,168 @@ class _AnalyticsScreenLargeState extends State<AnalyticsScreenLarge> {
                   data['status']?.toString() ?? 'Pending',
                   data['Order_source']?.toString() ?? 'POS',
                   timeago(timestamp),
-                  '\$${((data['totalAmount'] as num?)?.toDouble() ?? 0).toStringAsFixed(2)}'
+                  'QAR ${((data['totalAmount'] as num?)?.toDouble() ?? 0).toStringAsFixed(2)}'
                 ], primaryColor);
               }),
             ],
           ),
           const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPayrollExpensesReport(Color primaryColor, List<String> effectiveBranchIds) {
+    return Container(
+      decoration: BoxDecoration(color: appSurface, borderRadius: BorderRadius.circular(24), border: Border.all(color: Colors.grey[200]!)),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Payroll & Expenses Report', style: TextStyle(color: Colors.black87, fontSize: 20, fontWeight: FontWeight.bold)),
+                    SizedBox(height: 4),
+                    Text('Estimated staff costs based on attendance', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(color: primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                  child: Text(
+                    '${DateFormat('MMM dd').format(_dateRange.start)} - ${DateFormat('MMM dd').format(_dateRange.end)}',
+                    style: TextStyle(color: primaryColor, fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          StreamBuilder<QuerySnapshot>(
+            stream: StaffService().getAttendanceByDateRange(
+              _dateRange.start, 
+              _dateRange.end, 
+              branchIds: effectiveBranchIds.isEmpty ? null : effectiveBranchIds
+            ),
+            builder: (context, attendanceSnap) {
+              if (attendanceSnap.connectionState == ConnectionState.waiting) {
+                return const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator()));
+              }
+              
+              if (attendanceSnap.hasError) {
+                return const Padding(padding: EdgeInsets.all(48), child: Center(child: Text('Error loading attendance data', style: TextStyle(color: Colors.red))));
+              }
+
+              final attendanceDocs = attendanceSnap.data?.docs ?? [];
+              
+              // Calculate attendance days per staff member
+              // Map<staffId, Set<String> of Dates>
+              final Map<String, Set<String>> staffAttendanceDays = {};
+              for (var doc in attendanceDocs) {
+                final data = doc.data() as Map<String, dynamic>;
+                final staffId = data['staffId'] as String?;
+                final date = data['date'] as String?;
+                
+                if (staffId != null && date != null) {
+                  staffAttendanceDays.putIfAbsent(staffId, () => <String>{}).add(date);
+                }
+              }
+
+              return StreamBuilder<QuerySnapshot>(
+                stream: StaffService().getStaffStream(branchIds: effectiveBranchIds),
+                builder: (context, staffSnap) {
+                  if (staffSnap.connectionState == ConnectionState.waiting) {
+                    return const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator()));
+                  }
+
+                  final staffDocs = staffSnap.data?.docs ?? [];
+                  
+                  double totalEstimatedCost = 0;
+                  final List<Map<String, dynamic>> payrollRows = [];
+
+                  for (var staff in staffDocs) {
+                    final data = staff.data() as Map<String, dynamic>;
+                    final staffId = staff.id;
+                    final name = data['name'] ?? 'Unknown';
+                    final role = data['role'] ?? 'Staff';
+                    
+                    // Salary handling (assuming salary is monthly)
+                    final double salary = double.tryParse(data['salary']?.toString() ?? '0') ?? 0.0;
+                    final double dailyRate = salary / 30; // 30 days assumed
+                    
+                    final daysWorked = staffAttendanceDays[staffId]?.length ?? 0;
+                    final double estimatedCost = daysWorked * dailyRate;
+                    
+                    totalEstimatedCost += estimatedCost;
+                    payrollRows.add({
+                      'name': name,
+                      'role': role,
+                      'salary': salary,
+                      'days Worked': daysWorked,
+                      'estimatedCost': estimatedCost,
+                    });
+                  }
+
+                  // Sort by highest cost, then by name
+                  payrollRows.sort((a, b) {
+                    final costCompare = b['estimatedCost'].compareTo(a['estimatedCost']);
+                    if (costCompare != 0) return costCompare;
+                    return (a['name'] as String).compareTo(b['name'] as String);
+                  });
+
+                  return Column(
+                     crossAxisAlignment: CrossAxisAlignment.stretch,
+                     children: [
+                       Container(
+                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                         color: Colors.grey[50], // Very light background for the total
+                         child: Row(
+                           mainAxisAlignment: MainAxisAlignment.end,
+                           children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  const Text('TOTAL EST. COST', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)),
+                                  Text('QAR ${totalEstimatedCost.toStringAsFixed(2)}', style: TextStyle(color: appError, fontSize: 24, fontWeight: FontWeight.bold)),
+                                ]
+                              )
+                           ],
+                         ),
+                       ),
+                       if (payrollRows.isEmpty)
+                         const Padding(padding: EdgeInsets.all(48), child: Center(child: Text('No staff attendance or salary data found for this period.', style: TextStyle(color: Colors.grey))))
+                       else
+                         Table(
+                           columnWidths: const {
+                             0: FlexColumnWidth(2), 
+                             1: FlexColumnWidth(1.5), 
+                             2: FlexColumnWidth(1.5), 
+                             3: FlexColumnWidth(1.5), 
+                             4: FlexColumnWidth(1.5)
+                           },
+                           children: [
+                             _buildTableRow(['Staff Name', 'Role', 'Monthly Base', 'Days Present', 'Est. Cost'], primaryColor, isHeader: true),
+                             ...payrollRows.map((row) {
+                               return _buildTableRow([
+                                 row['name'].toString(),
+                                 row['role'].toString().capitalize(),
+                                 'QAR ${((row['salary'] as num?)?.toDouble() ?? 0).toStringAsFixed(0)}',
+                                 '${row['days Worked']} days',
+                                 'QAR ${((row['estimatedCost'] as num?)?.toDouble() ?? 0).toStringAsFixed(2)}'
+                               ], primaryColor);
+                             }),
+                           ],
+                         ),
+                       const SizedBox(height: 16),
+                     ],
+                  );
+                }
+              );
+            }
+          ),
         ],
       ),
     );

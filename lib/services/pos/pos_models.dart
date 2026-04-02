@@ -50,7 +50,7 @@ class PosCartItem {
       'menuItemId': productId,
       'itemId': productId,
       'name': name,
-      if (nameAr != null) 'nameAr': nameAr,
+      if (nameAr != null) 'name_ar': nameAr,
       'price': price,
       'quantity': quantity,
       'total': subtotal,

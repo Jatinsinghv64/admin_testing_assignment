@@ -119,7 +119,7 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildSummaryStatsRow(all),
+                _buildSummaryStatsRow(all, branchIds),
                 const SizedBox(height: 32),
                 _buildFiltersBarPC(),
                 const SizedBox(height: 32),
@@ -211,10 +211,10 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
     );
   }
 
-  Widget _buildSummaryStatsRow(List<IngredientModel> all) {
-    final totalValue = all.fold<double>(0, (sum, i) => sum + (i.costPerUnit * i.currentStock));
-    final lowStockCount = all.where((i) => i.isLowStock).length;
-    final outOfStockCount = all.where((i) => i.isOutOfStock).length;
+  Widget _buildSummaryStatsRow(List<IngredientModel> all, List<String> branchIds) {
+    final totalValue = all.fold<double>(0, (sum, i) => sum + (i.costPerUnit * i.getStock(branchIds.isNotEmpty ? branchIds.first : "default")));
+    final lowStockCount = all.where((i) => i.isLowStock(branchIds.isNotEmpty ? branchIds.first : "default")).length;
+    final outOfStockCount = all.where((i) => i.isOutOfStock(branchIds.isNotEmpty ? branchIds.first : "default")).length;
     
     return Row(
       children: [
@@ -502,13 +502,13 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
     final catColor = _getCategoryColor(i.category);
     
     // Stock indicators
-    final stockPercent = i.minStockThreshold > 0 
-        ? (i.currentStock / (i.minStockThreshold * 2)).clamp(0.0, 1.0) 
+    final stockPercent = i.getMinThreshold(branchIds.isNotEmpty ? branchIds.first : "default") > 0 
+        ? (i.getStock(branchIds.isNotEmpty ? branchIds.first : "default") / (i.getMinThreshold(branchIds.isNotEmpty ? branchIds.first : "default") * 2)).clamp(0.0, 1.0) 
         : 1.0;
         
     Color stockColor = Colors.green;
-    if (i.isOutOfStock) stockColor = Colors.red;
-    else if (i.isLowStock) stockColor = Colors.orange;
+    if (i.isOutOfStock(branchIds.isNotEmpty ? branchIds.first : "default")) stockColor = Colors.red;
+    else if (i.isLowStock(branchIds.isNotEmpty ? branchIds.first : "default")) stockColor = Colors.orange;
     
     // Expiry indicators
     IconData expiryIcon = Icons.event_available;
@@ -616,11 +616,11 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        '${i.currentStock} ${i.unit}', 
+                        '${i.getStock(branchIds.isNotEmpty ? branchIds.first : "default")} ${i.unit}', 
                         style: TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.bold)
                       ),
                       Text(
-                        'Min: ${i.minStockThreshold}${i.unit}', 
+                        'Min: ${i.getMinThreshold(branchIds.isNotEmpty ? branchIds.first : "default")}${i.unit}', 
                         style: TextStyle(color: Colors.grey.shade500, fontSize: 11)
                       ),
                     ],
@@ -915,6 +915,7 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
         ingredient: items[i],
         onEdit: () => _openForm(ctx, userScope, branchIds, existing: items[i]),
         onDelete: () => _confirmDelete(ctx, items[i]),
+        branchIds: branchIds,
       ),
     );
   }
@@ -1049,11 +1050,13 @@ class _IngredientCard extends StatelessWidget {
   final IngredientModel ingredient;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final List<String> branchIds;
 
   const _IngredientCard({
     required this.ingredient,
     required this.onEdit,
     required this.onDelete,
+    required this.branchIds,
   });
 
   @override
@@ -1103,7 +1106,7 @@ class _IngredientCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          _stockBadge(i),
+                          _stockBadge(i, branchIds),
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -1132,7 +1135,7 @@ class _IngredientCard extends StatelessWidget {
                               size: 13, color: Colors.grey[500]),
                           const SizedBox(width: 4),
                           Text(
-                            'Stock: ${i.currentStock} ${i.unit}',
+                            'Stock: ${i.getStock(branchIds.isNotEmpty ? branchIds.first : "default")} ${i.unit}',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey[600],
@@ -1211,13 +1214,13 @@ class _IngredientCard extends StatelessWidget {
     );
   }
 
-  Widget _stockBadge(IngredientModel i) {
+  Widget _stockBadge(IngredientModel i, List<String> branchIds) {
     Color color;
     String label;
-    if (i.isOutOfStock) {
+    if (i.isOutOfStock(branchIds.isNotEmpty ? branchIds.first : "default")) {
       color = Colors.red;
       label = 'Out';
-    } else if (i.isLowStock) {
+    } else if (i.isLowStock(branchIds.isNotEmpty ? branchIds.first : "default")) {
       color = Colors.orange;
       label = 'Low';
     } else {

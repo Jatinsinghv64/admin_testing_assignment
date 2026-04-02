@@ -25,8 +25,12 @@ class BranchMetricsService {
         .snapshots()
         .map((snap) {
       double total = 0;
+      final billableStatuses = {'delivered', 'completed', 'paid', 'collected'};
       for (var doc in snap.docs) {
         final data = doc.data();
+        final status = (data['status'] ?? '').toString().toLowerCase();
+        if (!billableStatuses.contains(status)) continue;
+
         final docBranchIds = (data['branchIds'] as List?)?.map((e) => e.toString()).toList() ?? [];
         
         bool matches = branchIds.isEmpty; // Super admin
@@ -83,9 +87,8 @@ class BranchMetricsService {
   Stream<int> getRiderCount(String branchId) {
     return _db
         .collection('staff')
+        .where('staffType', isEqualTo: 'driver')
         .where('branchIds', arrayContains: branchId)
-        .where('role', isEqualTo: 'rider')
-        .where('isActive', isEqualTo: true)
         .snapshots()
         .map((snap) => snap.docs.length);
   }

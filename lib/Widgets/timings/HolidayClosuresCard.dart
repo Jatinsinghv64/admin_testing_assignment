@@ -40,7 +40,8 @@ class HolidayClosuresCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.event_busy, color: Colors.deepPurple, size: 20),
+                  const Icon(Icons.event_busy,
+                      color: Colors.deepPurple, size: 20),
                   const SizedBox(width: 12),
                   Text(
                     'HOLIDAY CLOSURES',
@@ -71,20 +72,29 @@ class HolidayClosuresCard extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           if (holidays.isEmpty)
-              Padding(
-               padding: const EdgeInsets.symmetric(vertical: 24),
-               child: Center(
-                 child: Text(
-                   'No holiday closures scheduled',
-                   style: textTheme.bodySmall?.copyWith(color: const Color(0xFF64748b)),
-                 ),
-               ),
-             )
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'No holiday closures scheduled',
+                  style: textTheme.bodySmall
+                      ?.copyWith(color: const Color(0xFF64748b)),
+                ),
+              ),
+            )
           else
             ...holidays.asMap().entries.map((entry) {
               final index = entry.key;
               final holiday = entry.value;
               final date = holiday['date'] as DateTime;
+              final slotList =
+                  List<Map<String, dynamic>>.from(holiday['slots'] ?? const []);
+              final hoursLabel = holiday['forceOpen'] == true ||
+                      holiday['isOpenAllDay'] == true
+                  ? 'OPEN ALL DAY'
+                  : slotList.isNotEmpty
+                      ? '${slotList.first['open']} - ${slotList.first['close']}'
+                      : null;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Container(
@@ -97,7 +107,8 @@ class HolidayClosuresCard extends StatelessWidget {
                   child: Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(8),
@@ -143,19 +154,29 @@ class HolidayClosuresCard extends StatelessWidget {
                                 letterSpacing: -0.5,
                               ),
                             ),
+                            if (hoursLabel != null)
+                              Text(
+                                hoursLabel,
+                                style: textTheme.labelSmall?.copyWith(
+                                  color: const Color(0xFF475569),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                           ],
                         ),
                       ),
                       IconButton(
                         onPressed: () => onEditHoliday(index),
-                        icon: const Icon(Icons.edit, color: Color(0xFF475569), size: 14),
+                        icon: const Icon(Icons.edit,
+                            color: Color(0xFF475569), size: 14),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
                       const SizedBox(width: 8),
                       IconButton(
                         onPressed: () => onDeleteHoliday(index),
-                        icon: const Icon(Icons.delete_outline, color: Color(0xFFef4444), size: 14),
+                        icon: const Icon(Icons.delete_outline,
+                            color: Color(0xFFef4444), size: 14),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
@@ -172,12 +193,16 @@ class HolidayClosuresCard extends StatelessWidget {
               height: 52,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey[200]!, style: BorderStyle.solid, width: 2),
+                border: Border.all(
+                    color: Colors.grey[200]!,
+                    style: BorderStyle.solid,
+                    width: 2),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.add_circle, color: Color(0xFF64748b), size: 16),
+                  const Icon(Icons.add_circle,
+                      color: Color(0xFF64748b), size: 16),
                   const SizedBox(width: 8),
                   Text(
                     'ADD EXCEPTION DATE',

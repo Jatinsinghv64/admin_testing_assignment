@@ -383,9 +383,8 @@ class _ReceivePurchaseOrderScreenState
       final user = context.read<UserScopeService>();
       await _service.receivePurchaseOrder(
         poId: widget.purchaseOrder['id'].toString(),
-        recordedBy: user.userIdentifier.isNotEmpty
-            ? user.userIdentifier
-            : (user.userEmail.isNotEmpty ? user.userEmail : 'system'),
+        userId: user.userIdentifier,
+        userName: user.userEmail,
         receivedDate: _receivedDate,
         receivedItems: rows,
         fullReceipt: _fullReceipt,

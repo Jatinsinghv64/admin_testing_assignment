@@ -8,14 +8,11 @@ import '../../Widgets/BranchFilterService.dart';
 import '../../main.dart';
 import '../../services/inventory/InventoryService.dart';
 import '../../services/CsvExportService.dart';
-import '../../utils/responsive_helper.dart';
 
 class _StockColors {
   static const Color primary = Color(0xFF673AB7); // Deep Purple
   static const Color backgroundLight = Color(0xFFF8FAFC);
-  static const Color backgroundDark = Color(0xFF0F172A);
-  static const Color surfaceLight = Color(0xFFF1F5F9); 
-  static const Color surfaceDark = Color(0xFF1E293B);
+  static const Color surfaceLight = Color(0xFFF1F5F9);
   static const Color textMain = Color(0xFF0F172A);
   static const Color textMuted = Color(0xFF64748B);
   static const Color border = Color(0x1A673AB7); // primary with 10% opacity
@@ -63,8 +60,14 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
-    final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    final branchIds = branchFilter.selectedBranchId != null
+        ? [branchFilter.selectedBranchId!]
+        : userScope.branchIds.take(1).toList();
     final draftKey = _draftKey(branchIds);
+
+    if (branchIds.isEmpty) {
+      return _buildNoBranchState();
+    }
 
     return Container(
       color: _StockColors.backgroundLight,
@@ -94,8 +97,9 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                     Expanded(
                       child: allItems.isEmpty
                           ? const Center(
-                              child: Text('No active ingredients for stocktake.'))
-                          : _buildMainContent(allItems, draftKey),
+                              child:
+                                  Text('No active ingredients for stocktake.'))
+                          : _buildMainContent(allItems, draftKey, branchIds),
                     ),
                     _buildActionBar(allItems, userScope, draftKey, branchIds),
                   ],
@@ -108,8 +112,9 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     );
   }
 
-  Widget _buildMainContent(List<IngredientModel> allItems, String draftKey) {
-    _ensureState(allItems);
+  Widget _buildMainContent(
+      List<IngredientModel> allItems, String draftKey, List<String> branchIds) {
+    _ensureState(allItems, branchIds);
     _loadDraftOnce(draftKey);
 
     final filteredItems = allItems.where((item) {
@@ -126,15 +131,16 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(
         children: [
-          _buildItemsTable(filteredItems),
+          _buildItemsTable(filteredItems, branchIds),
           const SizedBox(height: 24),
-          _buildSummaryArea(allItems),
+          _buildSummaryArea(allItems, branchIds),
         ],
       ),
     );
   }
 
-  Widget _buildHeaderAndControls(BranchFilterService branchFilter, UserScopeService userScope) {
+  Widget _buildHeaderAndControls(
+      BranchFilterService branchFilter, UserScopeService userScope) {
     return Container(
       padding: const EdgeInsets.fromLTRB(32, 16, 32, 24),
       decoration: const BoxDecoration(
@@ -148,16 +154,22 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
             children: [
               Row(
                 children: [
-                  const Text('Physical Stocktake', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const Text('Physical Stocktake',
+                      style:
+                          TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(width: 16),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
                       color: _StockColors.primary.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(999),
                     ),
-                    child: const Text('Active Session', 
-                      style: TextStyle(color: _StockColors.primary, fontSize: 10, fontWeight: FontWeight.bold)),
+                    child: const Text('Active Session',
+                        style: TextStyle(
+                            color: _StockColors.primary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -170,11 +182,15 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                       onChanged: (v) => setState(() => _searchQuery = v),
                       decoration: InputDecoration(
                         hintText: 'Search ingredients...',
-                        hintStyle: const TextStyle(fontSize: 13, color: _StockColors.textMuted),
-                        prefixIcon: const Icon(Icons.search, size: 18, color: _StockColors.textMuted),
+                        hintStyle: const TextStyle(
+                            fontSize: 13, color: _StockColors.textMuted),
+                        prefixIcon: const Icon(Icons.search,
+                            size: 18, color: _StockColors.textMuted),
                         filled: true,
                         fillColor: _StockColors.surfaceLight,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide.none),
                         contentPadding: EdgeInsets.zero,
                       ),
                     ),
@@ -198,16 +214,29 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('BRANCH', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: _StockColors.textMuted, letterSpacing: 1)),
+                      const Text('BRANCH',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: _StockColors.textMuted,
+                              letterSpacing: 1)),
                       const SizedBox(height: 4),
                       Container(
                         width: 192,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(color: _StockColors.surfaceLight, borderRadius: BorderRadius.circular(8)),
+                        decoration: BoxDecoration(
+                            color: _StockColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(8)),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
-                            value: branchFilter.getFilterBranchIds(userScope.branchIds).firstOrNull,
-                            items: userScope.branchIds.map((id) => DropdownMenuItem(value: id, child: Text(id.replaceAll('_', ' '), style: const TextStyle(fontSize: 13)))).toList(),
+                            value: branchFilter.selectedBranchId ??
+                                userScope.branchIds.firstOrNull,
+                            items: userScope.branchIds
+                                .map((id) => DropdownMenuItem(
+                                    value: id,
+                                    child: Text(id.replaceAll('_', ' '),
+                                        style: const TextStyle(fontSize: 13))))
+                                .toList(),
                             onChanged: (v) {
                               if (v != null) branchFilter.selectBranch(v);
                             },
@@ -220,27 +249,47 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('CATEGORY', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: _StockColors.textMuted, letterSpacing: 1)),
+                      const Text('CATEGORY',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: _StockColors.textMuted,
+                              letterSpacing: 1)),
                       const SizedBox(height: 4),
                       Row(
-                        children: ['All', 'Meat', 'Vegetables', 'Grains', 'Dairy'].map((cat) => Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: InkWell(
-                            onTap: () => setState(() => _selectedCategory = cat),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: _selectedCategory == cat ? _StockColors.primary : _StockColors.surfaceLight,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(cat, style: TextStyle(
-                                fontSize: 12, 
-                                fontWeight: FontWeight.bold, 
-                                color: _selectedCategory == cat ? Colors.white : _StockColors.textMain,
-                              )),
-                            ),
-                          ),
-                        )).toList(),
+                        children: [
+                          'All',
+                          'Meat',
+                          'Vegetables',
+                          'Grains',
+                          'Dairy'
+                        ]
+                            .map((cat) => Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: InkWell(
+                                    onTap: () =>
+                                        setState(() => _selectedCategory = cat),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: _selectedCategory == cat
+                                            ? _StockColors.primary
+                                            : _StockColors.surfaceLight,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(cat,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: _selectedCategory == cat
+                                                ? Colors.white
+                                                : _StockColors.textMain,
+                                          )),
+                                    ),
+                                  ),
+                                ))
+                            .toList(),
                       ),
                     ],
                   ),
@@ -249,9 +298,14 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  const Text('Last sync', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: _StockColors.textMuted)),
-                  Text(DateFormat('MMM d, yyyy - h:mm a').format(_lastSync), 
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                  const Text('Last sync',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: _StockColors.textMuted)),
+                  Text(DateFormat('MMM d, yyyy - h:mm a').format(_lastSync),
+                      style: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.bold)),
                 ],
               ),
             ],
@@ -261,14 +315,56 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     );
   }
 
-  Widget _buildItemsTable(List<IngredientModel> items) {
+  Widget _buildNoBranchState() {
+    return Container(
+      color: _StockColors.backgroundLight,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(24),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 420),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _StockColors.border),
+        ),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.account_tree_outlined,
+              size: 34,
+              color: _StockColors.primary,
+            ),
+            SizedBox(height: 14),
+            Text(
+              'Assign or select a branch before starting stocktake.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: _StockColors.textMain,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildItemsTable(List<IngredientModel> items, List<String> branchIds) {
     return Container(
       margin: const EdgeInsets.only(top: 24),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: _StockColors.border),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.02),
+              blurRadius: 10,
+              offset: const Offset(0, 4))
+        ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
@@ -284,7 +380,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
           children: [
             // Header Row
             TableRow(
-              decoration: BoxDecoration(color: _StockColors.primary.withOpacity(0.05)),
+              decoration:
+                  BoxDecoration(color: _StockColors.primary.withOpacity(0.05)),
               children: [
                 _th('Ingredient Name / SKU'),
                 _th('Unit'),
@@ -298,27 +395,35 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
             ...items.map((item) {
               final controller = _actualControllers[item.id]!;
               final actual = double.tryParse(controller.text.trim()) ?? 0.0;
-              final diff = actual - item.currentStock;
-              
+              final diff = actual - item.getStock(branchIds.first);
+
               return TableRow(
                 decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: _StockColors.border)),
+                  border:
+                      Border(bottom: BorderSide(color: _StockColors.border)),
                 ),
                 children: [
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(item.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                        Text(item.sku ?? '-', style: const TextStyle(fontSize: 10, color: _StockColors.textMuted)),
+                        Text(item.name,
+                            style: const TextStyle(
+                                fontSize: 14, fontWeight: FontWeight.bold)),
+                        Text(item.sku ?? '-',
+                            style: const TextStyle(
+                                fontSize: 10, color: _StockColors.textMuted)),
                       ],
                     ),
                   ),
                   _td(item.unit),
-                  _td(item.currentStock.toStringAsFixed(2), isMono: true),
+                  _td(item.getStock(branchIds.first).toStringAsFixed(2),
+                      isMono: true),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     child: Center(
                       child: SizedBox(
                         width: 96,
@@ -326,15 +431,23 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                         child: TextField(
                           controller: controller,
                           onChanged: (_) => setState(() {}),
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
                           textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.bold),
                           decoration: InputDecoration(
                             filled: true,
                             fillColor: _StockColors.backgroundLight,
                             contentPadding: EdgeInsets.zero,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0x3317CF54))),
-                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _StockColors.primary, width: 2)),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    const BorderSide(color: Color(0x3317CF54))),
+                            focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(
+                                    color: _StockColors.primary, width: 2)),
                           ),
                         ),
                       ),
@@ -345,29 +458,49 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                     child: Padding(
                       padding: const EdgeInsets.only(left: 24),
                       child: Text(
-                        (diff == 0 ? '0.00' : '${diff > 0 ? '+' : ''}${diff.toStringAsFixed(2)}'),
+                        (diff == 0
+                            ? '0.00'
+                            : '${diff > 0 ? '+' : ''}${diff.toStringAsFixed(2)}'),
                         style: TextStyle(
-                          fontSize: 14, 
-                          fontWeight: FontWeight.bold, 
-                          color: diff == 0 ? _StockColors.primary : (diff < 0 ? Colors.red : _StockColors.primary),
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: diff == 0
+                              ? _StockColors.primary
+                              : (diff < 0 ? Colors.red : _StockColors.primary),
                         ),
                       ),
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     child: Row(
                       children: [
                         Expanded(
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
                               isExpanded: true,
-                              value: _reasons[item.id] == 'Select reason...' ? null : _reasons[item.id],
-                              hint: const Text('Select reason...', style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic)),
-                              style: const TextStyle(fontSize: 12, color: _StockColors.textMain),
-                              items: ['Waste / Spoilage', 'Unrecorded sale', 'Theft', 'Inventory Adjustment', 'Incorrect Delivery']
-                                  .map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
-                              onChanged: (v) => setState(() => _reasons[item.id] = v ?? 'Select reason...'),
+                              value: _reasons[item.id] == 'Select reason...'
+                                  ? null
+                                  : _reasons[item.id],
+                              hint: const Text('Select reason...',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontStyle: FontStyle.italic)),
+                              style: const TextStyle(
+                                  fontSize: 12, color: _StockColors.textMain),
+                              items: [
+                                'Waste / Spoilage',
+                                'Unrecorded sale',
+                                'Theft',
+                                'Inventory Adjustment',
+                                'Incorrect Delivery'
+                              ]
+                                  .map((r) => DropdownMenuItem(
+                                      value: r, child: Text(r)))
+                                  .toList(),
+                              onChanged: (v) => setState(() =>
+                                  _reasons[item.id] = v ?? 'Select reason...'),
                             ),
                           ),
                         ),
@@ -375,10 +508,12 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                         Expanded(
                           child: TextField(
                             controller: _noteControllers[item.id],
-                            style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic),
+                            style: const TextStyle(
+                                fontSize: 11, fontStyle: FontStyle.italic),
                             decoration: const InputDecoration(
                               hintText: 'Add note...',
-                              hintStyle: TextStyle(fontSize: 11, color: _StockColors.textMuted),
+                              hintStyle: TextStyle(
+                                  fontSize: 11, color: _StockColors.textMuted),
                               border: InputBorder.none,
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -396,7 +531,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     );
   }
 
-  Widget _buildSummaryArea(List<IngredientModel> allItems) {
+  Widget _buildSummaryArea(
+      List<IngredientModel> allItems, List<String> branchIds) {
     double totalVarianceValue = 0;
     int itemsWithVariance = 0;
     int completedCount = 0;
@@ -404,9 +540,10 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     for (final item in allItems) {
       final actualStr = _actualControllers[item.id]?.text ?? '';
       if (actualStr.isNotEmpty) completedCount++;
-      
-      final actual = double.tryParse(actualStr) ?? item.currentStock;
-      final diff = actual - item.currentStock;
+
+      final actual =
+          double.tryParse(actualStr) ?? item.getStock(branchIds.first);
+      final diff = actual - item.getStock(branchIds.first);
       if (diff.abs() > 0.001) {
         itemsWithVariance++;
         totalVarianceValue += diff * item.costPerUnit;
@@ -425,19 +562,27 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
               children: [
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: _StockColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(999)),
-                  child: const Icon(Icons.info_outline, color: _StockColors.primary),
+                  decoration: BoxDecoration(
+                      color: _StockColors.primary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(999)),
+                  child: const Icon(Icons.info_outline,
+                      color: _StockColors.primary),
                 ),
                 const SizedBox(width: 16),
                 const Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Discrepancy Policy', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                      Text('Discrepancy Policy',
+                          style: TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.bold)),
                       SizedBox(height: 4),
                       Text(
                         'Any variance exceeding 5% of system stock or QAR 50 in value requires manager approval and a secondary recount. Please ensure all waste logs from the previous shift have been entered before submitting.',
-                        style: TextStyle(fontSize: 11, color: _StockColors.textMuted, height: 1.4),
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: _StockColors.textMuted,
+                            height: 1.4),
                       ),
                     ],
                   ),
@@ -451,20 +596,27 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
           child: _summaryCard(
             Column(
               children: [
-                _summaryRow('Total Variance Value', 'QAR ${totalVarianceValue.toStringAsFixed(2)}', 
-                  color: totalVarianceValue < 0 ? Colors.red : (totalVarianceValue > 0 ? _StockColors.primary : _StockColors.textMain),
-                  isBold: true),
+                _summaryRow('Total Variance Value',
+                    'QAR ${totalVarianceValue.toStringAsFixed(2)}',
+                    color: totalVarianceValue < 0
+                        ? Colors.red
+                        : (totalVarianceValue > 0
+                            ? _StockColors.primary
+                            : _StockColors.textMain),
+                    isBold: true),
                 const SizedBox(height: 12),
                 _summaryRow('Items with Variance', '$itemsWithVariance Items'),
                 const SizedBox(height: 12),
-                _summaryRow('Total Recount Progress', '${(progress * 100).toInt()}% Complete'),
+                _summaryRow('Total Recount Progress',
+                    '${(progress * 100).toInt()}% Complete'),
                 const SizedBox(height: 8),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(999),
                   child: LinearProgressIndicator(
                     value: progress,
                     backgroundColor: _StockColors.surfaceLight,
-                    valueColor: const AlwaysStoppedAnimation(_StockColors.primary),
+                    valueColor:
+                        const AlwaysStoppedAnimation(_StockColors.primary),
                     minHeight: 6,
                   ),
                 ),
@@ -479,7 +631,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     );
   }
 
-  Widget _buildActionBar(List<IngredientModel> allItems, UserScopeService userScope, String draftKey, List<String> branchIds) {
+  Widget _buildActionBar(List<IngredientModel> allItems,
+      UserScopeService userScope, String draftKey, List<String> branchIds) {
     return Container(
       height: 80,
       padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -495,23 +648,45 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
               _actionBtn('Print Sheet', Icons.print, onTap: () {}),
               const SizedBox(width: 16),
               _actionBtn('Export CSV', Icons.cloud_download, onTap: () {
-                final range = DateTimeRange(start: DateTime.now().subtract(const Duration(days: 1)), end: DateTime.now());
-                CsvExportService.exportStockMovements(context, branchIds, range);
+                if (branchIds.isEmpty || allItems.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No stocktake data available to export.'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                  return;
+                }
+                CsvExportService.exportInventoryStockFromData(
+                  context,
+                  allItems,
+                  branchId: branchIds.first,
+                );
               }),
             ],
           ),
           Row(
             children: [
               OutlinedButton(
-                onPressed: _isSavingDraft ? null : () => _saveDraft(context, draftKey),
+                onPressed:
+                    _isSavingDraft ? null : () => _saveDraft(context, draftKey),
                 style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                   side: const BorderSide(color: Color(0x3317CF54)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
-                child: _isSavingDraft 
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: _StockColors.primary))
-                  : const Text('Save Progress', style: TextStyle(color: _StockColors.primary, fontWeight: FontWeight.bold)),
+                child: _isSavingDraft
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: _StockColors.primary))
+                    : const Text('Save Progress',
+                        style: TextStyle(
+                            color: _StockColors.primary,
+                            fontWeight: FontWeight.bold)),
               ),
               const SizedBox(width: 16),
               ElevatedButton(
@@ -524,14 +699,22 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                         draftKey: draftKey,
                         branchIds: branchIds),
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                   backgroundColor: _StockColors.primary,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
                 child: _isConfirming
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('Submit Stocktake', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Text('Submit Stocktake',
+                        style: TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -541,14 +724,23 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
   }
 
   Widget _th(String text) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-    child: Text(text.toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: _StockColors.textMuted, letterSpacing: 1)),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Text(text.toUpperCase(),
+            style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: _StockColors.textMuted,
+                letterSpacing: 1)),
+      );
 
   Widget _td(String text, {bool isMono = false}) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-    child: Text(text, style: TextStyle(fontSize: 13, fontWeight: isMono ? FontWeight.bold : FontWeight.normal, fontFamily: isMono ? 'monospace' : null)),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Text(text,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: isMono ? FontWeight.bold : FontWeight.normal,
+                fontFamily: isMono ? 'monospace' : null)),
+      );
 
   Widget _iconButton(IconData icon, {bool hasBadge = false}) {
     return Container(
@@ -557,31 +749,47 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       child: Stack(
         children: [
           Icon(icon, color: _StockColors.textMuted, size: 22),
-          if (hasBadge) Positioned(top: 2, right: 2, child: Container(width: 8, height: 8, decoration: const BoxDecoration(color: _StockColors.primary, shape: BoxShape.circle))),
+          if (hasBadge)
+            Positioned(
+                top: 2,
+                right: 2,
+                child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                        color: _StockColors.primary, shape: BoxShape.circle))),
         ],
       ),
     );
   }
 
-  Widget _actionBtn(String label, IconData icon, {required VoidCallback onTap}) {
+  Widget _actionBtn(String label, IconData icon,
+      {required VoidCallback onTap}) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-        decoration: BoxDecoration(color: _StockColors.surfaceLight, borderRadius: BorderRadius.circular(8)),
+        decoration: BoxDecoration(
+            color: _StockColors.surfaceLight,
+            borderRadius: BorderRadius.circular(8)),
         child: Row(
           children: [
             Icon(icon, size: 18, color: _StockColors.textMain),
             const SizedBox(width: 8),
-            Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _StockColors.textMain)),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: _StockColors.textMain)),
           ],
         ),
       ),
     );
   }
 
-  Widget _summaryCard(Widget child, {EdgeInsets? padding, Color? borderColor, Color? bgColor}) {
+  Widget _summaryCard(Widget child,
+      {EdgeInsets? padding, Color? borderColor, Color? bgColor}) {
     return Container(
       padding: padding ?? const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -593,25 +801,39 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     );
   }
 
-  Widget _summaryRow(String label, String value, {Color? color, bool isBold = false}) {
+  Widget _summaryRow(String label, String value,
+      {Color? color, bool isBold = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _StockColors.textMuted, letterSpacing: 0.5)),
-        Text(value, style: TextStyle(fontSize: isBold ? 18 : 13, fontWeight: isBold ? FontWeight.w900 : FontWeight.bold, color: color ?? _StockColors.textMain)),
+        Text(label,
+            style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: _StockColors.textMuted,
+                letterSpacing: 0.5)),
+        Text(value,
+            style: TextStyle(
+                fontSize: isBold ? 18 : 13,
+                fontWeight: isBold ? FontWeight.w900 : FontWeight.bold,
+                color: color ?? _StockColors.textMain)),
       ],
     );
   }
 
-  void _ensureState(List<IngredientModel> items) {
+  void _ensureState(List<IngredientModel> items, List<String> branchIds) {
     for (final i in items) {
-      _actualControllers.putIfAbsent(i.id, () => TextEditingController(text: i.currentStock.toStringAsFixed(2)));
+      _actualControllers.putIfAbsent(
+          i.id,
+          () => TextEditingController(
+              text: i.getStock(branchIds.first).toStringAsFixed(2)));
       _reasons.putIfAbsent(i.id, () => 'Select reason...');
       _noteControllers.putIfAbsent(i.id, () => TextEditingController());
     }
   }
 
-  String _draftKey(List<String> branchIds) => 'stocktake_draft_v2_${branchIds.join("_")}';
+  String _draftKey(List<String> branchIds) =>
+      'stocktake_draft_v2_${branchIds.join("_")}';
 
   Future<void> _loadDraftOnce(String key) async {
     if (_lastLoadedDraftKey == key) return;
@@ -627,7 +849,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       final notes = map['notes'] as Map<String, dynamic>? ?? {};
 
       setState(() {
-        counts.forEach((k, v) => _actualControllers[k]?.text = (v as num).toStringAsFixed(2));
+        counts.forEach((k, v) =>
+            _actualControllers[k]?.text = (v as num).toStringAsFixed(2));
         reasons.forEach((k, v) => _reasons[k] = v.toString());
         notes.forEach((k, v) => _noteControllers[k]?.text = v.toString());
       });
@@ -642,15 +865,19 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       final notes = <String, String>{};
 
       for (final id in _actualControllers.keys) {
-        counts[id] = double.tryParse(_actualControllers[id]!.text.trim()) ?? 0.0;
+        counts[id] =
+            double.tryParse(_actualControllers[id]!.text.trim()) ?? 0.0;
         reasons[id] = _reasons[id] ?? '';
         notes[id] = _noteControllers[id]!.text.trim();
       }
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(key, jsonEncode({'counts': counts, 'reasons': reasons, 'notes': notes}));
+      await prefs.setString(key,
+          jsonEncode({'counts': counts, 'reasons': reasons, 'notes': notes}));
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Progress saved'), backgroundColor: _StockColors.primary));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Progress saved'),
+            backgroundColor: _StockColors.primary));
       }
     } finally {
       if (mounted) setState(() => _isSavingDraft = false);
@@ -671,25 +898,37 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     int mismatched = 0;
 
     for (final i in items) {
-      final actual = double.tryParse(_actualControllers[i.id]!.text.trim()) ?? i.currentStock;
+      final actual = double.tryParse(_actualControllers[i.id]!.text.trim()) ??
+          i.getStock(branchIds.first);
       actualCounts[i] = actual;
       reasonsMap[i.id] = _reasons[i.id] ?? '';
       notesMap[i.id] = _noteControllers[i.id]!.text.trim();
 
-      if ((actual - i.currentStock).abs() < 0.001) matched++; else mismatched++;
+      if ((actual - i.getStock(branchIds.first)).abs() < 0.001)
+        matched++;
+      else
+        mismatched++;
     }
 
     final proceed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Submit Stocktake'),
-        content: Text('$matched items matched.\n$mismatched items have discrepancies.\n\nProceed with updates?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), style: ElevatedButton.styleFrom(backgroundColor: _StockColors.primary), child: const Text('Confirm')),
-        ],
-      ),
-    ) ?? false;
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Submit Stocktake'),
+            content: Text(
+                '$matched items matched.\n$mismatched items have discrepancies.\n\nProceed with updates?'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel')),
+              ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: _StockColors.primary),
+                  child: const Text('Confirm')),
+            ],
+          ),
+        ) ??
+        false;
 
     if (!proceed) return;
     setState(() => _isConfirming = true);
@@ -706,10 +945,14 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       await prefs.remove(draftKey);
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Stocktake completed. $updatedCount items adjusted.'), backgroundColor: _StockColors.primary));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Stocktake completed. $updatedCount items adjusted.'),
+            backgroundColor: _StockColors.primary));
       }
     } catch (e) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
+      if (context.mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
     } finally {
       if (mounted) setState(() => _isConfirming = false);
     }

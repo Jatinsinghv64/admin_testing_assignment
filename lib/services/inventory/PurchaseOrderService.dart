@@ -168,6 +168,8 @@ class PurchaseOrderService {
   Future<String> createPurchaseOrder({
     required List<String> branchIds,
     required Map<String, dynamic> data,
+    required String? userId,
+    required String? userName,
   }) async {
     final doc = _poCol.doc();
     final now = Timestamp.fromDate(DateTime.now());
@@ -176,6 +178,16 @@ class PurchaseOrderService {
       'branchIds': branchIds,
       'createdAt': now,
       'updatedAt': now,
+      'createdById': userId,
+      'createdBy': userName,
+      'history': FieldValue.arrayUnion([
+        {
+          'action': 'created',
+          'userId': userId,
+          'userName': userName,
+          'timestamp': now,
+        }
+      ]),
     });
     return doc.id;
   }
@@ -183,38 +195,103 @@ class PurchaseOrderService {
   Future<void> updatePurchaseOrder({
     required String id,
     required Map<String, dynamic> updates,
+    required String? userId,
+    required String? userName,
   }) async {
+    final now = Timestamp.fromDate(DateTime.now());
     await _poCol.doc(id).update({
       ...updates,
-      'updatedAt': Timestamp.fromDate(DateTime.now()),
+      'updatedAt': now,
+      'updatedById': userId,
+      'updatedBy': userName,
+      'history': FieldValue.arrayUnion([
+        {
+          'action': 'updated',
+          'userId': userId,
+          'userName': userName,
+          'timestamp': now,
+          'changes': updates.keys.toList(),
+        }
+      ]),
     });
   }
 
-  Future<void> duplicateAsDraft(String poId) async {
+  Future<void> deletePurchaseOrder({
+    required String id,
+    required String? userId,
+    required String? userName,
+  }) async {
+    final now = Timestamp.fromDate(DateTime.now());
+    // Log the deletion in history before deleting the document
+    // Note: Since we are about to hard-delete, this record will be lost unless we moved it to a separate log.
+    // However, to satisfy "id should be saved in logs", I will implement a soft-delete or a separate audit log.
+    // In this codebase, let's use a separate 'audit_logs' collection if it exists, or just do a soft-delete status update.
+    
+    // Changing to soft-delete to preserve history as requested
+    await _poCol.doc(id).update({
+      'status': 'deleted',
+      'updatedAt': now,
+      'history': FieldValue.arrayUnion([
+        {
+          'action': 'deleted',
+          'userId': userId,
+          'userName': userName,
+          'timestamp': now,
+        }
+      ]),
+    });
+  }
+
+  Future<void> duplicateAsDraft(
+    String poId, {
+    required String? userId,
+    required String? userName,
+  }) async {
     final snap = await _poCol.doc(poId).get();
     if (!snap.exists) throw Exception('Purchase order not found');
-    final data = snap.data()!;
+    final data = Map<String, dynamic>.from(snap.data()!);
     final newNumber =
         await generatePoNumber(List<String>.from(data['branchIds'] ?? []));
+    
+    // Remove metadata that should not be duplicated
+    data.remove('id');
+    data.remove('createdAt');
+    data.remove('updatedAt');
+    data.remove('history');
+    data.remove('receivedDate');
+    data.remove('lineItems'); // Optional: should we clear received quantities? Yes.
+    
+    final lineItems = List<Map<String, dynamic>>.from(snap.data()!['lineItems'] ?? []);
+    final resetItems = lineItems.map((item) {
+      final newItem = Map<String, dynamic>.from(item);
+      newItem['receivedQty'] = 0.0;
+      return newItem;
+    }).toList();
+
     await createPurchaseOrder(
       branchIds: List<String>.from(data['branchIds'] ?? []),
       data: {
         ...data,
         'poNumber': newNumber,
         'status': 'draft',
+        'lineItems': resetItems,
       },
+      userId: userId,
+      userName: userName,
     );
   }
 
   Future<void> receivePurchaseOrder({
     required String poId,
-    required String recordedBy,
+    required String? userId,
+    required String? userName,
     required DateTime receivedDate,
     required List<Map<String, dynamic>> receivedItems,
     required bool fullReceipt,
     String? notes,
   }) async {
     await _db.runTransaction((tx) async {
+      final recordedBy = userName ?? userId ?? 'system';
       final poRef = _poCol.doc(poId);
       final poSnap = await tx.get(poRef);
       if (!poSnap.exists) throw Exception('Purchase order not found');
@@ -232,7 +309,9 @@ class PurchaseOrderService {
         final ingSnap = await tx.get(ingRef);
         if (!ingSnap.exists) continue;
         final ing = ingSnap.data()!;
-        final current = (ing['currentStock'] as num?)?.toDouble() ?? 0.0;
+        final targetBranch = branchIds.isNotEmpty ? branchIds.first : 'default';
+        final branchStocks = ing['branchStocks'] as Map<String, dynamic>? ?? {};
+        final current = (branchStocks[targetBranch] as num?)?.toDouble() ?? 0.0;
         final newStock = current + receivedQty;
         final shelfLifeDays = (ing['shelfLifeDays'] as num?)?.toInt();
         final expiry = shelfLifeDays != null
@@ -241,7 +320,7 @@ class PurchaseOrderService {
             : ing['expiryDate'];
 
         tx.update(ingRef, {
-          'currentStock': newStock,
+          'branchStocks.$targetBranch': newStock,
           'costPerUnit': unitCost > 0 ? unitCost : (ing['costPerUnit'] ?? 0),
           'expiryDate': expiry,
           'updatedAt': Timestamp.fromDate(DateTime.now()),
@@ -269,6 +348,15 @@ class PurchaseOrderService {
         'receivedDate': Timestamp.fromDate(receivedDate),
         'notes': notes,
         'updatedAt': Timestamp.fromDate(DateTime.now()),
+        'history': FieldValue.arrayUnion([
+          {
+            'action': fullReceipt ? 'received' : 'partially_received',
+            'userId': userId,
+            'userName': userName,
+            'timestamp': Timestamp.fromDate(DateTime.now()),
+            'notes': notes,
+          }
+        ]),
       });
     });
   }
@@ -290,7 +378,9 @@ class PurchaseOrderService {
         final ingSnap = await tx.get(ingRef);
         if (!ingSnap.exists) continue;
         final ing = ingSnap.data()!;
-        final current = (ing['currentStock'] as num?)?.toDouble() ?? 0.0;
+        final targetBranch = branchIds.isNotEmpty ? branchIds.first : 'default';
+        final branchStocks = ing['branchStocks'] as Map<String, dynamic>? ?? {};
+        final current = (branchStocks[targetBranch] as num?)?.toDouble() ?? 0.0;
         final newStock = current + qty;
         final shelfLifeDays = (ing['shelfLifeDays'] as num?)?.toInt();
         final expiry = shelfLifeDays != null
@@ -299,7 +389,7 @@ class PurchaseOrderService {
             : ing['expiryDate'];
 
         tx.update(ingRef, {
-          'currentStock': newStock,
+          'branchStocks.$targetBranch': newStock,
           'costPerUnit': unitCost > 0 ? unitCost : (ing['costPerUnit'] ?? 0),
           'expiryDate': expiry,
           'updatedAt': Timestamp.fromDate(DateTime.now()),

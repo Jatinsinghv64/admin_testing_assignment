@@ -313,8 +313,12 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
         // Core user info
         'name': staffData['name'],
         'email': email,
-        'phone': staffData['phone'] ?? '', // ✅ Include phone
+        'phone': staffData['phone'] ?? '',
         'role': staffData['role'],
+        'qid': staffData['qid'] ?? '',
+        'passportNumber': staffData['passportNumber'] ?? '',
+        'salary': staffData['salary'] ?? 0,
+        'roleFields': staffData['roleFields'] ?? {},
         'isActive': true,
 
         // Branch assignments
@@ -347,8 +351,12 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       // ✅ IMPROVED: Explicitly update only allowed fields, add audit metadata
       await _db.collection('staff').doc(staffId).update({
         'name': staffData['name'],
-        'phone': staffData['phone'] ?? '', // ✅ Include phone
+        'phone': staffData['phone'] ?? '',
         'role': staffData['role'],
+        'qid': staffData['qid'] ?? '',
+        'passportNumber': staffData['passportNumber'] ?? '',
+        'salary': staffData['salary'] ?? 0,
+        'roleFields': staffData['roleFields'] ?? {},
         'isActive': staffData['isActive'],
         'branchIds': staffData['branchIds'] ?? [],
         'permissions': staffData['permissions'] ?? {},
@@ -632,7 +640,14 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
-  final _phoneController = TextEditingController(); // ✅ NEW
+  final _phoneController = TextEditingController();
+  final _qidController = TextEditingController();
+  final _passportController = TextEditingController();
+  final _salaryController = TextEditingController();
+  // Driver-specific controllers
+  final _licenseController = TextEditingController();
+  final _vehiclePlateController = TextEditingController();
+  String _vehicleType = 'car';
 
   String _selectedRole = 'branch_admin';
   bool _isActive = true;
@@ -659,7 +674,11 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
     if (widget.isEditing && widget.currentData != null) {
       _nameController.text = widget.currentData!['name'] ?? '';
       _emailController.text = widget.currentData!['email'] ?? '';
-      _phoneController.text = widget.currentData!['phone'] ?? ''; // ✅ NEW
+      _phoneController.text = widget.currentData!['phone'] ?? '';
+      _qidController.text = widget.currentData!['qid'] ?? '';
+      _passportController.text = widget.currentData!['passportNumber'] ?? '';
+      final sal = widget.currentData!['salary'];
+      _salaryController.text = (sal != null && sal != 0) ? sal.toString() : '';
 
       String rawRole = widget.currentData!['role'] ?? 'branch_admin';
       if (rawRole == 'superadmin') rawRole = 'super_admin';
@@ -669,6 +688,14 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
       _isActive = widget.currentData!['isActive'] ?? true;
       _selectedBranches =
           List<String>.from(widget.currentData!['branchIds'] ?? []);
+
+      // Load role-specific fields
+      final rf = widget.currentData!['roleFields'] as Map<String, dynamic>? ?? {};
+      if (_selectedRole == 'driver') {
+        _licenseController.text = rf['licenseNumber'] ?? '';
+        _vehicleType = rf['vehicleType'] ?? 'car';
+        _vehiclePlateController.text = rf['vehiclePlateNumber'] ?? '';
+      }
 
       final existingPerms =
           widget.currentData!['permissions'] as Map<String, dynamic>? ?? {};
@@ -772,6 +799,38 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                 ),
 
                 const SizedBox(height: 24),
+                _buildSectionHeader('Identity & Compensation', Icons.credit_card),
+                const SizedBox(height: 16),
+
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _qidController,
+                        decoration:
+                            _buildInputDecoration('QID', Icons.credit_card),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _passportController,
+                        decoration:
+                            _buildInputDecoration('Passport Number', Icons.book),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _salaryController,
+                  decoration:
+                      _buildInputDecoration('Salary (QAR)', Icons.payments),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+
+                const SizedBox(height: 24),
                 _buildSectionHeader('Role & Access', Icons.security),
                 const SizedBox(height: 16),
 
@@ -794,6 +853,43 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                         },
                 ),
 
+                // --- Driver-specific fields ---
+                if (_selectedRole == 'driver') ...[
+                  const SizedBox(height: 24),
+                  _buildSectionHeader('Driver Details', Icons.directions_car),
+                  const SizedBox(height: 16),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _licenseController,
+                          decoration: _buildInputDecoration('License Number', Icons.directions_car),
+                          validator: (v) => v!.isEmpty ? 'Required for drivers' : null,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: _vehicleType,
+                          decoration: _buildInputDecoration('Vehicle Type', Icons.local_shipping),
+                          items: const [
+                            DropdownMenuItem(value: 'car', child: Text('Car')),
+                            DropdownMenuItem(value: 'bike', child: Text('Bike')),
+                            DropdownMenuItem(value: 'van', child: Text('Van')),
+                          ],
+                          onChanged: (v) => setState(() => _vehicleType = v!),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _vehiclePlateController,
+                    decoration: _buildInputDecoration('Vehicle Plate Number', Icons.confirmation_number),
+                    validator: (v) => v!.isEmpty ? 'Required for drivers' : null,
+                  ),
+                ],
                 if (!widget.isSelf) ...[
                   const SizedBox(height: 16),
                   SwitchListTile(
@@ -903,11 +999,22 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                 return;
               }
 
+              final Map<String, dynamic> roleFields = {};
+              if (_selectedRole == 'driver') {
+                roleFields['licenseNumber'] = _licenseController.text.trim();
+                roleFields['vehicleType'] = _vehicleType;
+                roleFields['vehiclePlateNumber'] = _vehiclePlateController.text.trim();
+              }
+
               widget.onSave({
                 'name': _nameController.text.trim(),
                 'email': _emailController.text.trim(),
                 'phone': _phoneController.text.trim(),
+                'qid': _qidController.text.trim(),
+                'passportNumber': _passportController.text.trim(),
+                'salary': double.tryParse(_salaryController.text.trim()) ?? 0,
                 'role': _selectedRole,
+                'roleFields': roleFields,
                 'isActive': _isActive,
                 'branchIds': _selectedBranches,
                 'permissions': _permissions,

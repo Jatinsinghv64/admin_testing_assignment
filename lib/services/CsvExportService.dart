@@ -1,11 +1,16 @@
 import 'dart:io';
+import 'dart:convert' show utf8;
 import 'package:csv/csv.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
+
+import '../Models/IngredientModel.dart';
+import '../utils/web_download_stub.dart'
+    if (dart.library.html) '../utils/web_download_web.dart';
 
 class CsvExportService {
   /// General wrapper to generate CSV, save it, and trigger a share dialog or mailto
@@ -21,6 +26,13 @@ class CsvExportService {
       );
 
       final String csvString = const ListToCsvConverter().convert(csvData);
+
+      // Web download using BLOBs
+      if (kIsWeb) {
+        downloadCsvBytes(utf8.encode(csvString), fileName);
+        if (context.mounted) Navigator.pop(context); // close dialog
+        return;
+      }
 
       final directory = await getApplicationDocumentsDirectory();
       final path = '${directory.path}/$fileName';
@@ -143,6 +155,96 @@ class CsvExportService {
 
     final filename =
         'Purchase_Orders_${DateFormat('yyyyMMdd').format(DateTime.now())}.csv';
+    await _exportAndShare(context, filename, rows);
+  }
+
+  static Future<void> exportPurchaseOrdersFromData(
+    BuildContext context,
+    List<Map<String, dynamic>> orders,
+  ) async {
+    final List<List<dynamic>> rows = [
+      [
+        'PO Number',
+        'Order Date',
+        'Supplier',
+        'Status',
+        'Total Amount (QAR)',
+        'Expected Delivery',
+        'Received Date'
+      ]
+    ];
+
+    for (final order in orders) {
+      final orderDate = (order['orderDate'] as Timestamp?)?.toDate();
+      final expDelDate =
+          (order['expectedDeliveryDate'] as Timestamp?)?.toDate();
+      final recDate = (order['receivedDate'] as Timestamp?)?.toDate();
+
+      rows.add([
+        order['poNumber'] ?? '-',
+        orderDate != null ? DateFormat('yyyy-MM-dd').format(orderDate) : '-',
+        order['supplierName'] ?? '-',
+        order['status'] ?? '-',
+        ((order['totalAmount'] as num?) ?? 0).toDouble(),
+        expDelDate != null ? DateFormat('yyyy-MM-dd').format(expDelDate) : '-',
+        recDate != null ? DateFormat('yyyy-MM-dd').format(recDate) : '-',
+      ]);
+    }
+
+    final filename =
+        'Purchase_Orders_${DateFormat('yyyyMMdd').format(DateTime.now())}.csv';
+    await _exportAndShare(context, filename, rows);
+  }
+
+  static Future<void> exportInventoryStockFromData(
+    BuildContext context,
+    List<IngredientModel> ingredients, {
+    required String branchId,
+  }) async {
+    final rows = <List<dynamic>>[
+      [
+        'Ingredient',
+        'Category',
+        'Unit',
+        'Current Stock',
+        'Min Threshold',
+        'Unit Cost (QAR)',
+        'Inventory Value (QAR)',
+        'SKU',
+        'Barcode',
+        'Status',
+      ]
+    ];
+
+    for (final ingredient in ingredients) {
+      final stock = ingredient.getStock(branchId);
+      final minThreshold = ingredient.getMinThreshold(branchId);
+      final status = ingredient.isOutOfStock(branchId)
+          ? 'Out of Stock'
+          : ingredient.isLowStock(branchId)
+              ? 'Low Stock'
+              : ingredient.isExpired
+                  ? 'Expired'
+                  : ingredient.isExpiringSoon
+                      ? 'Expiring Soon'
+                      : 'In Stock';
+
+      rows.add([
+        ingredient.name,
+        IngredientModel.categoryLabel(ingredient.category),
+        ingredient.unit,
+        stock,
+        minThreshold,
+        ingredient.costPerUnit,
+        stock * ingredient.costPerUnit,
+        ingredient.sku ?? '',
+        ingredient.barcode ?? '',
+        status,
+      ]);
+    }
+
+    final filename =
+        'Inventory_Stock_${DateFormat('yyyyMMdd').format(DateTime.now())}.csv';
     await _exportAndShare(context, filename, rows);
   }
 

@@ -4,10 +4,12 @@ import '../../constants.dart';
 import '../../Models/IngredientModel.dart';
 import '../../Models/RecipeModel.dart';
 import '../ingredients/IngredientService.dart';
+import '../ingredients/ingredient_usage_history_service.dart';
 
 class InventoryService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final IngredientService _ingredientService = IngredientService();
+  final IngredientUsageHistoryService _usageHistoryService = IngredientUsageHistoryService();
 
   CollectionReference<Map<String, dynamic>> get _ingredientsCol =>
       _db.collection(AppConstants.collectionIngredients);
@@ -227,7 +229,9 @@ class InventoryService {
     for (final entry in actualCounts.entries) {
       final ingredient = entry.key;
       final actual = entry.value;
-      final delta = actual - ingredient.currentStock;
+      
+      final targetBranch = branchIds.isNotEmpty ? branchIds.first : 'default';
+      final delta = actual - ingredient.getStock(targetBranch);
       if (delta == 0) continue;
 
       final reason = reasons?[ingredient.id] ?? 'Stocktake adjustment';
@@ -464,8 +468,12 @@ class InventoryService {
 
         final ingData = ingSnap.data()!;
         final String ingUnit = (ingData['unit'] ?? '').toString();
+        
+        final targetBranch = branchIds.isNotEmpty ? branchIds.first : 'default';
+        final branchStocks = ingData['branchStocks'] as Map<String, dynamic>? ?? {};
+        
         final double before = runningBalances[ingredientId] ??
-            (ingData['currentStock'] as num?)?.toDouble() ??
+            (branchStocks[targetBranch] as num?)?.toDouble() ??
             0.0;
 
         double adjustedQty = recipeQty * itemQuantity;
@@ -485,7 +493,7 @@ class InventoryService {
 
         pendingWrites.add(() {
           transaction.update(ingRef, {
-            'currentStock': after,
+            'branchStocks.$targetBranch': after,
             'updatedAt': FieldValue.serverTimestamp(),
           });
 
@@ -508,6 +516,23 @@ class InventoryService {
             'recordedBy': recordedBy,
             'createdAt': FieldValue.serverTimestamp(),
           });
+
+          // Write ingredient usage history for traceability per menu item
+          final menuItemName = (menuData?['name'] ?? menuData?['itemName'] ?? '').toString();
+          _usageHistoryService.writeInTransaction(
+            transaction: transaction,
+            ingredientId: ingredientId,
+            ingredientName: (ingData['name'] ?? '').toString(),
+            menuItemId: menuItemId,
+            menuItemName: menuItemName,
+            quantity: adjustedQty,
+            unit: ingUnit,
+            orderId: orderId,
+            branchIds: branchIds,
+            movementType: movementType,
+            recordedBy: recordedBy,
+            recipeId: recipeSnap?.id,
+          );
         });
       }
     }

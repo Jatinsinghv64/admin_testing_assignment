@@ -6,18 +6,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../constants.dart';
 import '../../main.dart';
-import '../../Widgets/TimeUtils.dart';
 import '../inventory/InventoryService.dart';
 import '../ingredients/IngredientService.dart';
 import 'pos_order_lifecycle.dart';
 import 'pos_models.dart';
-
-class DailyNumberResult {
-  final int value;
-  final DocumentReference<Map<String, dynamic>>? ref;
-  final bool exists;
-  DailyNumberResult(this.value, this.ref, this.exists);
-}
 
 class _AllocatedPaymentPart {
   final String method;
@@ -435,45 +427,6 @@ class PosService extends ChangeNotifier {
     return null; // Valid
   }
 
-  // ── Daily Order Number ──────────────────────────────────────
-  // 🛠️ FIX: Strict types and NO swallowed exceptions for Web safety.
-  Future<DailyNumberResult> _prepareDailyOrderNumber(
-      List<String> branchIds, Transaction transaction) async {
-    try {
-      if (branchIds.isEmpty) return DailyNumberResult(1, null, false);
-      final branchId = branchIds.first;
-
-      final dynamic businessStart = TimeUtils.getBusinessStartTimestamp();
-      DateTime businessStartDt;
-      if (businessStart is Timestamp) {
-        businessStartDt = businessStart.toDate();
-      } else if (businessStart is DateTime) {
-        businessStartDt = businessStart;
-      } else {
-        businessStartDt = DateTime.now();
-      }
-
-      final dateKey = businessStartDt.toIso8601String().split('T')[0];
-      final counterRef = FirebaseFirestore.instance
-          .collection('Counters')
-          .doc('orders_${branchId}_$dateKey');
-
-      final counterSnap = await transaction.get(counterRef);
-      if (!counterSnap.exists) {
-        return DailyNumberResult(1, counterRef, false);
-      }
-
-      // 🛠️ FIX: Explicitly cast to Map and handle num to int conversion for Web safety
-      final data = counterSnap.data();
-      final currentCount = (data?['count'] as num?)?.toInt() ?? 0;
-      return DailyNumberResult(currentCount + 1, counterRef, true);
-    } catch (e, stackTrace) {
-      _logError('POS: _prepareDailyOrderNumber failed', e,
-          stackTrace: stackTrace);
-      rethrow; // Transaction MUST see this error to retry/fail properly
-    }
-  }
-
   // ── Order Submission ────────────────────────────────────────
   /// Loads an existing order into the POS cart for modification.
   /// Used by the Delivery/Orders panel "Load Order" feature.
@@ -534,8 +487,8 @@ class PosService extends ChangeNotifier {
 
     // 🛠️ FIX: Allow appending for takeaway orders if they were manually loaded
     final canUseCachedTableContext =
-        (isDineInSubmit || _orderType == PosOrderType.takeaway) && 
-        _activeBranchId == primaryBranchId;
+        (isDineInSubmit || _orderType == PosOrderType.takeaway) &&
+            _activeBranchId == primaryBranchId;
 
     if (canUseCachedTableContext && _existingOrderId != null) {
       try {
@@ -546,15 +499,15 @@ class PosService extends ChangeNotifier {
         );
       } catch (e, stackTrace) {
         if (!_isRecoverableAppendTargetError(e)) rethrow;
-        
-        // If it was already prepaid or otherwise completed, we fall through 
+
+        // If it was already prepaid or otherwise completed, we fall through
         // to create a new order instead of failing.
         _logError(
           'POS: Append target became stale or prepaid, falling back to new order',
           e,
           stackTrace: stackTrace,
         );
-        
+
         if (isDineInSubmit) {
           await _syncSelectedTableOrders(branchIds, notify: false);
           if (_existingOrderId != null) {
@@ -586,9 +539,6 @@ class PosService extends ChangeNotifier {
           .runTransaction<String>((transaction) async {
         try {
           // 1. ALL READS (Must happen before any writes)
-          final dailyNumData =
-              await _prepareDailyOrderNumber(branchIds, transaction);
-
           DocumentSnapshot<Map<String, dynamic>>? branchSnap;
           final branchRef = FirebaseFirestore.instance
               .collection(AppConstants.collectionBranch)
@@ -598,7 +548,6 @@ class PosService extends ChangeNotifier {
           }
 
           // 2. LOGIC / CALCULATIONS
-          final int dailyNumber = dailyNumData.value;
           if (branchSnap != null) {
             // 🛠️ FIX: Safer casting for Web
             final data = branchSnap.data();
@@ -626,21 +575,9 @@ class PosService extends ChangeNotifier {
           }
 
           final orderData =
-              _buildOrderData(branchIds, userScope, initialStatus, dailyNumber);
+              _buildOrderData(branchIds, userScope, initialStatus);
 
           // 3. ALL WRITES (Strictly after all reads)
-
-          if (dailyNumData.ref != null) {
-            if (dailyNumData.exists) {
-              transaction.update(dailyNumData.ref!, {'count': dailyNumber});
-            } else {
-              transaction.set(dailyNumData.ref!, {
-                'count': dailyNumber,
-                'branchId': primaryBranchId,
-                'createdAt': FieldValue.serverTimestamp(),
-              });
-            }
-          }
 
           if (_orderType == PosOrderType.dineIn && _selectedTableId != null) {
             transaction.update(branchRef, {
@@ -724,7 +661,7 @@ class PosService extends ChangeNotifier {
 
     if (normalized.contains('permission-denied') ||
         normalized.contains('missing or insufficient permissions')) {
-      return 'Missing Firestore permission. Deploy the updated rules for Orders, Branch, and Counters.';
+      return 'Missing Firestore permission. Deploy the updated rules for Orders and Branch.';
     }
 
     if (normalized.contains('table already has an active order') ||
@@ -733,7 +670,7 @@ class PosService extends ChangeNotifier {
     }
 
     if (normalized.contains('dart exception thrown from converted future')) {
-      return 'Firestore transaction failed. Check the deployed rules for Orders, Branch, and Counters.';
+      return 'Firestore transaction failed. Check the deployed rules for Orders and Branch.';
     }
 
     return message;
@@ -924,10 +861,6 @@ class PosService extends ChangeNotifier {
           .runTransaction<String?>((transaction) async {
         try {
           // 1. ALL READS (Must happen before any writes)
-          final dailyNumData =
-              await _prepareDailyOrderNumber(branchIds, transaction);
-          final int dailyNumber = dailyNumData.value;
-
           final List<Map<String, dynamic>> itemsToDeduct = [];
           final List<DocumentSnapshot<Map<String, dynamic>>> orderSnaps = [];
           for (final doc in existingOrders) {
@@ -1036,21 +969,9 @@ class PosService extends ChangeNotifier {
           }
 
           // 2. ALL WRITES
-          if (dailyNumData.ref != null) {
-            if (dailyNumData.exists) {
-              transaction.update(dailyNumData.ref!, {'count': dailyNumber});
-            } else {
-              transaction.set(dailyNumData.ref!, {
-                'count': dailyNumber,
-                'branchId': branchIds.first,
-                'createdAt': FieldValue.serverTimestamp(),
-              });
-            }
-          }
-
           if (newOrderDocRef != null && newOrderId != null) {
             final newOrderData = _buildOrderData(
-                branchIds, userScope, AppConstants.statusPending, dailyNumber);
+                branchIds, userScope, AppConstants.statusPending);
             if (newOrderPayment == null) {
               throw Exception('Missing payment allocation for new order');
             }
@@ -1231,7 +1152,6 @@ class PosService extends ChangeNotifier {
     List<String> branchIds,
     UserScopeService userScope,
     String status,
-    int dailyOrderNumber,
   ) {
     final DateTime now = DateTime.now();
     final DateTime autoAcceptDeadline = now.add(_kitchenResponseTimeout);
@@ -1243,7 +1163,6 @@ class PosService extends ChangeNotifier {
       'Order_type': _orderType.firestoreValue, // Queried by OrderService
       'orderType': _orderType.firestoreValue, // Used by KDS fallback
       'status': status,
-      'dailyOrderNumber': dailyOrderNumber, // For display in order lists
       'items': _cartItems.map((item) => item.toOrderItemMap()).toList(),
       'customerName': _customerName,
       if (_customerPhone != null) 'customerPhone': _customerPhone,
@@ -1264,6 +1183,8 @@ class PosService extends ChangeNotifier {
       'createdBy': userScope.userIdentifier,
       'kotPrinted': true,
       'posOrder': true,
+      // The shared order number is assigned by the backend so every source
+      // (POS, dine-in, takeaway, delivery) uses the same sequence.
       // ── New Dual Status fields ──
       'orderStatus': getOrderStatus({'status': status}),
       'paymentStatus': getPaymentStatus(
@@ -2249,10 +2170,14 @@ class PosService extends ChangeNotifier {
           final String ingUnit = (ingData['unit'] ?? '').toString();
 
           // Convert recipe unit → ingredient storage unit if they differ
-          if (recipeUnit.isNotEmpty && ingUnit.isNotEmpty && recipeUnit != ingUnit) {
-            final converted = IngredientService.convertUnit(deductQty, recipeUnit, ingUnit);
+          if (recipeUnit.isNotEmpty &&
+              ingUnit.isNotEmpty &&
+              recipeUnit != ingUnit) {
+            final converted =
+                IngredientService.convertUnit(deductQty, recipeUnit, ingUnit);
             if (converted == null) {
-              debugPrint('⚠️ POS: Cannot convert $recipeUnit→$ingUnit for ingredient $ingredientId, skipping');
+              debugPrint(
+                  '⚠️ POS: Cannot convert $recipeUnit→$ingUnit for ingredient $ingredientId, skipping');
               continue;
             }
             deductQty = converted;

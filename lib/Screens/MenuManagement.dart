@@ -10,6 +10,10 @@ import '../main.dart';
 import '../utils/responsive_helper.dart'; // âœ… Added
 import '../services/image_upload_service.dart';
 import 'MenuManagementScreenLarge.dart';
+import '../Models/IngredientModel.dart';
+import '../Models/RecipeModel.dart';
+import '../services/ingredients/RecipeService.dart';
+import '../services/ingredients/IngredientService.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});

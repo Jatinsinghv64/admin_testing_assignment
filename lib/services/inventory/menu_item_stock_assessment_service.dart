@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:rxdart/rxdart.dart';
 
 import '../../Models/IngredientModel.dart';
 import '../../Models/RecipeModel.dart';
@@ -91,6 +92,7 @@ class MenuItemStockAssessmentService {
     String? menuItemName,
     String? explicitRecipeId,
     int quantity = 1,
+    String? branchId,
   }) async {
     String resolvedName = menuItemName?.trim().isNotEmpty == true
         ? menuItemName!.trim()
@@ -157,7 +159,121 @@ class MenuItemStockAssessmentService {
       ingredientLines: recipe.ingredients,
       ingredients: ingredients,
       quantity: quantity,
+      branchId: branchId,
     );
+  }
+
+  /// Stream real-time out-of-stock status for all menu items based on ingredient stock.
+  /// Returns a stream of Set<String> where each string is a menuItemId that is out of stock.
+  Stream<Set<String>> streamMenuItemStockStatuses({
+    required String branchId,
+  }) {
+    // Stream ingredients for this branch
+    final ingredientStream = _db
+        .collection(AppConstants.collectionIngredients)
+        .where('branchIds', arrayContains: branchId)
+        .snapshots();
+
+    // Stream recipes
+    final recipeStream = _db
+        .collection(AppConstants.collectionRecipes)
+        .where('isActive', isEqualTo: true)
+        .snapshots();
+
+    // Stream menu items to get recipe links
+    final menuStream = _db
+        .collection(AppConstants.collectionMenuItems)
+        .where('branchIds', arrayContains: branchId)
+        .snapshots();
+
+    // Use combineLatest3 for stable, consistent emissions
+    return Rx.combineLatest3<
+      QuerySnapshot<Map<String, dynamic>>,
+      QuerySnapshot<Map<String, dynamic>>,
+      QuerySnapshot<Map<String, dynamic>>,
+      Set<String>
+    >(
+      ingredientStream,
+      recipeStream,
+      menuStream,
+      (ingredientSnap, recipeSnap, menuSnap) {
+        // Build ingredient map
+        final ingredientMap = <String, IngredientModel>{};
+        for (final doc in ingredientSnap.docs) {
+          try {
+            final ingredient = IngredientModel.fromFirestore(doc);
+            ingredientMap[ingredient.id] = ingredient;
+          } catch (_) {}
+        }
+
+        // Build recipe map: recipeId => RecipeModel
+        final recipeById = <String, RecipeModel>{};
+        // Build recipe map: linkedMenuItemId => RecipeModel
+        final recipeByMenuItem = <String, RecipeModel>{};
+        for (final doc in recipeSnap.docs) {
+          try {
+            final recipe = RecipeModel.fromFirestore(doc);
+            recipeById[recipe.id] = recipe;
+            if (recipe.linkedMenuItemId != null && recipe.linkedMenuItemId!.isNotEmpty) {
+              recipeByMenuItem[recipe.linkedMenuItemId!] = recipe;
+            }
+          } catch (_) {}
+        }
+
+        // Check each menu item
+        final outOfStockIds = <String>{};
+        for (final doc in menuSnap.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final menuItemId = doc.id;
+          final recipeId = data['recipeId']?.toString() ?? '';
+
+          // Resolve recipe
+          RecipeModel? recipe;
+          if (recipeId.isNotEmpty && recipeById.containsKey(recipeId)) {
+            recipe = recipeById[recipeId];
+          } else if (recipeByMenuItem.containsKey(menuItemId)) {
+            recipe = recipeByMenuItem[menuItemId];
+          }
+
+          if (recipe == null) continue; // No recipe = can't check stock
+
+          // Check all ingredient lines
+          for (final line in recipe.ingredients) {
+            if (line.ingredientId.isEmpty || line.quantity <= 0) continue;
+
+            final ingredient = ingredientMap[line.ingredientId];
+            if (ingredient == null) {
+              // Ingredient missing for this branch = out of stock
+              outOfStockIds.add(menuItemId);
+              break;
+            }
+
+            var requiredStock = line.quantity;
+            if (line.unit.isNotEmpty &&
+                ingredient.unit.isNotEmpty &&
+                line.unit != ingredient.unit) {
+              final converted = IngredientService.convertUnit(
+                requiredStock, line.unit, ingredient.unit,
+              );
+              if (converted == null) {
+                outOfStockIds.add(menuItemId);
+                break;
+              }
+              requiredStock = converted;
+            }
+
+            if (ingredient.getStock(branchId) < requiredStock) {
+              outOfStockIds.add(menuItemId);
+              break;
+            }
+          }
+        }
+
+        return outOfStockIds;
+      },
+    ).debounceTime(const Duration(milliseconds: 300))
+     .distinct((a, b) => a.length == b.length && a.containsAll(b))
+     .shareReplay(maxSize: 1);
   }
 
   MenuItemStockAssessment assessDraftMenuItem({
@@ -168,12 +284,16 @@ class MenuItemStockAssessmentService {
     required List<RecipeIngredientLine> ingredientLines,
     required List<IngredientModel> ingredients,
     int quantity = 1,
+    String? branchId,
   }) {
     final effectiveQuantity = quantity < 1 ? 1 : quantity;
     final warnings = <String>[];
     final issues = <MenuItemIngredientIssue>[];
     final ingredientMap = <String, IngredientModel>{
-      for (final ingredient in ingredients) ingredient.id: ingredient,
+      for (final ingredient in ingredients)
+        // If branchId is provided, only include ingredients belonging to that branch
+        if (branchId == null || ingredient.branchIds.isEmpty || ingredient.branchIds.contains(branchId))
+          ingredient.id: ingredient,
     };
 
     final cleanedLines =
@@ -237,11 +357,11 @@ class MenuItemStockAssessmentService {
             MenuItemIngredientIssue(
               ingredientId: ingredient.id,
               ingredientName: ingredient.name,
-              availableStock: ingredient.currentStock,
+              availableStock: ingredient.getStock(branchId ?? 'default'),
               requiredStock: requiredStock,
               unit: ingredient.unit,
               possibleServings: 0,
-              minStockThreshold: ingredient.minStockThreshold,
+              minStockThreshold: ingredient.getMinThreshold(branchId ?? 'default'),
               severity: MenuItemStockSeverity.out,
               note:
                   'Unit conversion failed: ${line.unit} cannot be converted to ${ingredient.unit}.',
@@ -256,15 +376,15 @@ class MenuItemStockAssessmentService {
       if (requiredStock <= 0) continue;
 
       final possibleServings =
-          (ingredient.currentStock / requiredStock).floor();
+          (ingredient.getStock(branchId ?? 'default') / requiredStock).floor();
 
       MenuItemStockSeverity severity = MenuItemStockSeverity.ok;
-      if (ingredient.isOutOfStock || possibleServings <= 0) {
+      if (ingredient.isOutOfStock(branchId ?? 'default') || possibleServings <= 0) {
         severity = MenuItemStockSeverity.out;
         note = 'Required stock is not available.';
-      } else if (ingredient.isLowStock || possibleServings <= 5) {
+      } else if (ingredient.isLowStock(branchId ?? 'default') || possibleServings <= 5) {
         severity = MenuItemStockSeverity.low;
-        note = ingredient.isLowStock
+        note = ingredient.isLowStock(branchId ?? 'default')
             ? 'Ingredient is already below its minimum stock threshold.'
             : 'Only a few servings are left at the current stock level.';
       }
@@ -277,11 +397,11 @@ class MenuItemStockAssessmentService {
         MenuItemIngredientIssue(
           ingredientId: ingredient.id,
           ingredientName: ingredient.name,
-          availableStock: ingredient.currentStock,
+          availableStock: ingredient.getStock(branchId ?? 'default'),
           requiredStock: requiredStock,
           unit: displayUnit,
           possibleServings: possibleServings,
-          minStockThreshold: ingredient.minStockThreshold,
+          minStockThreshold: ingredient.getMinThreshold(branchId ?? 'default'),
           severity: severity,
           note: note,
         ),

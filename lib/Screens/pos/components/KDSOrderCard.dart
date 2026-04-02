@@ -111,7 +111,14 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
         : 0;
     final isLate = elapsed >= KDSConfig.lateMinutes;
 
-    final orderNum = _data['dailyOrderNumber']?.toString() ?? '?';
+    final orderNum = OrderNumberHelper.getDisplayNumber(
+      _data,
+      orderId: widget.orderDoc.id,
+    );
+    final orderNumLabel =
+        orderNum == OrderNumberHelper.loadingText || orderNum.startsWith('#')
+            ? orderNum
+            : '#$orderNum';
     final customerName = _data['customerName']?.toString() ?? 'Guest';
     final tableName = _data['tableName']?.toString();
     final orderType =
@@ -195,7 +202,9 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                       children: [
                         // Order number (large, Odoo style)
                         Text(
-                          isCancelled ? '#$orderNum CANCELLED' : '#$orderNum',
+                          isCancelled
+                              ? '$orderNumLabel CANCELLED'
+                              : orderNumLabel,
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w800,

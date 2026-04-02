@@ -18,17 +18,18 @@ import '../../Widgets/IngredientFormSheet.dart';
 import '../../services/ingredients/IngredientService.dart';
 import '../../services/inventory/ExcelImportService.dart';
 import '../settings/RecipesScreen.dart';
+import '../../services/ExportReportService.dart';
+import 'ingredient_import_format_dialog.dart';
 
 // ─── Theme Colors (matching app ThemeData: light bg, deepPurple primary) ─────
 class _InvColors {
-  static final Color bgDark       = Colors.grey.shade50;   // app scaffold bg
-  static const Color surfaceDark  = Colors.white;           // card surfaces
+  static final Color bgDark = Colors.grey.shade50; // app scaffold bg
+  static const Color surfaceDark = Colors.white; // card surfaces
   static final Color surfaceLighter = Colors.grey.shade100; // subtle surfaces
-  static final Color borderDark   = Colors.grey.shade200;   // borders
-  static final Color primary      = Colors.deepPurple;
-  static final Color primaryLight = Colors.deepPurple.shade300;
-  static const Color textMain     = Color(0xFF1E293B);      // slate-800
-  static const Color textMuted    = Color(0xFF64748B);      // slate-500
+  static final Color borderDark = Colors.grey.shade200; // borders
+  static final Color primary = Colors.deepPurple;
+  static const Color textMain = Color(0xFF1E293B); // slate-800
+  static const Color textMuted = Color(0xFF64748B); // slate-500
 }
 
 class InventoryDashboardScreen extends StatefulWidget {
@@ -44,6 +45,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  bool _isImportingIngredients = false;
 
   static const _tabLabels = [
     'Stock Overview',
@@ -81,50 +83,252 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
 
   void _onTabChanged() => setState(() {});
 
-  void _handleBulkUpload(BuildContext context) async {
-    final userScope = Provider.of<UserScopeService>(context, listen: false);
-    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
-    final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
-    final String branchToImportTo =
-        userScope.branchIds.isNotEmpty ? userScope.branchIds.first : (branchIds.firstOrNull ?? '');
+  void _showSnackBar(
+    String message, {
+    Color backgroundColor = Colors.red,
+  }) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: backgroundColor,
+      ),
+    );
+  }
 
-    if (branchToImportTo.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No branch selected for import.'), backgroundColor: Colors.red),
+  Future<void> _handleBulkUpload(BuildContext context) async {
+    if (_isImportingIngredients) {
+      return;
+    }
+
+    final userScope = context.read<UserScopeService>();
+    final branchFilter = context.read<BranchFilterService>();
+    final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
+    if (branchIds.length != 1) {
+      _showSnackBar(
+        branchIds.isEmpty
+            ? 'Select one branch before bulk uploading ingredients.'
+            : 'Bulk upload works on one branch at a time. Please select a single branch.',
       );
       return;
     }
 
-    final excelService = ExcelImportService(IngredientService());
-    
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => const Center(child: CircularProgressIndicator(color: Colors.deepPurple)),
-    );
+    final shouldContinue = await showIngredientImportFormatDialog(context);
+    if (!shouldContinue || !mounted) {
+      return;
+    }
 
-    await excelService.pickAndImportExcel(
-      branchToImportTo,
-      onProgress: (msg) {},
-      onError: (err) {
-        if (mounted) Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Import Error: $err'), backgroundColor: Colors.red),
+    final progress = ValueNotifier<String>('Preparing ingredient import');
+    var dialogShown = false;
+    setState(() => _isImportingIngredients = true);
+
+    try {
+      dialogShown = true;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: ValueListenableBuilder<String>(
+              valueListenable: progress,
+              builder: (_, value, __) => Row(
+                children: [
+                  const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.4,
+                      color: Colors.deepPurple,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(child: Text(value)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final result = await ExcelImportService().pickAndImportFile(
+        branchIds.first,
+        onProgress: (message) => progress.value = message,
+      );
+
+      if (dialogShown && mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        dialogShown = false;
+      }
+
+      if (result == null) {
+        return;
+      }
+
+      final summary = StringBuffer('Ingredient import complete: ')
+        ..write('${result.createdCount} added')
+        ..write(', ${result.updatedCount} updated');
+      if (result.skippedCount > 0) {
+        summary.write(', ${result.skippedCount} skipped');
+      }
+      _showSnackBar(summary.toString(), backgroundColor: Colors.green);
+
+      if (result.warnings.isNotEmpty && mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Import Warnings'),
+            content: SizedBox(
+              width: 460,
+              child: ListView(
+                shrinkWrap: true,
+                children: result.warnings
+                    .take(12)
+                    .map(
+                      (warning) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(warning),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
         );
-      },
-      onSuccess: () {
-        if (mounted) Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Excel Import Successful!'), backgroundColor: Colors.green),
+      }
+    } catch (e) {
+      if (dialogShown && mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      _showSnackBar('Ingredient import failed: $e');
+    } finally {
+      progress.dispose();
+      if (mounted) {
+        setState(() => _isImportingIngredients = false);
+      }
+    }
+  }
+
+  Future<void> _handleInventoryExport(BuildContext context) async {
+    try {
+      final selectedFormat = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text(
+            'Export Inventory',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.table_view, color: Colors.green),
+                title: const Text('CSV Format'),
+                onTap: () => Navigator.pop(ctx, 'csv'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.table_chart, color: Colors.blue),
+                title: const Text('Excel Format'),
+                onTap: () => Navigator.pop(ctx, 'excel'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+                title: const Text('PDF Format'),
+                onTap: () => Navigator.pop(ctx, 'pdf'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (selectedFormat == null || !mounted) {
+        return;
+      }
+
+      final userScope = context.read<UserScopeService>();
+      final branchFilter = context.read<BranchFilterService>();
+      final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+
+      if (branchIds.isEmpty) {
+        _showSnackBar('Select at least one branch before exporting inventory.');
+        return;
+      }
+
+      final range = DateTimeRange(
+        start: DateTime.now().subtract(const Duration(days: 30)),
+        end: DateTime.now(),
+      );
+
+      if (selectedFormat == 'csv') {
+        if (branchIds.length != 1) {
+          _showSnackBar(
+            'CSV inventory export works on one branch at a time. Please select a single branch.',
+            backgroundColor: Colors.orange,
+          );
+          return;
+        }
+
+        final ingredients = await InventoryService().getIngredients(
+          branchIds,
+          isSuperAdmin: userScope.isSuperAdmin,
         );
-      },
-    );
+        if (ingredients.isEmpty) {
+          _showSnackBar(
+            'No inventory items available to export.',
+            backgroundColor: Colors.orange,
+          );
+          return;
+        }
+
+        await CsvExportService.exportInventoryStockFromData(
+          context,
+          ingredients,
+          branchId: branchIds.first,
+        );
+        return;
+      }
+
+      _showSnackBar(
+        'Generating ${selectedFormat.toUpperCase()} report...',
+        backgroundColor: _InvColors.primary,
+      );
+      await ExportReportService.generateReport(
+        context: context,
+        dateRange: range,
+        format: selectedFormat,
+        selectedSections: {'inventory_stock'},
+        branchIds: branchIds,
+        branchFilter: branchFilter,
+        userScope: userScope,
+      );
+    } catch (e) {
+      _showSnackBar('Inventory export failed: $e');
+    }
   }
 
   void _openAddIngredientForm(BuildContext context) {
     final userScope = Provider.of<UserScopeService>(context, listen: false);
-    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
+    final branchFilter =
+        Provider.of<BranchFilterService>(context, listen: false);
     final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    final effectiveBranchIds =
+        branchIds.isNotEmpty ? branchIds : userScope.branchIds;
+
+    if (effectiveBranchIds.isEmpty) {
+      _showSnackBar('Select at least one branch before adding an ingredient.');
+      return;
+    }
 
     showModalBottomSheet(
       context: context,
@@ -132,9 +336,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
       backgroundColor: Colors.transparent,
       builder: (_) => IngredientFormSheet(
         existing: null,
-        branchIds: userScope.branchIds.isNotEmpty
-            ? userScope.branchIds
-            : branchIds,
+        branchIds: effectiveBranchIds,
         service: IngredientService(),
       ),
     );
@@ -160,13 +362,16 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
               padding: const EdgeInsets.fromLTRB(24, 4, 24, 12),
               child: TextField(
                 controller: _searchController,
-                style: const TextStyle(color: _InvColors.textMain, fontSize: 14),
+                style:
+                    const TextStyle(color: _InvColors.textMain, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: isCategoryTab
                       ? 'Search categories by name...'
                       : 'Search menu items by name...',
-                  hintStyle: const TextStyle(color: _InvColors.textMuted, fontSize: 14),
-                  prefixIcon: const Icon(Icons.search_rounded, color: _InvColors.textMuted),
+                  hintStyle: const TextStyle(
+                      color: _InvColors.textMuted, fontSize: 14),
+                  prefixIcon: const Icon(Icons.search_rounded,
+                      color: _InvColors.textMuted),
                   filled: true,
                   fillColor: _InvColors.bgDark,
                   border: OutlineInputBorder(
@@ -183,7 +388,8 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                   ),
                   contentPadding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                onChanged: (v) => setState(() => _searchQuery = v.toLowerCase()),
+                onChanged: (v) =>
+                    setState(() => _searchQuery = v.toLowerCase()),
               ),
             ),
           // ─── Tab Content ───────────────────────────────────────────
@@ -210,7 +416,8 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
     );
   }
 
-  Widget _buildHeader(int idx, bool isCategoryTab, bool isMenuTab, bool isRecipeTab) {
+  Widget _buildHeader(
+      int idx, bool isCategoryTab, bool isMenuTab, bool isRecipeTab) {
     return Container(
       padding: const EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 16),
       decoration: BoxDecoration(
@@ -271,16 +478,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                   _headerButton(
                     icon: Icons.download_rounded,
                     label: 'Export',
-                    onTap: () {
-                      final range = DateTimeRange(
-                        start: DateTime.now().subtract(const Duration(days: 30)),
-                        end: DateTime.now(),
-                      );
-                      final userScope = context.read<UserScopeService>();
-                      final branchFilter = context.read<BranchFilterService>();
-                      final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
-                      CsvExportService.exportStockMovements(context, branchIds, range);
-                    },
+                    onTap: () => _handleInventoryExport(context),
                   ),
                   const SizedBox(width: 10),
                 ],
@@ -325,7 +523,8 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                         onTap: () => _tabController.animateTo(i),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
                           decoration: BoxDecoration(
                             color: selected
                                 ? _InvColors.primary.withOpacity(0.15)
@@ -352,7 +551,9 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                                 _tabLabels[i],
                                 style: TextStyle(
                                   fontSize: 13,
-                                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                                  fontWeight: selected
+                                      ? FontWeight.w600
+                                      : FontWeight.w500,
                                   color: selected
                                       ? _InvColors.primary
                                       : _InvColors.textMuted,
@@ -391,13 +592,19 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
             borderRadius: BorderRadius.circular(10),
             border: filled ? null : Border.all(color: _InvColors.borderDark),
             boxShadow: filled
-                ? [BoxShadow(color: _InvColors.primary.withOpacity(0.25), blurRadius: 12)]
+                ? [
+                    BoxShadow(
+                        color: _InvColors.primary.withOpacity(0.25),
+                        blurRadius: 12)
+                  ]
                 : null,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 18, color: filled ? _InvColors.bgDark : _InvColors.textMain),
+              Icon(icon,
+                  size: 18,
+                  color: filled ? _InvColors.bgDark : _InvColors.textMain),
               const SizedBox(width: 6),
               Text(
                 label,
@@ -457,6 +664,11 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
       stream: _service.streamIngredients(branchIds,
           isSuperAdmin: userScope.isSuperAdmin),
       builder: (context, ingSnap) {
+        if (branchIds.isEmpty && !userScope.isSuperAdmin) {
+          return _buildNoBranchState(
+            'Select at least one branch to view inventory insights.',
+          );
+        }
         if (ingSnap.connectionState == ConnectionState.waiting) {
           return Center(
             child: CircularProgressIndicator(color: _InvColors.primary),
@@ -473,10 +685,13 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
         final items = ingSnap.data ?? [];
         final totalValue = items.fold<double>(
           0,
-          (sum, i) => sum + (i.currentStock * i.costPerUnit),
+          (total, i) =>
+              total + (i.getStockForBranches(branchIds) * i.costPerUnit),
         );
-        final lowCount = items.where((i) => i.isLowStock).length;
-        final outCount = items.where((i) => i.isOutOfStock).length;
+        final lowCount =
+            items.where((i) => i.isLowStockForBranches(branchIds)).length;
+        final outCount =
+            items.where((i) => i.isOutOfStockForBranches(branchIds)).length;
         final expiringCount =
             items.where((i) => i.isExpiringSoon || i.isExpired).length;
 
@@ -535,11 +750,17 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                       const SizedBox(height: 14),
                       Row(
                         children: [
-                          Expanded(child: _countTile('Received', received, Colors.green)),
+                          Expanded(
+                              child: _countTile(
+                                  'Received', received, Colors.green)),
                           const SizedBox(width: 10),
-                          Expanded(child: _countTile('Deducted', deducted, Colors.red)),
+                          Expanded(
+                              child:
+                                  _countTile('Deducted', deducted, Colors.red)),
                           const SizedBox(width: 10),
-                          Expanded(child: _countTile('Adjustments', adjusted, Colors.orange)),
+                          Expanded(
+                              child: _countTile(
+                                  'Adjustments', adjusted, Colors.orange)),
                         ],
                       ),
                     ],
@@ -553,7 +774,9 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                     onPressed: widget.onGoStockList,
                     child: Text(
                       'View All',
-                      style: TextStyle(color: _InvColors.primary, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                          color: _InvColors.primary,
+                          fontWeight: FontWeight.w600),
                     ),
                   ),
                   child: movements.isEmpty
@@ -566,14 +789,17 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                         )
                       : Column(
                           children: movements.take(10).map((m) {
-                            final qty = (m['quantity'] as num?)?.toDouble() ?? 0.0;
-                            final createdAt = (m['createdAt'] as Timestamp?)?.toDate();
+                            final qty =
+                                (m['quantity'] as num?)?.toDouble() ?? 0.0;
+                            final createdAt =
+                                (m['createdAt'] as Timestamp?)?.toDate();
                             return Container(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               decoration: BoxDecoration(
                                 border: Border(
                                   bottom: BorderSide(
-                                    color: _InvColors.borderDark.withOpacity(0.5),
+                                    color:
+                                        _InvColors.borderDark.withOpacity(0.5),
                                   ),
                                 ),
                               ),
@@ -583,22 +809,29 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                                     width: 28,
                                     height: 28,
                                     decoration: BoxDecoration(
-                                      color: (qty >= 0 ? Colors.green : Colors.red).withOpacity(0.15),
+                                      color:
+                                          (qty >= 0 ? Colors.green : Colors.red)
+                                              .withOpacity(0.15),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Icon(
-                                      qty >= 0 ? Icons.arrow_downward : Icons.arrow_upward,
-                                      color: qty >= 0 ? Colors.green : Colors.red,
+                                      qty >= 0
+                                          ? Icons.arrow_downward
+                                          : Icons.arrow_upward,
+                                      color:
+                                          qty >= 0 ? Colors.green : Colors.red,
                                       size: 14,
                                     ),
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          (m['ingredientName'] ?? '').toString(),
+                                          (m['ingredientName'] ?? '')
+                                              .toString(),
                                           style: const TextStyle(
                                             fontSize: 13,
                                             fontWeight: FontWeight.w600,
@@ -621,13 +854,20 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                                       Text(
                                         '${qty >= 0 ? '+' : ''}${qty.toStringAsFixed(2)}',
                                         style: TextStyle(
-                                          color: qty >= 0 ? Colors.green : Colors.red,
+                                          color: qty >= 0
+                                              ? Colors.green
+                                              : Colors.red,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 12,
                                         ),
                                       ),
                                       Text(
-                                        createdAt?.toLocal().toString().split('.').first ?? '-',
+                                        createdAt
+                                                ?.toLocal()
+                                                .toString()
+                                                .split('.')
+                                                .first ??
+                                            '-',
                                         style: const TextStyle(
                                           fontSize: 10,
                                           color: _InvColors.textMuted,
@@ -652,14 +892,19 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                       _actionButton(
                         icon: Icons.delete_sweep_outlined,
                         label: 'Log Waste',
-                        onTap: () => Navigator.push(context,
-                            MaterialPageRoute(builder: (_) => const WasteEntryScreenLarge())),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const WasteEntryScreenLarge())),
                       ),
                       _actionButton(
                         icon: Icons.shopping_cart_outlined,
                         label: 'Purchase Order',
-                        onTap: () => Navigator.push(context,
-                            MaterialPageRoute(builder: (_) => const CreatePurchaseOrderScreen())),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    const CreatePurchaseOrderScreen())),
                       ),
                       _actionButton(
                         icon: Icons.fact_check_outlined,
@@ -677,7 +922,10 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
     );
   }
 
-  Widget _actionButton({required IconData icon, required String label, required VoidCallback onTap}) {
+  Widget _actionButton(
+      {required IconData icon,
+      required String label,
+      required VoidCallback onTap}) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -694,9 +942,47 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
             children: [
               Icon(icon, size: 18, color: _InvColors.textMuted),
               const SizedBox(width: 8),
-              Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _InvColors.textMain)),
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: _InvColors.textMain)),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNoBranchState(String message) {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 420),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: _InvColors.surfaceDark,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _InvColors.borderDark),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.account_tree_outlined,
+              size: 34,
+              color: _InvColors.primary,
+            ),
+            const SizedBox(height: 14),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: _InvColors.textMain,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -710,10 +996,14 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? _InvColors.primary.withOpacity(0.15) : _InvColors.bgDark,
+          color: selected
+              ? _InvColors.primary.withOpacity(0.15)
+              : _InvColors.bgDark,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: selected ? _InvColors.primary.withOpacity(0.4) : _InvColors.borderDark,
+            color: selected
+                ? _InvColors.primary.withOpacity(0.4)
+                : _InvColors.borderDark,
           ),
         ),
         child: Text(
@@ -740,7 +1030,8 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
         children: [
           Text(
             value.toString(),
-            style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 20),
+            style: TextStyle(
+                color: color, fontWeight: FontWeight.bold, fontSize: 20),
           ),
           const SizedBox(height: 2),
           Text(
@@ -821,7 +1112,8 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: isAlert ? Colors.red.withOpacity(0.4) : _InvColors.borderDark,
+              color:
+                  isAlert ? Colors.red.withOpacity(0.4) : _InvColors.borderDark,
             ),
           ),
           child: Column(
@@ -917,16 +1209,19 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
     final db = FirebaseFirestore.instance;
 
     final branchFilter = context.watch<BranchFilterService>();
-    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    final filterBranchIds =
+        branchFilter.getFilterBranchIds(userScope.branchIds);
     Query<Map<String, dynamic>> query;
 
     if (filterBranchIds.isNotEmpty) {
       if (filterBranchIds.length == 1) {
-        query = db.collection('menu_categories')
+        query = db
+            .collection('menu_categories')
             .where('branchIds', arrayContains: filterBranchIds.first)
             .orderBy('sortOrder');
       } else {
-        query = db.collection('menu_categories')
+        query = db
+            .collection('menu_categories')
             .where('branchIds', arrayContainsAny: filterBranchIds)
             .orderBy('sortOrder');
       }
@@ -940,169 +1235,281 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
         final catMap = <String, String>{};
         if (catSnap.hasData) {
           for (var doc in catSnap.data!.docs) {
-            catMap[doc.id] = (doc.data() as Map<String, dynamic>)['name'] ?? 'Unnamed';
+            catMap[doc.id] =
+                (doc.data() as Map<String, dynamic>)['name'] ?? 'Unnamed';
           }
         }
         return StreamBuilder<QuerySnapshot>(
           stream: query.snapshots(),
           builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-            child: CircularProgressIndicator(color: _InvColors.primary),
-          );
-        }
-        if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              'Unable to load categories: ${snapshot.error}',
-              style: const TextStyle(color: Colors.red),
-            ),
-          );
-        }
-        final docs = snapshot.data?.docs ?? [];
-        final filtered = docs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          final name = (data['name'] ?? '').toString().toLowerCase();
-          final nameAr = (data['name_ar'] ?? '').toString().toLowerCase();
-          return name.contains(widget.searchQuery) ||
-              nameAr.contains(widget.searchQuery);
-        }).toList();
-
-        if (filtered.isEmpty) {
-          return Center(
-            child: Text(
-              widget.searchQuery.isNotEmpty
-                  ? 'No categories match your search.'
-                  : 'No categories found.',
-              style: const TextStyle(color: _InvColors.textMuted),
-            ),
-          );
-        }
-
-        // ─── Table layout ─────────────────────────────────────────
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Container(
-            decoration: BoxDecoration(
-              color: _InvColors.surfaceDark,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _InvColors.borderDark),
-            ),
-            child: Column(
-              children: [
-                // Header row
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: _InvColors.surfaceLighter,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                  ),
-                  child: const Row(children: [
-                    SizedBox(width: 52),  // image col
-                    Expanded(flex: 3, child: Text('CATEGORY NAME', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
-                    Expanded(flex: 1, child: Text('SORT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
-                    Expanded(flex: 1, child: Text('BRANCHES', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
-                    Expanded(flex: 1, child: Text('STATUS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
-                    SizedBox(width: 100, child: Text('ACTIONS', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
-                  ]),
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Center(
+                child: CircularProgressIndicator(color: _InvColors.primary),
+              );
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Text(
+                  'Unable to load categories: ${snapshot.error}',
+                  style: const TextStyle(color: Colors.red),
                 ),
-                // Data rows
-                ...filtered.map((category) {
-                  final data = category.data() as Map<String, dynamic>;
-                  final isActive = data['isActive'] ?? false;
-                  final imageUrl = data['imageUrl'] as String? ?? '';
-                  final name = data['name'] ?? 'Unnamed';
-                  final nameAr = data['name_ar'] as String? ?? '';
-                  final sortOrder = data['sortOrder'] ?? 0;
-                  final branchIds = List<String>.from(data['branchIds'] ?? []);
+              );
+            }
+            final docs = snapshot.data?.docs ?? [];
+            final filtered = docs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              final name = (data['name'] ?? '').toString().toLowerCase();
+              final nameAr = (data['name_ar'] ?? '').toString().toLowerCase();
+              return name.contains(widget.searchQuery) ||
+                  nameAr.contains(widget.searchQuery);
+            }).toList();
 
-                  return Container(
-                    decoration: BoxDecoration(
-                      border: Border(top: BorderSide(color: _InvColors.borderDark, width: 0.5)),
-                    ),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () => showDialog(context: context, builder: (_) => CategoryDialog(doc: category)),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                          child: Row(children: [
-                            // Image
-                            Container(
-                              width: 40, height: 40,
-                              margin: const EdgeInsets.only(right: 12),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                color: Colors.deepPurple.withOpacity(0.08),
-                              ),
-                              child: imageUrl.isNotEmpty
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(imageUrl, fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => const Icon(Icons.category_rounded, color: Colors.deepPurple, size: 20)),
-                                    )
-                                  : const Icon(Icons.category_rounded, color: Colors.deepPurple, size: 20),
-                            ),
-                            // Name
-                            Expanded(flex: 3, child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: _InvColors.textMain), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                if (nameAr.isNotEmpty)
-                                  Text(nameAr, style: const TextStyle(fontSize: 12, color: _InvColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis, textDirection: TextDirection.rtl),
-                              ],
-                            )),
-                            // Sort Order
-                            Expanded(flex: 1, child: Text('$sortOrder', style: const TextStyle(fontSize: 13, color: _InvColors.textMuted))),
-                            // Branches
-                            Expanded(flex: 1, child: Text('${branchIds.length}', style: const TextStyle(fontSize: 13, color: _InvColors.textMuted))),
-                            // Status
-                            Expanded(flex: 1, child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: isActive ? Colors.green.withOpacity(0.08) : Colors.red.withOpacity(0.08),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: isActive ? Colors.green : Colors.red)),
-                                const SizedBox(width: 6),
-                                Text(isActive ? 'Active' : 'Inactive', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: isActive ? Colors.green.shade700 : Colors.red.shade700)),
-                              ]),
-                            )),
-                            // Actions
-                            SizedBox(width: 100, child: Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.edit_outlined, size: 18),
-                                  color: Colors.deepPurple,
-                                  onPressed: () => showDialog(context: context, builder: (_) => CategoryDialog(doc: category)),
-                                  tooltip: 'Edit',
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                                  color: Colors.red.shade400,
-                                  onPressed: () => _deleteDoc(context, category, 'Category'),
-                                  tooltip: 'Delete',
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                                ),
-                              ],
-                            )),
-                          ]),
-                        ),
+            if (filtered.isEmpty) {
+              return Center(
+                child: Text(
+                  widget.searchQuery.isNotEmpty
+                      ? 'No categories match your search.'
+                      : 'No categories found.',
+                  style: const TextStyle(color: _InvColors.textMuted),
+                ),
+              );
+            }
+
+            // ─── Table layout ─────────────────────────────────────────
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _InvColors.surfaceDark,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _InvColors.borderDark),
+                ),
+                child: Column(
+                  children: [
+                    // Header row
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: _InvColors.surfaceLighter,
+                        borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(12)),
                       ),
+                      child: const Row(children: [
+                        SizedBox(width: 52), // image col
+                        Expanded(
+                            flex: 3,
+                            child: Text('CATEGORY NAME',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.8))),
+                        Expanded(
+                            flex: 1,
+                            child: Text('SORT',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.8))),
+                        Expanded(
+                            flex: 1,
+                            child: Text('BRANCHES',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.8))),
+                        Expanded(
+                            flex: 1,
+                            child: Text('STATUS',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.8))),
+                        SizedBox(
+                            width: 100,
+                            child: Text('ACTIONS',
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.8))),
+                      ]),
                     ),
-                  );
-                }),
-              ],
-            ),
-          ),
+                    // Data rows
+                    ...filtered.map((category) {
+                      final data = category.data() as Map<String, dynamic>;
+                      final isActive = data['isActive'] ?? false;
+                      final imageUrl = data['imageUrl'] as String? ?? '';
+                      final name = data['name'] ?? 'Unnamed';
+                      final nameAr = data['name_ar'] as String? ?? '';
+                      final sortOrder = data['sortOrder'] ?? 0;
+                      final branchIds =
+                          List<String>.from(data['branchIds'] ?? []);
+
+                      return Container(
+                        decoration: BoxDecoration(
+                          border: Border(
+                              top: BorderSide(
+                                  color: _InvColors.borderDark, width: 0.5)),
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => showDialog(
+                                context: context,
+                                builder: (_) => CategoryDialog(doc: category)),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 14),
+                              child: Row(children: [
+                                // Image
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  margin: const EdgeInsets.only(right: 12),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(8),
+                                    color: Colors.deepPurple.withOpacity(0.08),
+                                  ),
+                                  child: imageUrl.isNotEmpty
+                                      ? ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          child: Image.network(imageUrl,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) =>
+                                                  const Icon(
+                                                      Icons.category_rounded,
+                                                      color: Colors.deepPurple,
+                                                      size: 20)),
+                                        )
+                                      : const Icon(Icons.category_rounded,
+                                          color: Colors.deepPurple, size: 20),
+                                ),
+                                // Name
+                                Expanded(
+                                    flex: 3,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(name,
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 14,
+                                                color: _InvColors.textMain),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis),
+                                        if (nameAr.isNotEmpty)
+                                          Text(nameAr,
+                                              style: const TextStyle(
+                                                  fontSize: 12,
+                                                  color: _InvColors.textMuted),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              textDirection: TextDirection.rtl),
+                                      ],
+                                    )),
+                                // Sort Order
+                                Expanded(
+                                    flex: 1,
+                                    child: Text('$sortOrder',
+                                        style: const TextStyle(
+                                            fontSize: 13,
+                                            color: _InvColors.textMuted))),
+                                // Branches
+                                Expanded(
+                                    flex: 1,
+                                    child: Text('${branchIds.length}',
+                                        style: const TextStyle(
+                                            fontSize: 13,
+                                            color: _InvColors.textMuted))),
+                                // Status
+                                Expanded(
+                                    flex: 1,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: isActive
+                                            ? Colors.green.withOpacity(0.08)
+                                            : Colors.red.withOpacity(0.08),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                                width: 6,
+                                                height: 6,
+                                                decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    color: isActive
+                                                        ? Colors.green
+                                                        : Colors.red)),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                                isActive
+                                                    ? 'Active'
+                                                    : 'Inactive',
+                                                style: TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w500,
+                                                    color: isActive
+                                                        ? Colors.green.shade700
+                                                        : Colors.red.shade700)),
+                                          ]),
+                                    )),
+                                // Actions
+                                SizedBox(
+                                    width: 100,
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.edit_outlined,
+                                              size: 18),
+                                          color: Colors.deepPurple,
+                                          onPressed: () => showDialog(
+                                              context: context,
+                                              builder: (_) => CategoryDialog(
+                                                  doc: category)),
+                                          tooltip: 'Edit',
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(
+                                              minWidth: 36, minHeight: 36),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(
+                                              Icons.delete_outline_rounded,
+                                              size: 18),
+                                          color: Colors.red.shade400,
+                                          onPressed: () => _deleteDoc(
+                                              context, category, 'Category'),
+                                          tooltip: 'Delete',
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(
+                                              minWidth: 36, minHeight: 36),
+                                        ),
+                                      ],
+                                    )),
+                              ]),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            );
+          },
         );
-      },
-    );
       },
     );
   }
@@ -1127,16 +1534,19 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
     final db = FirebaseFirestore.instance;
 
     final branchFilter = context.watch<BranchFilterService>();
-    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    final filterBranchIds =
+        branchFilter.getFilterBranchIds(userScope.branchIds);
     Query<Map<String, dynamic>> query;
 
     if (filterBranchIds.isNotEmpty) {
       if (filterBranchIds.length == 1) {
-        query = db.collection('menu_items')
+        query = db
+            .collection('menu_items')
             .where('branchIds', arrayContains: filterBranchIds.first)
             .orderBy('sortOrder');
       } else {
-        query = db.collection('menu_items')
+        query = db
+            .collection('menu_items')
             .where('branchIds', arrayContainsAny: filterBranchIds)
             .orderBy('sortOrder');
       }
@@ -1150,216 +1560,368 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
         final catMap = <String, String>{};
         if (catSnap.hasData) {
           for (var doc in catSnap.data!.docs) {
-            catMap[doc.id] = (doc.data() as Map<String, dynamic>)['name'] ?? 'Unnamed';
+            catMap[doc.id] =
+                (doc.data() as Map<String, dynamic>)['name'] ?? 'Unnamed';
           }
         }
         return StreamBuilder<QuerySnapshot>(
           stream: query.snapshots(),
           builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-            child: CircularProgressIndicator(color: _InvColors.primary),
-          );
-        }
-        if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              'Unable to load menu items: ${snapshot.error}',
-              style: const TextStyle(color: Colors.red),
-            ),
-          );
-        }
-        final docs = snapshot.data?.docs ?? [];
-        final filtered = docs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          final name = (data['name'] ?? '').toString().toLowerCase();
-          final nameAr = (data['name_ar'] ?? '').toString().toLowerCase();
-          return name.contains(widget.searchQuery) ||
-              nameAr.contains(widget.searchQuery);
-        }).toList();
-
-        if (filtered.isEmpty) {
-          return Center(
-            child: Text(
-              widget.searchQuery.isNotEmpty
-                  ? 'No menu items match your search.'
-                  : 'No menu items found.',
-              style: const TextStyle(color: _InvColors.textMuted),
-            ),
-          );
-        }
-
-        // ─── Table layout ─────────────────────────────────────────
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Container(
-            decoration: BoxDecoration(
-              color: _InvColors.surfaceDark,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _InvColors.borderDark),
-            ),
-            child: Column(
-              children: [
-                // Header row
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: _InvColors.surfaceLighter,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                  ),
-                  child: const Row(children: [
-                    SizedBox(width: 52),  // image col
-                    Expanded(flex: 3, child: Text('ITEM NAME', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
-                    Expanded(flex: 2, child: Text('CATEGORY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
-                    Expanded(flex: 1, child: Text('PRICE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
-                    Expanded(flex: 1, child: Text('STATUS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
-                    SizedBox(width: 100, child: Text('ACTIONS', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted, letterSpacing: 0.8))),
-                  ]),
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Center(
+                child: CircularProgressIndicator(color: _InvColors.primary),
+              );
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Text(
+                  'Unable to load menu items: ${snapshot.error}',
+                  style: const TextStyle(color: Colors.red),
                 ),
-                // Data rows
-                ...filtered.map((item) {
-                  final data = item.data() as Map<String, dynamic>;
-                  final isActive = data['isAvailable'] ?? false;
-                  final imageUrl = data['imageUrl'] as String? ?? '';
-                  final name = data['name'] ?? 'Unnamed';
-                  final nameAr = data['name_ar'] as String? ?? '';
-                  final categoryName = catMap[data['categoryId']] ?? 'Uncategorized';
-                  final price = (data['price'] ?? 0).toDouble();
-                  final discountedPrice = (data['discountedPrice'] ?? 0).toDouble();
-                  final hasDiscount = discountedPrice > 0 && discountedPrice < price;
-                  final isPopular = data['isPopular'] ?? false;
+              );
+            }
+            final docs = snapshot.data?.docs ?? [];
+            final filtered = docs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              final name = (data['name'] ?? '').toString().toLowerCase();
+              final nameAr = (data['name_ar'] ?? '').toString().toLowerCase();
+              return name.contains(widget.searchQuery) ||
+                  nameAr.contains(widget.searchQuery);
+            }).toList();
 
-                  return Container(
-                    decoration: BoxDecoration(
-                      border: Border(top: BorderSide(color: _InvColors.borderDark, width: 0.5)),
+            if (filtered.isEmpty) {
+              return Center(
+                child: Text(
+                  widget.searchQuery.isNotEmpty
+                      ? 'No menu items match your search.'
+                      : 'No menu items found.',
+                  style: const TextStyle(color: _InvColors.textMuted),
+                ),
+              );
+            }
+
+            // ─── Table layout ─────────────────────────────────────────
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _InvColors.surfaceDark,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _InvColors.borderDark),
+                ),
+                child: Column(
+                  children: [
+                    // Header row
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: _InvColors.surfaceLighter,
+                        borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(12)),
+                      ),
+                      child: const Row(children: [
+                        SizedBox(width: 52), // image col
+                        Expanded(
+                            flex: 3,
+                            child: Text('ITEM NAME',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.8))),
+                        Expanded(
+                            flex: 2,
+                            child: Text('CATEGORY',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.8))),
+                        Expanded(
+                            flex: 1,
+                            child: Text('PRICE',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.8))),
+                        Expanded(
+                            flex: 1,
+                            child: Text('STATUS',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.8))),
+                        SizedBox(
+                            width: 100,
+                            child: Text('ACTIONS',
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.8))),
+                      ]),
                     ),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => DishEditScreenLarge(doc: item),
+                    // Data rows
+                    ...filtered.map((item) {
+                      final data = item.data() as Map<String, dynamic>;
+                      final isActive = data['isAvailable'] ?? false;
+                      final imageUrl = data['imageUrl'] as String? ?? '';
+                      final name = data['name'] ?? 'Unnamed';
+                      final nameAr = data['name_ar'] as String? ?? '';
+                      final categoryName =
+                          catMap[data['categoryId']] ?? 'Uncategorized';
+                      final price = (data['price'] ?? 0).toDouble();
+                      final discountedPrice =
+                          (data['discountedPrice'] ?? 0).toDouble();
+                      final hasDiscount =
+                          discountedPrice > 0 && discountedPrice < price;
+                      final isPopular = data['isPopular'] ?? false;
+
+                      return Container(
+                        decoration: BoxDecoration(
+                          border: Border(
+                              top: BorderSide(
+                                  color: _InvColors.borderDark, width: 0.5)),
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => DishEditScreenLarge(doc: item),
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 14),
+                              child: Row(children: [
+                                // Image
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  margin: const EdgeInsets.only(right: 12),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(8),
+                                    color: Colors.amber.withOpacity(0.08),
+                                  ),
+                                  child: imageUrl.isNotEmpty
+                                      ? ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          child: Image.network(imageUrl,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) =>
+                                                  Icon(Icons.fastfood_rounded,
+                                                      color:
+                                                          Colors.amber.shade600,
+                                                      size: 20)),
+                                        )
+                                      : Icon(Icons.fastfood_rounded,
+                                          color: Colors.amber.shade600,
+                                          size: 20),
+                                ),
+                                // Name
+                                Expanded(
+                                    flex: 3,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(children: [
+                                          Flexible(
+                                              child: Text(name,
+                                                  style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      fontSize: 14,
+                                                      color:
+                                                          _InvColors.textMain),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis)),
+                                          if (isPopular) ...[
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2),
+                                              decoration: BoxDecoration(
+                                                  color: Colors.amber
+                                                      .withOpacity(0.12),
+                                                  borderRadius:
+                                                      BorderRadius.circular(8)),
+                                              child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(Icons.star_rounded,
+                                                        size: 12,
+                                                        color: Colors
+                                                            .amber.shade700),
+                                                    const SizedBox(width: 2),
+                                                    Text('Popular',
+                                                        style: TextStyle(
+                                                            fontSize: 10,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            color: Colors.amber
+                                                                .shade700)),
+                                                  ]),
+                                            ),
+                                          ],
+                                        ]),
+                                        if (nameAr.isNotEmpty)
+                                          Text(nameAr,
+                                              style: const TextStyle(
+                                                  fontSize: 12,
+                                                  color: _InvColors.textMuted),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              textDirection: TextDirection.rtl),
+                                      ],
+                                    )),
+                                // Category
+                                Expanded(
+                                  flex: 2,
+                                  child: categoryName.isNotEmpty
+                                      ? Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.deepPurple
+                                                .withOpacity(0.08),
+                                            borderRadius:
+                                                BorderRadius.circular(6),
+                                          ),
+                                          child: Text(categoryName,
+                                              style: const TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: Colors.deepPurple),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis),
+                                        )
+                                      : const Text('—',
+                                          style: TextStyle(
+                                              color: _InvColors.textMuted)),
+                                ),
+                                // Price
+                                Expanded(
+                                    flex: 1,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'QAR ${(hasDiscount ? discountedPrice : price).toStringAsFixed(2)}',
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600,
+                                              color: hasDiscount
+                                                  ? Colors.green.shade700
+                                                  : _InvColors.textMain),
+                                        ),
+                                        if (hasDiscount)
+                                          Text(
+                                              'QAR ${price.toStringAsFixed(2)}',
+                                              style: const TextStyle(
+                                                  fontSize: 11,
+                                                  color: _InvColors.textMuted,
+                                                  decoration: TextDecoration
+                                                      .lineThrough)),
+                                      ],
+                                    )),
+                                // Status
+                                Expanded(
+                                    flex: 1,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: isActive
+                                            ? Colors.green.withOpacity(0.08)
+                                            : Colors.red.withOpacity(0.08),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                                width: 6,
+                                                height: 6,
+                                                decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    color: isActive
+                                                        ? Colors.green
+                                                        : Colors.red)),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                                isActive
+                                                    ? 'Active'
+                                                    : 'Inactive',
+                                                style: TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w500,
+                                                    color: isActive
+                                                        ? Colors.green.shade700
+                                                        : Colors.red.shade700)),
+                                          ]),
+                                    )),
+                                // Actions
+                                SizedBox(
+                                    width: 100,
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.edit_outlined,
+                                              size: 18),
+                                          color: Colors.deepPurple,
+                                          onPressed: () => Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  DishEditScreenLarge(
+                                                      doc: item),
+                                            ),
+                                          ),
+                                          tooltip: 'Edit',
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(
+                                              minWidth: 36, minHeight: 36),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(
+                                              Icons.delete_outline_rounded,
+                                              size: 18),
+                                          color: Colors.red.shade400,
+                                          onPressed: () => _deleteDoc(
+                                              context, item, 'Menu item'),
+                                          tooltip: 'Delete',
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(
+                                              minWidth: 36, minHeight: 36),
+                                        ),
+                                      ],
+                                    )),
+                              ]),
+                            ),
                           ),
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                          child: Row(children: [
-                            // Image
-                            Container(
-                              width: 40, height: 40,
-                              margin: const EdgeInsets.only(right: 12),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                color: Colors.amber.withOpacity(0.08),
-                              ),
-                              child: imageUrl.isNotEmpty
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(imageUrl, fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => Icon(Icons.fastfood_rounded, color: Colors.amber.shade600, size: 20)),
-                                    )
-                                  : Icon(Icons.fastfood_rounded, color: Colors.amber.shade600, size: 20),
-                            ),
-                            // Name
-                            Expanded(flex: 3, child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(children: [
-                                  Flexible(child: Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: _InvColors.textMain), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                                  if (isPopular) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(color: Colors.amber.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
-                                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                        Icon(Icons.star_rounded, size: 12, color: Colors.amber.shade700),
-                                        const SizedBox(width: 2),
-                                        Text('Popular', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.amber.shade700)),
-                                      ]),
-                                    ),
-                                  ],
-                                ]),
-                                if (nameAr.isNotEmpty)
-                                  Text(nameAr, style: const TextStyle(fontSize: 12, color: _InvColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis, textDirection: TextDirection.rtl),
-                              ],
-                            )),
-                            // Category
-                            Expanded(flex: 2, child: categoryName.isNotEmpty
-                              ? Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.deepPurple.withOpacity(0.08),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(categoryName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.deepPurple), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                )
-                              : const Text('—', style: TextStyle(color: _InvColors.textMuted)),
-                            ),
-                            // Price
-                            Expanded(flex: 1, child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'QAR ${(hasDiscount ? discountedPrice : price).toStringAsFixed(2)}',
-                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: hasDiscount ? Colors.green.shade700 : _InvColors.textMain),
-                                ),
-                                if (hasDiscount)
-                                  Text('QAR ${price.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: _InvColors.textMuted, decoration: TextDecoration.lineThrough)),
-                              ],
-                            )),
-                            // Status
-                            Expanded(flex: 1, child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: isActive ? Colors.green.withOpacity(0.08) : Colors.red.withOpacity(0.08),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: isActive ? Colors.green : Colors.red)),
-                                const SizedBox(width: 6),
-                                Text(isActive ? 'Active' : 'Inactive', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: isActive ? Colors.green.shade700 : Colors.red.shade700)),
-                              ]),
-                            )),
-                            // Actions
-                            SizedBox(width: 100, child: Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.edit_outlined, size: 18),
-                                  color: Colors.deepPurple,
-                                  onPressed: () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => DishEditScreenLarge(doc: item),
-                                    ),
-                                  ),
-                                  tooltip: 'Edit',
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                                  color: Colors.red.shade400,
-                                  onPressed: () => _deleteDoc(context, item, 'Menu item'),
-                                  tooltip: 'Delete',
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                                ),
-                              ],
-                            )),
-                          ]),
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            );
+          },
         );
-      },
-    );
       },
     );
   }

@@ -6,7 +6,7 @@ import '../main.dart'; // Imports UserScopeService
 import '../constants.dart'; // For OrderNumberHelper
 import '../Widgets/BranchFilterService.dart';
 import '../Widgets/PrintingService.dart';
-import 'dart:html' as html; // For web CSV download
+import '../utils/web_download.dart';
 import 'dart:convert';
 
 class OrderHistoryScreen extends StatefulWidget {
@@ -971,12 +971,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
     String csv = rows.map((e) => e.join(',')).join('\n');
     final bytes = utf8.encode(csv);
-    final blob = html.Blob([bytes]);
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    final anchor = html.AnchorElement(href: url)
-      ..setAttribute("download", "orders_export_${DateTime.now().millisecondsSinceEpoch}.csv")
-      ..click();
-    html.Url.revokeObjectUrl(url);
+    downloadCsvBytes(bytes, 'orders_export_${DateTime.now().millisecondsSinceEpoch}.csv');
     
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('CSV Export Started'), backgroundColor: Colors.green),

@@ -7,6 +7,10 @@ const { CloudTasksClient } = require("@google-cloud/tasks");
 const { logger } = require("firebase-functions");
 const admin = require("firebase-admin");
 const { DateTime } = require("luxon"); // <--- Timezone handling
+const {
+    validateTimezone,
+    evaluateBranchSchedule,
+} = require("./scheduleUtils");
 
 // --- GLOBAL OPTIONS (Fix for Quota Exceeded) ---
 setGlobalOptions({ maxInstances: 10 });
@@ -511,76 +515,6 @@ exports.handleOrderCancellation = onDocumentUpdated(
     }
 );
 
-// -------------------- HELPER: Normalize time format --------------------
-// Handles various formats: "9:00", "09:0", "9:0", "09:00"
-function normalizeTimeFormat(timeStr) {
-    if (!timeStr || typeof timeStr !== 'string') return null;
-
-    const parts = timeStr.split(':');
-    if (parts.length !== 2) return null;
-
-    const hours = parseInt(parts[0], 10);
-    const minutes = parseInt(parts[1], 10);
-
-    if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
-        return null;
-    }
-
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-}
-
-// -------------------- HELPER: Check if time is within a slot --------------------
-function isWithinSlot(now, openStr, closeStr, timezone, dayOffset) {
-    try {
-        // Normalize time formats
-        const normalizedOpen = normalizeTimeFormat(openStr);
-        const normalizedClose = normalizeTimeFormat(closeStr);
-
-        if (!normalizedOpen || !normalizedClose) {
-            logger.warn(`Invalid time format: open='${openStr}', close='${closeStr}'`);
-            return { isWithin: false };
-        }
-
-        const baseDate = now.plus({ days: dayOffset });
-
-        let openTime = DateTime.fromFormat(normalizedOpen, "HH:mm", { zone: timezone })
-            .set({ year: baseDate.year, month: baseDate.month, day: baseDate.day });
-
-        let closeTime = DateTime.fromFormat(normalizedClose, "HH:mm", { zone: timezone })
-            .set({ year: baseDate.year, month: baseDate.month, day: baseDate.day });
-
-        // Handle overnight shift (close <= open means next day)
-        if (closeTime <= openTime) {
-            closeTime = closeTime.plus({ days: 1 });
-        }
-
-        const isWithin = now >= openTime && now < closeTime;
-        return { isWithin, openTime, closeTime };
-    } catch (e) {
-        logger.warn(`isWithinSlot error: ${e.message}`);
-        return { isWithin: false };
-    }
-}
-
-// -------------------- HELPER: Validate timezone --------------------
-function validateTimezone(tz, branchId) {
-    if (!tz || typeof tz !== 'string' || tz.trim() === '') {
-        logger.warn(`[${branchId}] Empty timezone, falling back to UTC`);
-        return 'UTC';
-    }
-
-    try {
-        const testDate = DateTime.now().setZone(tz);
-        if (!testDate.isValid) {
-            throw new Error('Invalid zone');
-        }
-        return tz;
-    } catch (e) {
-        logger.warn(`[${branchId}] Invalid timezone '${tz}', falling back to UTC`);
-        return 'UTC';
-    }
-}
-
 // -------------------- HELPER: Log status change to history --------------------
 async function logStatusChange(branchRef, branchId, fromStatus, toStatus, reason, triggeredBy) {
     try {
@@ -598,54 +532,26 @@ async function logStatusChange(branchRef, branchId, fromStatus, toStatus, reason
 
 // -------------------- HELPER: Process a single branch --------------------
 function processBranchStatus(data, branchId) {
-    const timezone = validateTimezone(data.timezone || 'UTC', branchId);
-    const workingHours = data.workingHours;
-    const currentIsOpen = data.isOpen || false;
-    const manuallyClosed = data.manuallyClosed || false;
-    const manuallyOpened = data.manuallyOpened || false;
+    const rawTimezone = data.timezone || 'UTC';
+    const timezone = validateTimezone(rawTimezone);
+    if (timezone !== rawTimezone) {
+        logger.warn(`[${branchId}] Invalid timezone '${rawTimezone}', falling back to UTC`);
+    }
 
-    // If no schedule exists or empty, skip (assume manual control only)
-    if (!workingHours || Object.keys(workingHours).length === 0) {
+    const scheduleEvaluation = evaluateBranchSchedule({
+        timezone,
+        workingHours: data.workingHours,
+        holidayClosures: data.holidayClosures,
+    });
+    const currentIsOpen = data.isOpen === true;
+    const manuallyClosed = data.manuallyClosed === true;
+    const manuallyOpened = data.manuallyOpened === true;
+
+    if (!scheduleEvaluation.hasScheduleControl) {
         return null;
     }
 
-    // Get current time in branch's timezone
-    const now = DateTime.now().setZone(timezone);
-    const currentDayName = now.weekdayLong.toLowerCase();
-
-    // Determine if it SHOULD be open right now based on SCHEDULE
-    let isScheduledOpen = false;
-
-    // Check today's schedule
-    const todaySchedule = workingHours[currentDayName];
-    if (todaySchedule && todaySchedule.isOpen === true && Array.isArray(todaySchedule.slots)) {
-        for (const slot of todaySchedule.slots) {
-            if (!slot.open || !slot.close) continue;
-            const result = isWithinSlot(now, slot.open, slot.close, timezone, 0);
-            if (result.isWithin) {
-                isScheduledOpen = true;
-                break;
-            }
-        }
-    }
-
-    // Check yesterday's overnight slots extending into today
-    if (!isScheduledOpen) {
-        const yesterday = now.minus({ days: 1 });
-        const yesterdayName = yesterday.weekdayLong.toLowerCase();
-        const yesterdaySchedule = workingHours[yesterdayName];
-
-        if (yesterdaySchedule && yesterdaySchedule.isOpen === true && Array.isArray(yesterdaySchedule.slots)) {
-            for (const slot of yesterdaySchedule.slots) {
-                if (!slot.open || !slot.close) continue;
-                const result = isWithinSlot(now, slot.open, slot.close, timezone, -1);
-                if (result.isWithin) {
-                    isScheduledOpen = true;
-                    break;
-                }
-            }
-        }
-    }
+    const isScheduledOpen = scheduleEvaluation.isScheduledOpen;
 
     // DECISION LOGIC with Manual Overrides
     let finalShouldBeOpen = isScheduledOpen;
@@ -658,7 +564,7 @@ function processBranchStatus(data, branchId) {
             finalShouldBeOpen = false;
             statusReason = 'Manually Closed (Override)';
         } else {
-            statusReason = 'Auto-Opened by Schedule';
+            statusReason = scheduleEvaluation.openReason;
         }
         // Reset manuallyOpened flag since schedule is now open anyway
         if (manuallyOpened) {
@@ -670,7 +576,7 @@ function processBranchStatus(data, branchId) {
             finalShouldBeOpen = true;
             statusReason = 'Manually Opened (Override)';
         } else {
-            statusReason = 'Auto-Closed by Schedule';
+            statusReason = scheduleEvaluation.closedReason;
         }
         // Reset manuallyClosed flag since schedule naturally closed
         if (manuallyClosed) {
@@ -700,6 +606,8 @@ function processBranchStatus(data, branchId) {
         isScheduledOpen,
         manuallyClosed,
         manuallyOpened,
+        scheduleIssues: scheduleEvaluation.issues,
+        scheduleSource: scheduleEvaluation.holidayOverride?.type || 'working_hours',
     };
 }
 
@@ -2293,10 +2201,11 @@ function formatOrderNumber(prefix, businessDate, sequenceNumber) {
 }
 
 /**
- * FUNCTION 6: Generate Daily Order Number (Per Branch)
+ * FUNCTION 6: Generate Daily Order Number
  * 
  * Industry-Grade Features:
  * - Formatted order numbers: {PREFIX}-{YYMMDD}-{NNN}
+ * - One shared sequence for every order source in the same branch/business day
  * - Branch-specific prefixes for easy identification
  * - Business day logic (configurable reset hour)
  * - Timezone-aware using branch configuration
@@ -2310,10 +2219,11 @@ function formatOrderNumber(prefix, businessDate, sequenceNumber) {
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 
 /**
- * FUNCTION 6: Generate Daily Order Number (Per Branch)
+ * FUNCTION 6: Generate Daily Order Number
  * 
  * Industry-Grade Features:
  * - Formatted order numbers: {PREFIX}-{YYMMDD}-{NNN}
+ * - One shared sequence for every order source in the same branch/business day
  * - Branch-specific prefixes for easy identification
  * - Business day logic (configurable reset hour)
  * - Timezone-aware using branch configuration
@@ -2334,8 +2244,13 @@ exports.generateOrderNumber = onDocumentWritten(
         const orderData = event.data.after.data();
         const orderId = event.params.orderId;
 
-        // 2. IDEMPOTENCY CHECK: If already has a number, STOP IMMEDIATELY
-        if (orderData.dailyOrderNumber) {
+        // 2. IDEMPOTENCY CHECK:
+        // Only skip when a final formatted order number is already assigned.
+        // Legacy POS clients may still write an integer here; we intentionally
+        // replace that with the shared backend-generated sequence.
+        const existingDailyOrderNumber = orderData.dailyOrderNumber;
+        if (typeof existingDailyOrderNumber === 'string' &&
+            existingDailyOrderNumber.trim() !== '') {
             return;
         }
 
@@ -2381,7 +2296,10 @@ exports.generateOrderNumber = onDocumentWritten(
 
                     // Get timezone
                     if (branchData.timezone) {
-                        branchTimezone = validateTimezone(branchData.timezone, branchId);
+                        branchTimezone = validateTimezone(branchData.timezone);
+                        if (branchTimezone !== branchData.timezone) {
+                            logger.warn(`[${branchId}] Invalid timezone '${branchData.timezone}', using UTC for order numbering`);
+                        }
                     }
 
                     // Get reset hour
@@ -2510,21 +2428,34 @@ exports.onBranchScheduleUpdate = onDocumentUpdated(
         const afterData = event.data.after.data();
         const branchId = event.params.branchId;
 
-        // Only trigger if workingHours actually changed
-        const beforeHours = JSON.stringify(beforeData.workingHours || {});
-        const afterHours = JSON.stringify(afterData.workingHours || {});
+        const beforeScheduleInputs = JSON.stringify({
+            workingHours: beforeData.workingHours || {},
+            holidayClosures: beforeData.holidayClosures || [],
+            timezone: beforeData.timezone || 'UTC',
+        });
+        const afterScheduleInputs = JSON.stringify({
+            workingHours: afterData.workingHours || {},
+            holidayClosures: afterData.holidayClosures || [],
+            timezone: afterData.timezone || 'UTC',
+        });
 
-        if (beforeHours === afterHours) {
+        if (beforeScheduleInputs === afterScheduleInputs) {
             return;
         }
 
-        logger.log(`[${branchId}] Schedule changed, recalculating status immediately...`);
+        logger.log(`[${branchId}] Scheduling inputs changed, recalculating status immediately...`);
 
         const result = processBranchStatus(afterData, branchId);
 
         if (!result) {
             // No schedule or no change needed
             return;
+        }
+
+        if (Array.isArray(result.scheduleIssues) && result.scheduleIssues.length > 0) {
+            logger.warn(
+                `[${branchId}] Scheduling data issues detected: ${result.scheduleIssues.slice(0, 5).join(' | ')}`
+            );
         }
 
         // When schedule changes, we update status and optionally reset manual flags
@@ -2539,8 +2470,8 @@ exports.onBranchScheduleUpdate = onDocumentUpdated(
             updateData.manuallyClosed = false;
             updateData.manuallyOpened = false;
             updateData.statusReason = result.toStatus
-                ? 'Auto-Opened (Schedule Changed)'
-                : 'Auto-Closed (Schedule Changed)';
+                ? 'Auto-Opened (Scheduling Changed)'
+                : 'Auto-Closed (Scheduling Changed)';
         }
 
         if (Object.keys(updateData).length === 0) {
@@ -2556,7 +2487,7 @@ exports.onBranchScheduleUpdate = onDocumentUpdated(
                 branchId,
                 result.fromStatus,
                 result.toStatus,
-                'Schedule Changed',
+                'Scheduling Changed',
                 'schedule_update_trigger'
             );
             logger.log(`[${branchId}] Immediate update: ${result.fromStatus} → ${result.toStatus}`);

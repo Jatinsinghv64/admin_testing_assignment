@@ -46,7 +46,7 @@ class _RidersScreenState extends State<RidersScreen> {
 
     // --- 2. Build Branch-Scoped Query ---
     Query<Map<String, dynamic>> baseQuery =
-        FirebaseFirestore.instance.collection('Drivers').orderBy('name');
+        FirebaseFirestore.instance.collection('staff').where('staffType', isEqualTo: 'driver').orderBy('name');
 
     // Get branch IDs properly from filter service
     // Note: We need to access branchFilter here. Since it wasn't watched in original code, we should technically check if it's available or use userScope fallback.
@@ -327,7 +327,7 @@ class _RidersScreenState extends State<RidersScreen> {
     final branchFilter =
         Provider.of<BranchFilterService>(context); // Listen to branch changes
     Query<Map<String, dynamic>> query =
-        FirebaseFirestore.instance.collection('Drivers');
+        FirebaseFirestore.instance.collection('staff').where('staffType', isEqualTo: 'driver');
 
     final filterBranchIds =
         branchFilter.getFilterBranchIds(userScope.branchIds);
@@ -1563,7 +1563,7 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
     setState(() => _isActionLoading = true);
     try {
       await FirebaseFirestore.instance
-          .collection('Drivers')
+          .collection('staff')
           .doc(widget.driver.id)
           .update({
         'isAvailable': !driverInfo.isAvailable,
@@ -1682,7 +1682,7 @@ class _EnhancedDriverCardState extends State<EnhancedDriverCard>
   Future<void> _deleteDriverDoc(BuildContext context) async {
     try {
       await FirebaseFirestore.instance
-          .collection('Drivers')
+          .collection('staff')
           .doc(widget.driver.id)
           .delete();
       if (mounted) {
@@ -1919,8 +1919,9 @@ class _DriverDialogState extends State<_DriverDialog> {
         if (docId.isEmpty) {
           throw Exception('Email is required to create a new driver.');
         }
+        driverData['staffType'] = 'driver';
         await FirebaseFirestore.instance
-            .collection('Drivers')
+            .collection('staff')
             .doc(docId)
             .set(driverData);
       }
@@ -3082,7 +3083,7 @@ class _DriverDetailsBottomSheetState extends State<_DriverDetailsBottomSheet> {
       BuildContext context, DriverInfo driverInfo) async {
     try {
       await FirebaseFirestore.instance
-          .collection('Drivers')
+          .collection('staff')
           .doc(widget.driver.id)
           .update({
         'isAvailable': !driverInfo.isAvailable,

@@ -63,7 +63,12 @@ class OrderService {
         AppConstants.statusRiderAssigned,
         AppConstants.statusPickedUp,
       ]).orderBy('timestamp', descending: false); // Oldest first for KDS
-    } else if (status == 'all') {
+      
+      return arrayQuery.snapshots().map((snapshot) => snapshot.docs);
+    } else {
+      // Order screens should only show current day orders by default 
+      // Handled efficiently by querying the time slice and filtering status locally 
+      // This also fully encompasses orders placed late (e.g. 11:59PM) or early morning (e.g. 2AM) based on Business Day logic
       final startOfBusinessDay = TimeUtils.getBusinessStartTimestamp();
       final endOfBusinessDay = TimeUtils.getBusinessEndTimestamp();
 
@@ -71,14 +76,19 @@ class OrderService {
           .where('timestamp', isGreaterThanOrEqualTo: startOfBusinessDay)
           .where('timestamp', isLessThan: endOfBusinessDay)
           .orderBy('timestamp', descending: true);
-    } else {
-      final normalizedStatus = AppConstants.normalizeStatus(status);
-      arrayQuery = arrayQuery
-          .where('status', isEqualTo: normalizedStatus)
-          .orderBy('timestamp', descending: true);
-    }
 
-    return arrayQuery.snapshots().map((snapshot) => snapshot.docs);
+      return arrayQuery.snapshots().map((snapshot) {
+        if (status != 'all') {
+          final normalizedStatus = AppConstants.normalizeStatus(status);
+          return snapshot.docs.where((doc) {
+            final docData = doc.data();
+            final docStatus = AppConstants.normalizeStatus((docData['status'] ?? '').toString());
+            return docStatus == normalizedStatus;
+          }).toList();
+        }
+        return snapshot.docs;
+      });
+    }
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> getTodayOrdersStream({
@@ -94,12 +104,12 @@ class OrderService {
         .snapshots();
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> getActiveDriversStream({
+  Stream<QuerySnapshot<Map<String, dynamic>>> getActiveRidersStream({
     required UserScopeService userScope,
     List<String>? filterBranchIds,
   }) {
     Query<Map<String, dynamic>> query = _db
-        .collection(AppConstants.collectionDrivers)
+        .collection(AppConstants.collectionStaff).where('staffType', isEqualTo: 'rider')
         .where('isAvailable', isEqualTo: true);
     query = _applyBranchFilter(query, userScope, filterBranchIds);
     return query.snapshots();
@@ -263,7 +273,7 @@ class OrderService {
 
             final String? riderId = data['riderId'];
             if (riderId != null && riderId.isNotEmpty) {
-              final driverRef = _db.collection(AppConstants.collectionDrivers).doc(riderId);
+              final driverRef = _db.collection(AppConstants.collectionStaff).doc(riderId);
               transaction.update(driverRef, {
                 'assignedOrderId': '',
                 'isAvailable': true,
@@ -313,7 +323,7 @@ class OrderService {
 
               final String? oldRiderId = data['riderId'];
               if (oldRiderId != null && oldRiderId.isNotEmpty) {
-                final driverRef = _db.collection(AppConstants.collectionDrivers).doc(oldRiderId);
+                final driverRef = _db.collection(AppConstants.collectionStaff).doc(oldRiderId);
                 transaction.update(driverRef, {
                   'assignedOrderId': '',
                   'isAvailable': true,
@@ -391,7 +401,7 @@ class OrderService {
               final String? riderId = data['riderId'] as String?;
 
               if (orderType == 'delivery' && riderId != null && riderId.isNotEmpty) {
-                final driverRef = _db.collection(AppConstants.collectionDrivers).doc(riderId);
+                final driverRef = _db.collection(AppConstants.collectionStaff).doc(riderId);
                 transaction.update(driverRef, {
                   'assignedOrderId': '',
                   'isAvailable': true,

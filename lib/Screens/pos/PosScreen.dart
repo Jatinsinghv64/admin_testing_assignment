@@ -17,9 +17,11 @@ import '../../Widgets/PrintingService.dart';
 import 'PosProductTile.dart';
 import 'PosCartPanel.dart';
 import 'pos_payment_dialog.dart';
+import 'pos_register_dialog.dart';
 import 'DeliveryOrdersPanel.dart';
 import 'DineInFloorPlanPanel.dart';
 import 'components/VariantSelectionDialog.dart';
+import '../../services/pos/pos_register_service.dart';
 
 enum PosViewMode { pos, delivery, dineIn }
 
@@ -46,9 +48,17 @@ class _PosScreenState extends State<PosScreen> {
   String? _kitchenCancellationBranchId;
   bool _isKitchenCancellationWatcherPrimed = false;
   bool _isKitchenCancellationDialogOpen = false;
+  bool _isProductTapping = false; // Guard to prevent duplicate popups on fast taps
+  bool _isRegisterDialogOpen = false; // Guard to prevent duplicate register dialogs (open OR close)
+  bool _optedOutRegisterOpen = false; // User cancelled register opening
 
   // ── POS ↔ Delivery ↔ Dine In Toggle ──
   PosViewMode _viewMode = PosViewMode.pos;
+
+  // ── Register Session ──
+  final PosRegisterService _registerService = PosRegisterService();
+  PosRegisterSession? _currentRegisterSession;
+  // REMOVED: bool _registerChecked = false; in favor of _checkedBranchId
 
   // ── Stream Caching ──
   Stream<QuerySnapshot>? _categoryStream;
@@ -57,6 +67,10 @@ class _PosScreenState extends State<PosScreen> {
   Stream<QuerySnapshot>? _productStream;
   String? _lastProductBranchId;
   String? _lastCategoryId;
+
+  // ── Ingredient Stock Stream (real-time out-of-stock detection) ──
+  Stream<Set<String>>? _ingredientStockStream;
+  String? _lastStockBranchId;
 
   @override
   void dispose() {
@@ -334,7 +348,32 @@ class _PosScreenState extends State<PosScreen> {
           pos.setActiveBranch(globalBranchId);
         }
       });
-      return builder(globalBranchId);
+      // Wrap POS content with reactive register stream
+      return StreamBuilder<PosRegisterSession?>(
+        stream: _registerService.streamOpenSession(globalBranchId),
+        builder: (context, regSnapshot) {
+          // Update local session state reactively
+          final session = regSnapshot.data;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (_currentRegisterSession?.id != session?.id) {
+              setState(() => _currentRegisterSession = session);
+            }
+            // Guard: only show if no register dialog (open or close) is already visible
+            if (regSnapshot.connectionState != ConnectionState.waiting &&
+                session == null &&
+                !_isRegisterDialogOpen &&
+                !_optedOutRegisterOpen) {
+              _showOpenRegisterDialog(context);
+            }
+          });
+          
+          if (session == null && _optedOutRegisterOpen) {
+            return _buildRegisterClosedOverlay();
+          }
+          return builder(globalBranchId);
+        },
+      );
     }
 
     // 2. Otherwise (All Branches or no selection), block POS with an overlay
@@ -413,6 +452,72 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
+  Widget _buildRegisterClosedOverlay() {
+    return Container(
+      color: Colors.grey[100],
+      child: Center(
+        child: Container(
+          width: 480,
+          padding: const EdgeInsets.all(40),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.lock_outline,
+                    size: 56, color: Colors.orange),
+              ),
+              const SizedBox(height: 32),
+              const Text(
+                'Register is Closed',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'You must open the register to start taking orders and managing the POS system.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: Colors.grey[600], fontSize: 16, height: 1.4),
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() => _optedOutRegisterOpen = false); // Will re-trigger StreamBuilder check
+                  },
+                  icon: const Icon(Icons.lock_open),
+                  label: const Text('Open Register Now', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.deepPurple,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── POS Header Bar with Toggle ─────────────────────────────────
   Widget _buildPosHeader(BuildContext context) {
     return Container(
@@ -480,9 +585,163 @@ class _PosScreenState extends State<PosScreen> {
                 ),
               ),
             ),
+          // ── Register Button ──
+          if (_viewMode == PosViewMode.pos) ...[
+            const SizedBox(width: 12),
+            _buildRegisterButton(context),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildRegisterButton(BuildContext context) {
+    final isOpen = _currentRegisterSession != null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: isOpen ? () => _showCloseRegisterDialog(context) : () => _showOpenRegisterDialog(context),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: isOpen ? Colors.green.withValues(alpha: 0.08) : Colors.red.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: isOpen ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8, height: 8,
+                decoration: BoxDecoration(
+                  color: isOpen ? Colors.green : Colors.red,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                isOpen ? 'Register Open' : 'Open Register',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isOpen ? Colors.green[800] : Colors.red[800],
+                ),
+              ),
+              if (isOpen) ...[
+                const SizedBox(width: 6),
+                Icon(Icons.lock_open, size: 14, color: Colors.green[600]),
+              ] else ...[
+                const SizedBox(width: 6),
+                Icon(Icons.lock, size: 14, color: Colors.red[600]),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Register session check is now handled by StreamBuilder in _buildBranchCheckWrapper
+
+  Future<void> _showOpenRegisterDialog(BuildContext context) async {
+    if (_isRegisterDialogOpen) return;
+    if (!mounted) return;
+    _isRegisterDialogOpen = true;
+
+    try {
+      final branchFilter = context.read<BranchFilterService>();
+      final userScope = context.read<UserScopeService>();
+      final activeBranchId = branchFilter.selectedBranchId ??
+          (userScope.branchIds.isNotEmpty ? userScope.branchIds.first : '');
+      if (activeBranchId.isEmpty) {
+        _isRegisterDialogOpen = false;
+        return;
+      }
+
+      final branchName = branchFilter.branchNames[activeBranchId] ?? 'Branch';
+      final result = await showDialog<dynamic>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PosRegisterOpeningDialog(
+          branchId: activeBranchId,
+          branchName: branchName,
+          userEmail: userScope.userEmail,
+          registerService: _registerService,
+        ),
+      );
+      if (result is PosRegisterSession && mounted) {
+        setState(() {
+          _currentRegisterSession = result;
+          _optedOutRegisterOpen = false;
+        });
+      } else if (result == 'cancel' && mounted) {
+        setState(() {
+          _optedOutRegisterOpen = true;
+        });
+      }
+    } finally {
+      // Only reset the guard if dialog was dismissed WITHOUT opening
+      // (i.e. result was null). If opened, StreamBuilder will detect
+      // the session and won't re-trigger.
+      if (mounted) {
+        _isRegisterDialogOpen = false;
+      }
+    }
+  }
+
+  Future<void> _showCloseRegisterDialog(BuildContext context) async {
+    if (_currentRegisterSession == null) return;
+    if (_isRegisterDialogOpen) return;
+    _isRegisterDialogOpen = true;
+
+    // Capture session reference before any async gap
+    final session = _currentRegisterSession!;
+
+    // Show a loading overlay while we calculate sales
+    late final OverlayEntry loadingOverlay;
+    loadingOverlay = OverlayEntry(
+      builder: (_) => Container(
+        color: Colors.black54,
+        child: const Center(child: CircularProgressIndicator(color: Colors.white)),
+      ),
+    );
+    Overlay.of(context).insert(loadingOverlay);
+
+    double totalSales = 0.0;
+    try {
+      totalSales = await _registerService.getSessionSales(
+        session.branchId,
+        session.openedAt,
+      );
+    } catch (e) {
+      debugPrint('Error calculating sales: \$e');
+    } finally {
+      loadingOverlay.remove(); // Always removes the correct overlay
+    }
+
+    if (!mounted) {
+      _isRegisterDialogOpen = false;
+      return;
+    }
+
+    final result = await showDialog<bool?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PosRegisterClosingDialog(
+        session: session,
+        userEmail: context.read<UserScopeService>().userEmail,
+        registerService: _registerService,
+        totalSales: totalSales,
+      ),
+    );
+    if (result == true && mounted) {
+      setState(() {
+        _currentRegisterSession = null;
+        // StreamBuilder will detect null session and re-show dialog
+      });
+    }
+    _isRegisterDialogOpen = false;
   }
 
   // ── Animated POS / Delivery / Dine In Toggle ───────────────────────────────
@@ -732,7 +991,19 @@ class _PosScreenState extends State<PosScreen> {
       _productStream = query.snapshots();
     }
 
-    return StreamBuilder<QuerySnapshot>(
+    // Initialize ingredient stock stream for real-time out-of-stock detection
+    if (_lastStockBranchId != activeBranchId || _ingredientStockStream == null) {
+      _lastStockBranchId = activeBranchId;
+      _ingredientStockStream = _stockAssessmentService
+          .streamMenuItemStockStatuses(branchId: activeBranchId);
+    }
+
+    return StreamBuilder<Set<String>>(
+      stream: _ingredientStockStream,
+      builder: (context, stockSnapshot) {
+        final ingredientOutOfStockIds = stockSnapshot.data ?? <String>{};
+
+        return StreamBuilder<QuerySnapshot>(
       stream: _productStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -748,11 +1019,19 @@ class _PosScreenState extends State<PosScreen> {
                 const SizedBox(height: 12),
                 Text(
                   'Failed to load products',
-                  style: TextStyle(fontSize: 14, color: Colors.red[400]),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () => setState(() {}),
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _productStream = null;
+                    });
+                  },
                   icon: const Icon(Icons.refresh, size: 16),
                   label: const Text('Retry'),
                 ),
@@ -828,6 +1107,9 @@ class _PosScreenState extends State<PosScreen> {
                 List<String>.from(data['outOfStockBranches'] ?? const []);
             final isMarkedOutOfStock =
                 outOfStockBranches.contains(activeBranchId);
+            // Check if any ingredient is out of stock for this branch
+            final isIngredientOutOfStock =
+                ingredientOutOfStockIds.contains(doc.id);
 
             final catId = data['categoryId']?.toString();
             final catName =
@@ -838,77 +1120,133 @@ class _PosScreenState extends State<PosScreen> {
               name: name,
               price: price,
               imageUrl: imageUrl,
-              isAvailable: isAvailable && !isMarkedOutOfStock,
+              isAvailable: isAvailable && !isMarkedOutOfStock && !isIngredientOutOfStock,
               disableTapWhenUnavailable: false,
               unavailableLabel:
-                  isMarkedOutOfStock ? 'Out of Stock' : 'Unavailable',
+                  (isMarkedOutOfStock || isIngredientOutOfStock) ? 'Out of Stock' : 'Unavailable',
               chinColor: chinColor,
-              onTap: () async {
-                if (!isAvailable) {
-                  await _showMenuItemBlockedDialog(
-                    context,
-                    title: 'Dish Unavailable',
-                    message:
-                        '"$name" is currently disabled in menu settings for this branch.',
-                  );
-                  return;
-                }
+                onTap: () async {
+                  if (_isProductTapping) return;
+                  setState(() => _isProductTapping = true);
+                  
+                  try {
+                    if (!isAvailable) {
+                      await _showMenuItemBlockedDialog(
+                        context,
+                        title: 'Dish Unavailable',
+                        message:
+                            '"$name" is currently disabled in menu settings for this branch.',
+                      );
+                      return;
+                    }
 
-                if (isMarkedOutOfStock) {
-                  await _showMenuItemBlockedDialog(
-                    context,
-                    title: 'Out of Stock',
-                    message:
-                        '"$name" is marked out of stock for this branch. Restock its ingredients or update the dish availability before adding it.',
-                  );
-                  return;
-                }
+                    if (isMarkedOutOfStock) {
+                      await _showMenuItemBlockedDialog(
+                        context,
+                        title: 'Out of Stock',
+                        message:
+                            '"$name" is marked out of stock for this branch. Restock its ingredients or update the dish availability before adding it.',
+                      );
+                      return;
+                    }
 
-                final assessment = await _stockAssessmentService.assessMenuItem(
-                  menuItemId: doc.id,
-                  menuItemName: name,
-                  explicitRecipeId: data['recipeId']?.toString(),
-                );
-                if (!mounted) return;
+                    if (isIngredientOutOfStock) {
+                      await _showMenuItemBlockedDialog(
+                        context,
+                        title: 'Ingredient Out of Stock',
+                        message:
+                            '"$name" has one or more ingredients that are out of stock for this branch. Please restock the required ingredients before adding this dish.',
+                      );
+                      return;
+                    }
 
-                final canProceed = await _confirmStockAssessmentForAdd(
-                  context: this.context,
-                  itemName: name,
-                  assessment: assessment,
-                );
-                if (!canProceed || !mounted) return;
+                    // ── Fast-path: instant recipe check (no Firestore round-trip) ──
+                    final recipeId = (data['recipeId'] ?? '').toString().trim();
+                    if (recipeId.isEmpty) {
+                      // No recipe linked — show warning instantly
+                      final proceed = await showDialog<bool>(
+                        context: this.context,
+                        builder: (dialogContext) => AlertDialog(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                          title: Row(children: [
+                            Icon(Icons.link_off, color: Colors.orange[700]),
+                            const SizedBox(width: 10),
+                            const Expanded(child: Text('Recipe Not Integrated')),
+                          ]),
+                          content: Text(
+                            '"$name" does not have a recipe linked. Inventory tracking will not work for this item. Do you want to add it anyway?',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dialogContext, false),
+                              child: const Text('Cancel'),
+                            ),
+                            ElevatedButton(
+                              onPressed: () => Navigator.pop(dialogContext, true),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white,
+                              ),
+                              child: const Text('Add Anyway'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (proceed != true || !mounted) return;
+                    } else {
+                      // ── Recipe exists: run full stock assessment ──
+                      final assessment = await _stockAssessmentService.assessMenuItem(
+                        menuItemId: doc.id,
+                        menuItemName: name,
+                        explicitRecipeId: recipeId,
+                        branchId: activeBranchId,
+                      );
+                      if (!mounted) return;
 
-                final pos = this.context.read<PosService>();
-                final variants = data['variants'] as Map<String, dynamic>?;
+                      final canProceed = await _confirmStockAssessmentForAdd(
+                        context: this.context,
+                        itemName: name,
+                        assessment: assessment,
+                      );
+                      if (!canProceed || !mounted) return;
+                    }
 
-                List<PosAddon> selectedAddons = [];
-                if (variants != null && variants.isNotEmpty) {
-                  if (!mounted) return;
-                  final result = await showDialog<List<PosAddon>>(
-                    context: this.context,
-                    builder: (ctx) => VariantSelectionDialog(
-                      productName: name,
-                      variants: variants,
-                    ),
-                  );
-                  if (result == null) return; // User cancelled
-                  selectedAddons = result;
-                }
+                    final pos = this.context.read<PosService>();
+                    final variants = data['variants'] as Map<String, dynamic>?;
 
-                pos.addItem(PosCartItem(
-                  productId: doc.id,
-                  name: name,
-                  nameAr: data['nameAr']?.toString(),
-                  price: price,
-                  imageUrl: imageUrl,
-                  categoryId: catId,
-                  categoryName: catName,
-                  addons: selectedAddons,
-                ));
-              },
+                    List<PosAddon> selectedAddons = [];
+                    if (variants != null && variants.isNotEmpty) {
+                      if (!mounted) return;
+                      final result = await showDialog<List<PosAddon>>(
+                        context: this.context,
+                        builder: (ctx) => VariantSelectionDialog(
+                          productName: name,
+                          variants: variants,
+                        ),
+                      );
+                      if (result == null) return; // User cancelled
+                      selectedAddons = result;
+                    }
+
+                    pos.addItem(PosCartItem(
+                      productId: doc.id,
+                      name: name,
+                      nameAr: (data['name_ar'] ?? data['nameAr'])?.toString(),
+                      price: price,
+                      imageUrl: imageUrl,
+                      categoryId: catId,
+                      categoryName: catName,
+                      addons: selectedAddons,
+                    ));
+                  } finally {
+                    if (mounted) setState(() => _isProductTapping = false);
+                  }
+                },
             );
           },
         );
+      },
+    );
       },
     );
   }

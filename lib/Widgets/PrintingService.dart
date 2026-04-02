@@ -99,10 +99,36 @@ class PrintingService {
     return number;
   }
 
+  static bool _hasPrintableOrderNumber(Map<String, dynamic>? data) {
+    final orderNumber = data?['dailyOrderNumber'];
+    return orderNumber is String && orderNumber.trim().isNotEmpty;
+  }
+
+  static Future<DocumentSnapshot> _resolvePrintableOrderDoc(
+      DocumentSnapshot orderDoc) async {
+    final initialData = orderDoc.data() as Map<String, dynamic>?;
+    if (_hasPrintableOrderNumber(initialData)) {
+      return orderDoc;
+    }
+
+    for (int attempt = 0; attempt < 6; attempt++) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      final refreshed =
+          await orderDoc.reference.get().timeout(AppConstants.firestoreTimeout);
+      final refreshedData = refreshed.data() as Map<String, dynamic>?;
+      if (_hasPrintableOrderNumber(refreshedData)) {
+        return refreshed;
+      }
+    }
+
+    return orderDoc;
+  }
+
   static Future<void> printReceipt(
       BuildContext context, DocumentSnapshot orderDoc) async {
     try {
       await _loadAssets();
+      final resolvedOrderDoc = await _resolvePrintableOrderDoc(orderDoc);
 
       // Fonts - Use separate fonts for English and Arabic to avoid missing glyphs
       // Arabic font for RTL text
@@ -119,7 +145,7 @@ class PrintingService {
 
       // --- 1. PRE-FETCH DATA ---
       final Map<String, dynamic> order =
-          Map<String, dynamic>.from(orderDoc.data() as Map);
+          Map<String, dynamic>.from(resolvedOrderDoc.data() as Map);
 
       // Branch Info - Fetch BEFORE layoutPdf
       final List<dynamic> branchIds = order['branchIds'] ?? [];
@@ -179,45 +205,46 @@ class PrintingService {
           final int qty =
               int.tryParse((m['quantity'] ?? m['qty'] ?? '1').toString()) ?? 1;
           totalItemCount += qty;
-          
+
           // Get current price (may be discounted)
           final double price = double.tryParse(
                   (m['price'] ?? m['unitPrice'] ?? m['amount'] ?? '0')
                       .toString()) ??
               0.0;
-          
+
           // Get original price if available (for items with individual discounts)
           final double originalPrice = double.tryParse(
                   (m['originalPrice'] ?? m['original_price'] ?? '0')
                       .toString()) ??
               0.0;
-          
+
           // Track total original price for savings calculation
           if (originalPrice > 0) {
             totalOriginalPrice += originalPrice * qty;
           } else {
             totalOriginalPrice += price * qty;
           }
-          
+
           return {
             'name': (m['name'] ?? 'Item').toString(),
-            'name_ar': (m['name_ar'] ?? '').toString(),
+            'name_ar': (m['name_ar'] ?? m['nameAr'] ?? '').toString(),
             'qty': qty,
             'price': price,
             'originalPrice': originalPrice > price ? originalPrice : 0.0,
             'addons': (m['addons'] as List<dynamic>? ?? []),
           };
         }).toList();
-        
+
         // Calculate total savings
         // ignore: unused_local_variable
-        final double totalSavings = discount > 0 
-            ? discount 
-            : (totalOriginalPrice > subtotal ? totalOriginalPrice - subtotal : 0.0);
+        final double totalSavings = discount > 0
+            ? discount
+            : (totalOriginalPrice > subtotal
+                ? totalOriginalPrice - subtotal
+                : 0.0);
 
-        final double itemLevelSavings = totalOriginalPrice > subtotal 
-            ? totalOriginalPrice - subtotal 
-            : 0.0;
+        final double itemLevelSavings =
+            totalOriginalPrice > subtotal ? totalOriginalPrice - subtotal : 0.0;
 
         // Dates
         final DateTime? rawDate = (order['timestamp'] as Timestamp?)?.toDate();
@@ -249,10 +276,9 @@ class PrintingService {
               : branchAddress;
         }
 
-
         // Order Details
         final String dailyOrderNumber = order['dailyOrderNumber']?.toString() ??
-            orderDoc.id.substring(0, 6).toUpperCase();
+            resolvedOrderDoc.id.substring(0, 6).toUpperCase();
         final String orderType = (order['Order_type'] ?? 'Unknown')
             .toString()
             .toUpperCase()
@@ -361,7 +387,8 @@ class PrintingService {
                         pw.Text("SALES RECEIPT",
                             style: fontBold.copyWith(fontSize: 11)),
                         if (arabicFont != null) ...[
-                          pw.Text(" / ", style: fontBold.copyWith(fontSize: 11)),
+                          pw.Text(" / ",
+                              style: fontBold.copyWith(fontSize: 11)),
                           pw.Text("إيصال بيع",
                               style: fontArBold.copyWith(fontSize: 11),
                               textDirection: pw.TextDirection.rtl),
@@ -441,7 +468,8 @@ class PrintingService {
                                           pw.Text(" / ", style: fontBold),
                                           pw.Text("الصنف",
                                               style: fontArBold,
-                                              textDirection: pw.TextDirection.rtl),
+                                              textDirection:
+                                                  pw.TextDirection.rtl),
                                         ],
                                       ],
                                     )),
@@ -460,10 +488,12 @@ class PrintingService {
                           ...items.map((item) {
                             final itemTotal =
                                 (item['price'] * item['qty']).toDouble();
-                            final double origPrice = item['originalPrice'] as double;
+                            final double origPrice =
+                                item['originalPrice'] as double;
                             final bool hasItemDiscount = origPrice > 0;
-                            final double origTotal = hasItemDiscount ? origPrice * item['qty'] : 0.0;
-                            
+                            final double origTotal =
+                                hasItemDiscount ? origPrice * item['qty'] : 0.0;
+
                             return pw.TableRow(children: [
                               pw.Padding(
                                   padding: const pw.EdgeInsets.symmetric(
@@ -475,13 +505,17 @@ class PrintingService {
                                         pw.Text(item['name'], style: fontReg),
                                         // ── NEW: Display Add-ons ──
                                         if ((item['addons'] as List).isNotEmpty)
-                                          ... (item['addons'] as List).map((addon) {
-                                            final a = Map<String, dynamic>.from(addon as Map);
+                                          ...(item['addons'] as List)
+                                              .map((addon) {
+                                            final a = Map<String, dynamic>.from(
+                                                addon as Map);
                                             return pw.Padding(
-                                              padding: const pw.EdgeInsets.only(left: 4, top: 1),
+                                              padding: const pw.EdgeInsets.only(
+                                                  left: 4, top: 1),
                                               child: pw.Text(
                                                 "+ ${a['name']} (${AppConstants.currencySymbol}${((a['price'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)})",
-                                                style: fontSmall.copyWith(color: PdfColors.grey700),
+                                                style: fontSmall.copyWith(
+                                                    color: PdfColors.grey700),
                                               ),
                                             );
                                           }),
@@ -489,14 +523,16 @@ class PrintingService {
                                         pw.Row(children: [
                                           pw.Text(
                                             "@ ${item['price'].toStringAsFixed(2)}",
-                                             style: fontSmall.copyWith(color: PdfColors.grey700),
+                                            style: fontSmall.copyWith(
+                                                color: PdfColors.grey700),
                                           ),
                                           if (hasItemDiscount) ...[
                                             pw.SizedBox(width: 4),
                                             pw.Text(
                                               origPrice.toStringAsFixed(2),
                                               style: fontSmall.copyWith(
-                                                  decoration: pw.TextDecoration.lineThrough,
+                                                  decoration: pw.TextDecoration
+                                                      .lineThrough,
                                                   color: PdfColors.grey500,
                                                   fontSize: 7),
                                             ),
@@ -519,18 +555,21 @@ class PrintingService {
                                   padding: const pw.EdgeInsets.symmetric(
                                       vertical: 4),
                                   child: pw.Column(
-                                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                                    crossAxisAlignment:
+                                        pw.CrossAxisAlignment.end,
                                     children: [
                                       // Show original price with strikethrough if discounted
                                       if (hasItemDiscount)
                                         pw.Text(origTotal.toStringAsFixed(2),
                                             style: fontSmall.copyWith(
-                                                decoration: pw.TextDecoration.lineThrough,
+                                                decoration: pw
+                                                    .TextDecoration.lineThrough,
                                                 color: PdfColors.grey600),
                                             textAlign: pw.TextAlign.right),
                                       pw.Text(itemTotal.toStringAsFixed(2),
-                                          style: hasItemDiscount 
-                                              ? fontReg.copyWith(color: PdfColors.green800)
+                                          style: hasItemDiscount
+                                              ? fontReg.copyWith(
+                                                  color: PdfColors.green800)
                                               : fontReg,
                                           textAlign: pw.TextAlign.right),
                                     ],
@@ -569,7 +608,7 @@ class PrintingService {
                                   // Show Original Price as Subtotal
                                   bilingualRow("Subtotal", "المجموع",
                                       totalOriginalPrice.toStringAsFixed(2)),
-                                  
+
                                   pw.SizedBox(height: 2),
                                   bilingualRow("Item Discounts", "خصم الأصناف",
                                       "- ${itemLevelSavings.toStringAsFixed(2)}"),
@@ -583,15 +622,20 @@ class PrintingService {
                                 if (couponCode.isNotEmpty) ...[
                                   pw.SizedBox(height: 2),
                                   pw.Container(
-                                    padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    padding: const pw.EdgeInsets.symmetric(
+                                        horizontal: 4, vertical: 2),
                                     decoration: pw.BoxDecoration(
-                                      border: pw.Border.all(color: PdfColors.green700, width: 0.5),
+                                      border: pw.Border.all(
+                                          color: PdfColors.green700,
+                                          width: 0.5),
                                       borderRadius: pw.BorderRadius.circular(3),
                                     ),
                                     child: pw.Row(
-                                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                      mainAxisAlignment:
+                                          pw.MainAxisAlignment.spaceBetween,
                                       children: [
-                                        pw.Text("Coupon: ${couponCode.toUpperCase()}",
+                                        pw.Text(
+                                            "Coupon: ${couponCode.toUpperCase()}",
                                             style: fontSmall.copyWith(
                                                 fontWeight: pw.FontWeight.bold,
                                                 color: PdfColors.green800)),
@@ -603,11 +647,8 @@ class PrintingService {
                                 // Show Coupon/Extra discount if available
                                 if (discount > 0) ...[
                                   pw.SizedBox(height: 2),
-                                  bilingualRow(
-                                    "Coupon Discount", 
-                                    "خصم الكوبون", 
-                                    "- ${discount.toStringAsFixed(2)}"
-                                  ),
+                                  bilingualRow("Coupon Discount", "خصم الكوبون",
+                                      "- ${discount.toStringAsFixed(2)}"),
                                 ],
 
                                 if (deliveryCharge > 0)
@@ -704,57 +745,51 @@ class PrintingService {
           final String baseName = (m['name'] ?? 'Item').toString();
           return {
             'name': isAddOn ? '[ADD-ON] $baseName' : baseName,
-            'name_ar': (m['name_ar'] ?? '').toString(),
-            'qty': int.tryParse(
-                    (m['quantity'] ?? m['qty'] ?? '1').toString()) ??
-                1,
+            'name_ar': (m['name_ar'] ?? m['nameAr'] ?? '').toString(),
+            'qty':
+                int.tryParse((m['quantity'] ?? m['qty'] ?? '1').toString()) ??
+                    1,
             'addons': (m['addons'] as List<dynamic>? ?? []),
           };
         }).toList();
 
-        final DateTime? rawDate =
-            (order['timestamp'] as Timestamp?)?.toDate();
+        final DateTime? rawDate = (order['timestamp'] as Timestamp?)?.toDate();
         final DateTime? orderDate =
             rawDate != null ? TimeUtils.getRestaurantTime(rawDate) : null;
-        final String formattedTime = orderDate != null
-            ? DateFormat('hh:mm a').format(orderDate)
-            : "N/A";
+        final String formattedTime =
+            orderDate != null ? DateFormat('hh:mm a').format(orderDate) : "N/A";
 
-        final String dailyOrderNumber =
-            order['dailyOrderNumber']?.toString() ??
-                orderDoc.id.substring(0, 6).toUpperCase();
+        final String dailyOrderNumber = order['dailyOrderNumber']?.toString() ??
+            orderDoc.id.substring(0, 6).toUpperCase();
         final String orderType = (order['Order_type'] ?? 'Unknown')
             .toString()
             .toUpperCase()
             .replaceAll('_', ' ');
-        final String tableNumber =
-            (order['tableNumber'] ?? '').toString();
+        final String tableNumber = (order['tableNumber'] ?? '').toString();
         final String specialInstructions =
             (order['specialInstructions'] ?? '').toString();
 
         final pdf = pw.Document();
         final pw.TextStyle fontLarge = pw.TextStyle(
-            font: regularFont,
-            fontSize: 14,
-            fontWeight: pw.FontWeight.bold);
+            font: regularFont, fontSize: 14, fontWeight: pw.FontWeight.bold);
         final pw.TextStyle fontMed =
             pw.TextStyle(font: regularFont, fontSize: 12);
         final pw.TextStyle fontMedBold = pw.TextStyle(
-            font: regularFont,
-            fontSize: 12,
-            fontWeight: pw.FontWeight.bold);
+            font: regularFont, fontSize: 12, fontWeight: pw.FontWeight.bold);
         final pw.TextStyle fontSmall =
             pw.TextStyle(font: regularFont, fontSize: 10);
 
         // Arabic styles
         final pw.TextStyle fontArLarge = arabicFont != null
-            ? pw.TextStyle(font: arabicFont, fontSize: 14, fontWeight: pw.FontWeight.bold)
+            ? pw.TextStyle(
+                font: arabicFont, fontSize: 14, fontWeight: pw.FontWeight.bold)
             : fontLarge;
         final pw.TextStyle fontArMed = arabicFont != null
             ? pw.TextStyle(font: arabicFont, fontSize: 12)
             : fontMed;
         final pw.TextStyle fontArMedBold = arabicFont != null
-            ? pw.TextStyle(font: arabicFont, fontSize: 12, fontWeight: pw.FontWeight.bold)
+            ? pw.TextStyle(
+                font: arabicFont, fontSize: 12, fontWeight: pw.FontWeight.bold)
             : fontMedBold;
 
         pdf.addPage(pw.Page(
@@ -767,29 +802,23 @@ class PrintingService {
                     // Header
                     pw.Center(
                         child: pw.Text('KITCHEN ORDER TICKET',
-                            style:
-                                fontLarge.copyWith(fontSize: 16))),
-                    pw.Center(
-                        child: pw.Text('--- KOT ---',
-                            style: fontMed)),
+                            style: fontLarge.copyWith(fontSize: 16))),
+                    pw.Center(child: pw.Text('--- KOT ---', style: fontMed)),
                     pw.SizedBox(height: 8),
                     pw.Divider(thickness: 2),
                     pw.SizedBox(height: 8),
 
                     // Order info
                     pw.Row(
-                        mainAxisAlignment:
-                            pw.MainAxisAlignment.spaceBetween,
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
-                          pw.Text('Order #$dailyOrderNumber',
-                              style: fontLarge),
+                          pw.Text('Order #$dailyOrderNumber', style: fontLarge),
                           pw.Text(formattedTime, style: fontMed),
                         ]),
                     pw.SizedBox(height: 4),
                     pw.Text('Type: $orderType', style: fontMedBold),
                     if (tableNumber.isNotEmpty)
-                      pw.Text('Table: $tableNumber',
-                          style: fontMedBold),
+                      pw.Text('Table: $tableNumber', style: fontMedBold),
                     pw.SizedBox(height: 8),
                     pw.Divider(thickness: 1),
                     pw.SizedBox(height: 8),
@@ -797,48 +826,66 @@ class PrintingService {
                     // Items - large font, no prices
                     ...items.map((item) {
                       return pw.Padding(
-                          padding: const pw.EdgeInsets.symmetric(
-                              vertical: 4),
+                          padding: const pw.EdgeInsets.symmetric(vertical: 4),
                           child: pw.Row(
-                              mainAxisAlignment: pw
-                                  .MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment:
+                                  pw.MainAxisAlignment.spaceBetween,
                               children: [
                                 pw.Expanded(
                                   child: pw.Column(
-                                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                                  children: [
-                                    pw.Text(item['name'].toString(), style: fontLarge),
-                                    if (item['name_ar'].toString().isNotEmpty && arabicFont != null)
-                                      pw.Text(item['name_ar'].toString(), 
-                                         style: fontArLarge.copyWith(fontSize: 12), 
-                                         textDirection: pw.TextDirection.rtl),
-                                    
-                                    if ((item['addons'] as List).isNotEmpty)
-                                      ... (item['addons'] as List).map((addon) {
-                                        final a = Map<String, dynamic>.from(addon as Map);
-                                        final String aName = a['name'] ?? '';
-                                        final String aNameAr = a['name_ar'] ?? '';
-                                        return pw.Column(
-                                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                                          children: [
-                                            pw.Text("  + $aName", style: fontMedBold.copyWith(color: PdfColors.grey800)),
-                                            if (aNameAr.isNotEmpty && arabicFont != null)
-                                              pw.Padding(
-                                                padding: const pw.EdgeInsets.only(left: 10),
-                                                child: pw.Text(aNameAr, 
-                                                  style: fontArMedBold.copyWith(fontSize: 10, color: PdfColors.grey800),
-                                                  textDirection: pw.TextDirection.rtl),
-                                              ),
-                                          ],
-                                        );
-                                      }),
-                                  ],
+                                    crossAxisAlignment:
+                                        pw.CrossAxisAlignment.start,
+                                    children: [
+                                      pw.Text(item['name'].toString(),
+                                          style: fontLarge),
+                                      if (item['name_ar']
+                                              .toString()
+                                              .isNotEmpty &&
+                                          arabicFont != null)
+                                        pw.Text(item['name_ar'].toString(),
+                                            style: fontArLarge.copyWith(
+                                                fontSize: 12),
+                                            textDirection:
+                                                pw.TextDirection.rtl),
+                                      if ((item['addons'] as List).isNotEmpty)
+                                        ...(item['addons'] as List)
+                                            .map((addon) {
+                                          final a = Map<String, dynamic>.from(
+                                              addon as Map);
+                                          final String aName = a['name'] ?? '';
+                                          final String aNameAr =
+                                              a['name_ar'] ?? '';
+                                          return pw.Column(
+                                            crossAxisAlignment:
+                                                pw.CrossAxisAlignment.start,
+                                            children: [
+                                              pw.Text("  + $aName",
+                                                  style: fontMedBold.copyWith(
+                                                      color:
+                                                          PdfColors.grey800)),
+                                              if (aNameAr.isNotEmpty &&
+                                                  arabicFont != null)
+                                                pw.Padding(
+                                                  padding:
+                                                      const pw.EdgeInsets.only(
+                                                          left: 10),
+                                                  child: pw.Text(aNameAr,
+                                                      style: fontArMedBold
+                                                          .copyWith(
+                                                              fontSize: 10,
+                                                              color: PdfColors
+                                                                  .grey800),
+                                                      textDirection:
+                                                          pw.TextDirection.rtl),
+                                                ),
+                                            ],
+                                          );
+                                        }),
+                                    ],
+                                  ),
                                 ),
-                              ),
-
                                 pw.Text('x${item['qty']}',
-                                    style: fontLarge.copyWith(
-                                        fontSize: 16)),
+                                    style: fontLarge.copyWith(fontSize: 16)),
                               ]));
                     }),
 
@@ -852,19 +899,15 @@ class PrintingService {
                           padding: const pw.EdgeInsets.all(8),
                           decoration: pw.BoxDecoration(
                               border: pw.Border.all(
-                                  color: PdfColors.grey600,
-                                  width: 1),
-                              borderRadius:
-                                  pw.BorderRadius.circular(4)),
+                                  color: PdfColors.grey600, width: 1),
+                              borderRadius: pw.BorderRadius.circular(4)),
                           child: pw.Column(
-                              crossAxisAlignment:
-                                  pw.CrossAxisAlignment.start,
+                              crossAxisAlignment: pw.CrossAxisAlignment.start,
                               children: [
                                 pw.Text('SPECIAL INSTRUCTIONS:',
                                     style: fontMedBold),
                                 pw.SizedBox(height: 4),
-                                pw.Text(specialInstructions,
-                                    style: fontMed),
+                                pw.Text(specialInstructions, style: fontMed),
                               ])),
                     ],
 

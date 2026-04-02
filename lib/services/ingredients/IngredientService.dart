@@ -144,7 +144,9 @@ class IngredientService {
       if (!snap.exists) throw Exception('Ingredient not found');
 
       final ingData = snap.data() as Map<String, dynamic>;
-      final current = (ingData['currentStock'] as num?)?.toDouble() ?? 0.0;
+      final targetBranch = branchIds.isNotEmpty ? branchIds.first : 'default';
+      final branchStocks = ingData['branchStocks'] as Map<String, dynamic>? ?? {};
+      final current = (branchStocks[targetBranch] as num?)?.toDouble() ?? 0.0;
       final desired = current + delta;
 
       // Clamp: never go below 0
@@ -156,7 +158,7 @@ class IngredientService {
           : null;
 
       tx.update(docRef, {
-        'currentStock': newStock,
+        'branchStocks.$targetBranch': newStock,
         'updatedAt': Timestamp.fromDate(DateTime.now()),
       });
 

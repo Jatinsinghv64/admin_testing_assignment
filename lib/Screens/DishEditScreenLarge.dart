@@ -10,6 +10,7 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../main.dart';
 import 'MenuManagementWidgets.dart';
 import 'BranchManagement.dart';
+import '../Widgets/BranchFilterService.dart';
 import '../services/ingredients/RecipeService.dart';
 import '../Models/RecipeModel.dart';
 import '../Models/IngredientModel.dart';
@@ -2891,6 +2892,8 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
   }
 
   Widget _buildInventoryForecastCard() {
+    final userScope = context.watch<UserScopeService>();
+    final branchIds = context.watch<BranchFilterService>().getFilterBranchIds(userScope.branchIds);
     final hasRecipe = _ingredientLines.isNotEmpty;
 
     // Build forecast data
@@ -2918,7 +2921,7 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
         }
 
         final int possible =
-            recipeQty > 0 ? (ingredient.currentStock / recipeQty).floor() : 0;
+            recipeQty > 0 ? (ingredient.getStock(branchIds.isNotEmpty ? branchIds.first : "default") / recipeQty).floor() : 0;
         String status;
         Color statusColor;
         if (possible <= 0) {
@@ -2934,7 +2937,7 @@ class _DishEditScreenLargeState extends State<DishEditScreenLarge> {
 
         forecastRows.add({
           'name': ingredient.name,
-          'stock': ingredient.currentStock,
+          'stock': ingredient.getStock(branchIds.isNotEmpty ? branchIds.first : "default"),
           'unit': ingredient.unit,
           'possible': possible,
           'status': status,

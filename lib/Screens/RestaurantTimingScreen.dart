@@ -6,11 +6,11 @@ import 'package:provider/provider.dart';
 import '../main.dart';
 import '../Widgets/BranchFilterService.dart';
 import '../Widgets/BranchSelectorDialog.dart';
+import '../Widgets/timings/working_hours_utils.dart';
 import '../constants.dart';
 import '../utils/responsive_helper.dart';
 import 'ConnectionUtils.dart';
 import 'RestaurantTimingScreenLarge.dart';
-
 
 class RestaurantTimingScreen extends StatefulWidget {
   const RestaurantTimingScreen({super.key});
@@ -37,12 +37,13 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
   static const int _defaultEstimatedTime = 20;
   static const int _warningThreshold = 60; // Warn if setting above this
   static const int _maxRetries = 3; // Retry attempts for failed updates
-  
+
   int _preparationTime = _defaultEstimatedTime;
   int _lastSavedPrepTime = _defaultEstimatedTime; // For rollback on error
   bool _isUpdatingPrepTime = false;
   DateTime? _lastPrepTimeUpdate; // Debounce tracking
-  DateTime? _estimatedTimeLastUpdatedAt; // When it was last updated in Firestore
+  DateTime?
+      _estimatedTimeLastUpdatedAt; // When it was last updated in Firestore
   StreamSubscription<DocumentSnapshot>? _branchSubscription; // Real-time sync
   int _retryCount = 0; // Current retry attempt
 
@@ -88,10 +89,10 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
       return;
     }
 
-    // Use specific branch from filter if one is selected, 
+    // Use specific branch from filter if one is selected,
     // otherwise default to first assigned branch
     String? targetBranchId;
-    if (branchFilter.selectedBranchId != null && 
+    if (branchFilter.selectedBranchId != null &&
         userScope.branchIds.contains(branchFilter.selectedBranchId)) {
       targetBranchId = branchFilter.selectedBranchId;
     } else if (userScope.branchIds.isNotEmpty) {
@@ -145,10 +146,9 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
       } else {
         _initializeDefaultTimings();
       }
-      
+
       // Start real-time listener for external updates to estimatedTime
       _startEstimatedTimeListener();
-      
     } catch (e) {
       debugPrint("Error loading timings: $e");
       if (mounted) {
@@ -161,13 +161,13 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
       }
     }
   }
-  
+
   /// Parse estimated time and timestamp from Firestore document
   void _parseEstimatedTimeFromDoc(Map<String, dynamic> data) {
     // Load estimated time with robust type handling
     final rawPrepTime = data['estimatedTime'];
     int parsedTime = _defaultEstimatedTime;
-    
+
     if (rawPrepTime is int) {
       parsedTime = rawPrepTime;
     } else if (rawPrepTime is double) {
@@ -175,11 +175,11 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
     } else if (rawPrepTime is String) {
       parsedTime = int.tryParse(rawPrepTime) ?? _defaultEstimatedTime;
     }
-    
+
     // Clamp to valid bounds
     _preparationTime = parsedTime.clamp(_minEstimatedTime, _maxEstimatedTime);
     _lastSavedPrepTime = _preparationTime;
-    
+
     // Parse last updated timestamp
     final rawTimestamp = data['estimatedTimeUpdatedAt'];
     if (rawTimestamp is Timestamp) {
@@ -188,39 +188,41 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
       _estimatedTimeLastUpdatedAt = null;
     }
   }
-  
+
   /// Parse working hours from Firestore document
   void _parseWorkingHoursFromDoc(Map<String, dynamic> data) {
     if (data.containsKey('workingHours')) {
-      final loadedHours = Map<String, dynamic>.from(data['workingHours']);
+      final loadedHours = WorkingHoursUtils.cloneWorkingHours(
+        Map<String, dynamic>.from(data['workingHours']),
+      );
       setState(() {
         _workingHours = loadedHours;
-        _originalWorkingHours = Map<String, dynamic>.from(loadedHours.map(
-            (key, value) => MapEntry(key, Map<String, dynamic>.from(value))));
+        _originalWorkingHours =
+            WorkingHoursUtils.cloneWorkingHours(loadedHours);
         _isLoading = false;
       });
     } else {
       _initializeDefaultTimings();
     }
   }
-  
+
   /// Start real-time listener for estimatedTime changes from other admins
   void _startEstimatedTimeListener() {
     _branchSubscription?.cancel(); // Cancel any existing subscription
-    
+
     if (_selectedBranchId == null || _selectedBranchId!.isEmpty) return;
-    
+
     _branchSubscription = FirebaseFirestore.instance
         .collection(AppConstants.collectionBranch)
         .doc(_selectedBranchId)
         .snapshots()
         .listen((snapshot) {
       if (!mounted || !snapshot.exists) return;
-      
+
       final data = snapshot.data()!;
       final rawPrepTime = data['estimatedTime'];
       int newPrepTime = _defaultEstimatedTime;
-      
+
       if (rawPrepTime is int) {
         newPrepTime = rawPrepTime;
       } else if (rawPrepTime is double) {
@@ -228,28 +230,29 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
       } else if (rawPrepTime is String) {
         newPrepTime = int.tryParse(rawPrepTime) ?? _defaultEstimatedTime;
       }
-      
+
       newPrepTime = newPrepTime.clamp(_minEstimatedTime, _maxEstimatedTime);
-      
+
       // Only update if value changed externally (not from our own update)
       // and we're not currently in the middle of updating
       if (newPrepTime != _lastSavedPrepTime && !_isUpdatingPrepTime) {
         setState(() {
           _preparationTime = newPrepTime;
           _lastSavedPrepTime = newPrepTime;
-          
+
           // Update timestamp
           final rawTimestamp = data['estimatedTimeUpdatedAt'];
           if (rawTimestamp is Timestamp) {
             _estimatedTimeLastUpdatedAt = rawTimestamp.toDate();
           }
         });
-        
+
         // Show notification that value was updated externally
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('ℹ️ Estimated time updated to $newPrepTime mins by another admin'),
+              content: Text(
+                  'ℹ️ Estimated time updated to $newPrepTime mins by another admin'),
               backgroundColor: Colors.blue,
               behavior: SnackBarBehavior.floating,
               duration: const Duration(seconds: 3),
@@ -263,19 +266,10 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
   }
 
   void _initializeDefaultTimings() {
-    final defaultHours = <String, dynamic>{};
-    for (var day in _days) {
-      defaultHours[day] = {
-        'isOpen': true,
-        'slots': [
-          {'open': '09:00', 'close': '22:00'}
-        ]
-      };
-    }
+    final defaultHours = WorkingHoursUtils.createDefaultWorkingHours();
     setState(() {
       _workingHours = defaultHours;
-      _originalWorkingHours = Map<String, dynamic>.from(defaultHours.map(
-          (key, value) => MapEntry(key, Map<String, dynamic>.from(value))));
+      _originalWorkingHours = WorkingHoursUtils.cloneWorkingHours(defaultHours);
       _isLoading = false;
     });
   }
@@ -283,58 +277,22 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
   // --- Validation ---
 
   String? _validateSlots(String day) {
-    final dayData = _workingHours[day];
-    if (dayData == null || dayData['isOpen'] != true) return null;
-
-    final List slots = dayData['slots'] ?? [];
-    if (slots.isEmpty) return null;
-
-    // Check for overlapping slots
-    for (int i = 0; i < slots.length; i++) {
-      for (int j = i + 1; j < slots.length; j++) {
-        if (_doSlotsOverlap(slots[i], slots[j])) {
-          return 'Slot ${i + 1} and Slot ${j + 1} overlap';
-        }
-      }
-    }
-    return null;
-  }
-
-  bool _doSlotsOverlap(Map slot1, Map slot2) {
-    final open1 = _parseTimeToMinutes(slot1['open'] ?? '00:00');
-    final close1 = _parseTimeToMinutes(slot1['close'] ?? '23:59');
-    final open2 = _parseTimeToMinutes(slot2['open'] ?? '00:00');
-    final close2 = _parseTimeToMinutes(slot2['close'] ?? '23:59');
-
-    // Handle overnight slots (close < open)
-    if (close1 < open1 || close2 < open2) {
-      return false; // Allow overnight slots without overlap check
-    }
-
-    return (open1 < close2) && (open2 < close1);
-  }
-
-  int _parseTimeToMinutes(String time) {
-    try {
-      final parts = time.split(':');
-      return int.parse(parts[0]) * 60 + int.parse(parts[1]);
-    } catch (e) {
-      return 0;
-    }
+    final validation = WorkingHoursUtils.validateWorkingHours(_workingHours);
+    return validation.errorForDay(day);
   }
 
   bool _validateAllSlots() {
-    for (var day in _days) {
-      final error = _validateSlots(day);
-      if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('⚠️ ${day.toUpperCase()}: $error'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return false;
-      }
+    final validation = WorkingHoursUtils.validateWorkingHours(_workingHours);
+    if (!validation.isValid) {
+      final message = validation.firstErrorMessage ??
+          'Please fix the highlighted schedule issues.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚠️ $message'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return false;
     }
     return true;
   }
@@ -389,18 +347,31 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
     setState(() => _isSaving = true);
 
     try {
+      final validation = WorkingHoursUtils.validateWorkingHours(_workingHours);
+      if (!validation.isValid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(validation.firstErrorMessage ?? 'Invalid schedule'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() => _isSaving = false);
+        return;
+      }
+
       await FirebaseFirestore.instance
           .collection(AppConstants.collectionBranch)
           .doc(_selectedBranchId)
-          .set({'workingHours': _workingHours},
+          .set({'workingHours': validation.normalizedWorkingHours},
               SetOptions(merge: true)).timeout(const Duration(seconds: 15));
 
       if (mounted) {
         final branchName = _selectedBranchId;
 
         // Update original to match saved state
-        _originalWorkingHours = Map<String, dynamic>.from(_workingHours.map(
-            (key, value) => MapEntry(key, Map<String, dynamic>.from(value))));
+        _workingHours = validation.normalizedWorkingHours;
+        _originalWorkingHours = WorkingHoursUtils.cloneWorkingHours(
+            validation.normalizedWorkingHours);
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -465,28 +436,30 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
 
   // --- Kitchen Operations ---
 
-  Future<void> _updatePreparationTime(int newValue, {bool skipConfirmation = false}) async {
+  Future<void> _updatePreparationTime(int newValue,
+      {bool skipConfirmation = false}) async {
     if (_selectedBranchId == null || _selectedBranchId!.isEmpty) return;
-    
+
     // Clamp to valid bounds
     final clampedValue = newValue.clamp(_minEstimatedTime, _maxEstimatedTime);
-    
+
     // Debounce: prevent rapid updates (minimum 500ms between saves)
     final now = DateTime.now();
     if (_lastPrepTimeUpdate != null &&
         now.difference(_lastPrepTimeUpdate!).inMilliseconds < 500) {
       return;
     }
-    
+
     // Skip if value hasn't actually changed
     if (clampedValue == _lastSavedPrepTime) return;
-    
+
     // Show warning for high values (60+ mins)
     if (!skipConfirmation && clampedValue >= _warningThreshold) {
       final shouldProceed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
               Icon(Icons.warning_amber_rounded, color: Colors.orange[700]),
@@ -515,7 +488,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
           ],
         ),
       );
-      
+
       if (shouldProceed != true) return;
     }
 
@@ -538,7 +511,8 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
             action: SnackBarAction(
               label: 'Retry',
               textColor: Colors.white,
-              onPressed: () => _updatePreparationTime(clampedValue, skipConfirmation: true),
+              onPressed: () =>
+                  _updatePreparationTime(clampedValue, skipConfirmation: true),
             ),
           ),
         );
@@ -552,7 +526,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
 
     await _performUpdateWithRetry(clampedValue);
   }
-  
+
   /// Performs the Firestore update with exponential backoff retry logic
   Future<void> _performUpdateWithRetry(int clampedValue) async {
     try {
@@ -560,19 +534,18 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
           .collection(AppConstants.collectionBranch)
           .doc(_selectedBranchId)
           .set({
-            'estimatedTime': clampedValue,
-            'estimatedTimeUpdatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true))
-          .timeout(const Duration(seconds: 10));
+        'estimatedTime': clampedValue,
+        'estimatedTimeUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
 
       // Update last saved value and timestamp on success
       _lastSavedPrepTime = clampedValue;
       _estimatedTimeLastUpdatedAt = DateTime.now();
       _retryCount = 0;
-      
+
       // Haptic feedback on success
       HapticFeedback.lightImpact();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -584,32 +557,34 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
         );
       }
     } catch (e) {
-      debugPrint('Error updating estimated time (attempt ${_retryCount + 1}): $e');
-      
+      debugPrint(
+          'Error updating estimated time (attempt ${_retryCount + 1}): $e');
+
       // Retry with exponential backoff
       if (_retryCount < _maxRetries) {
         _retryCount++;
         final delaySeconds = 1 << (_retryCount - 1); // 1s, 2s, 4s
         debugPrint('Retrying in $delaySeconds seconds...');
-        
+
         await Future.delayed(Duration(seconds: delaySeconds));
-        
+
         if (mounted) {
           await _performUpdateWithRetry(clampedValue);
         }
         return;
       }
-      
+
       // All retries exhausted - rollback and show error
       if (mounted) {
         setState(() => _preparationTime = _lastSavedPrepTime);
-        
+
         // Haptic feedback for error
         HapticFeedback.heavyImpact();
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ Failed after $_maxRetries retries. Reverted to $_lastSavedPrepTime mins.'),
+            content: Text(
+                '❌ Failed after $_maxRetries retries. Reverted to $_lastSavedPrepTime mins.'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
             action: SnackBarAction(
@@ -638,10 +613,10 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
     if (_isLoading) {
       return const SizedBox.shrink();
     }
-    
+
     return Semantics(
       label: 'Kitchen Operations. Estimated time is $_preparationTime minutes. '
-             'Use slider to adjust between $_minEstimatedTime and $_maxEstimatedTime minutes.',
+          'Use slider to adjust between $_minEstimatedTime and $_maxEstimatedTime minutes.',
       child: Card(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         elevation: 2,
@@ -662,7 +637,8 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                       color: Colors.orange.shade50,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Icon(Icons.restaurant, color: Colors.orange.shade700, size: 20),
+                    child: Icon(Icons.restaurant,
+                        color: Colors.orange.shade700, size: 20),
                   ),
                   const SizedBox(width: 12),
                   const Expanded(
@@ -699,7 +675,8 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
               const SizedBox(height: 20),
               Row(
                 children: [
-                  const Icon(Icons.timer_outlined, size: 18, color: Colors.grey),
+                  const Icon(Icons.timer_outlined,
+                      size: 18, color: Colors.grey),
                   const SizedBox(width: 8),
                   const Text(
                     'Estimated Time:',
@@ -711,29 +688,33 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                   ),
                   const Spacer(),
                   // Show unsaved indicator
-                  if (_preparationTime != _lastSavedPrepTime && !_isUpdatingPrepTime)
+                  if (_preparationTime != _lastSavedPrepTime &&
+                      !_isUpdatingPrepTime)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
-                      child: Icon(Icons.edit, size: 14, color: Colors.orange.shade600),
+                      child: Icon(Icons.edit,
+                          size: 14, color: Colors.orange.shade600),
                     ),
                   // Tappable badge for direct input
                   Semantics(
                     button: true,
                     label: 'Tap to enter estimated time manually',
                     child: InkWell(
-                      onTap: _isUpdatingPrepTime ? null : _showDirectInputDialog,
+                      onTap:
+                          _isUpdatingPrepTime ? null : _showDirectInputDialog,
                       borderRadius: BorderRadius.circular(20),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
                           // Red tint for high values (warning zone)
-                          color: _preparationTime >= _warningThreshold 
-                              ? Colors.red.shade100 
+                          color: _preparationTime >= _warningThreshold
+                              ? Colors.red.shade100
                               : Colors.orange.shade100,
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: _preparationTime >= _warningThreshold 
-                                ? Colors.red.shade300 
+                            color: _preparationTime >= _warningThreshold
+                                ? Colors.red.shade300
                                 : Colors.orange.shade300,
                             width: 1,
                           ),
@@ -746,8 +727,8 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14,
-                                color: _preparationTime >= _warningThreshold 
-                                    ? Colors.red.shade800 
+                                color: _preparationTime >= _warningThreshold
+                                    ? Colors.red.shade800
                                     : Colors.orange.shade800,
                               ),
                             ),
@@ -755,8 +736,8 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                             Icon(
                               Icons.edit_outlined,
                               size: 12,
-                              color: _preparationTime >= _warningThreshold 
-                                  ? Colors.red.shade600 
+                              color: _preparationTime >= _warningThreshold
+                                  ? Colors.red.shade600
                                   : Colors.orange.shade600,
                             ),
                           ],
@@ -770,20 +751,21 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
               SliderTheme(
                 data: SliderTheme.of(context).copyWith(
                   // Red tint for high values
-                  activeTrackColor: _preparationTime >= _warningThreshold 
-                      ? Colors.red.shade400 
+                  activeTrackColor: _preparationTime >= _warningThreshold
+                      ? Colors.red.shade400
                       : Colors.orange,
-                  inactiveTrackColor: _preparationTime >= _warningThreshold 
-                      ? Colors.red.shade100 
+                  inactiveTrackColor: _preparationTime >= _warningThreshold
+                      ? Colors.red.shade100
                       : Colors.orange.shade100,
-                  thumbColor: _preparationTime >= _warningThreshold 
-                      ? Colors.red.shade700 
+                  thumbColor: _preparationTime >= _warningThreshold
+                      ? Colors.red.shade700
                       : Colors.orange.shade700,
-                  overlayColor: (_preparationTime >= _warningThreshold 
-                      ? Colors.red 
-                      : Colors.orange).withValues(alpha: 0.2),
-                  valueIndicatorColor: _preparationTime >= _warningThreshold 
-                      ? Colors.red.shade700 
+                  overlayColor: (_preparationTime >= _warningThreshold
+                          ? Colors.red
+                          : Colors.orange)
+                      .withValues(alpha: 0.2),
+                  valueIndicatorColor: _preparationTime >= _warningThreshold
+                      ? Colors.red.shade700
                       : Colors.orange.shade700,
                   valueIndicatorTextStyle: const TextStyle(
                     color: Colors.white,
@@ -792,12 +774,14 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                 ),
                 child: Slider(
                   value: _preparationTime.toDouble().clamp(
-                      _minEstimatedTime.toDouble(), _maxEstimatedTime.toDouble()),
+                      _minEstimatedTime.toDouble(),
+                      _maxEstimatedTime.toDouble()),
                   min: _minEstimatedTime.toDouble(),
                   max: _maxEstimatedTime.toDouble(),
-                  divisions: ((_maxEstimatedTime - _minEstimatedTime) ~/ 5), // Step size of 5
+                  divisions: ((_maxEstimatedTime - _minEstimatedTime) ~/
+                      5), // Step size of 5
                   label: '$_preparationTime mins',
-                  onChanged: _isUpdatingPrepTime 
+                  onChanged: _isUpdatingPrepTime
                       ? null // Disable while updating
                       : (value) {
                           // Haptic feedback on slider change
@@ -806,8 +790,8 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                             _preparationTime = value.round();
                           });
                         },
-                  onChangeEnd: _isUpdatingPrepTime 
-                      ? null 
+                  onChangeEnd: _isUpdatingPrepTime
+                      ? null
                       : (value) {
                           _updatePreparationTime(value.round());
                         },
@@ -818,10 +802,12 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('$_minEstimatedTime min', 
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-                    Text('$_maxEstimatedTime min', 
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                    Text('$_minEstimatedTime min',
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade600)),
+                    Text('$_maxEstimatedTime min',
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade600)),
                   ],
                 ),
               ),
@@ -832,11 +818,13 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Row(
                     children: [
-                      Icon(Icons.history, size: 14, color: Colors.grey.shade500),
+                      Icon(Icons.history,
+                          size: 14, color: Colors.grey.shade500),
                       const SizedBox(width: 6),
                       Text(
                         'Last updated: ${_formatLastUpdated(_estimatedTimeLastUpdatedAt!)}',
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade600),
                       ),
                     ],
                   ),
@@ -849,12 +837,14 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline, size: 16, color: Colors.blue.shade700),
+                    Icon(Icons.info_outline,
+                        size: 16, color: Colors.blue.shade700),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'This affects delivery time estimates shown to customers',
-                        style: TextStyle(fontSize: 11, color: Colors.blue.shade700),
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.blue.shade700),
                       ),
                     ),
                   ],
@@ -866,12 +856,12 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
       ),
     );
   }
-  
+
   /// Format the last updated timestamp in a user-friendly way
   String _formatLastUpdated(DateTime timestamp) {
     final now = DateTime.now();
     final diff = now.difference(timestamp);
-    
+
     if (diff.inMinutes < 1) {
       return 'Just now';
     } else if (diff.inMinutes < 60) {
@@ -884,12 +874,12 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
       return '${timestamp.day}/${timestamp.month}/${timestamp.year}';
     }
   }
-  
+
   /// Show dialog for direct input of estimated time
   Future<void> _showDirectInputDialog() async {
     final controller = TextEditingController(text: _preparationTime.toString());
     final formKey = GlobalKey<FormState>();
-    
+
     final result = await showDialog<int>(
       context: context,
       builder: (context) => AlertDialog(
@@ -913,14 +903,16 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                 autofocus: true,
                 decoration: InputDecoration(
                   labelText: 'Minutes',
-                  hintText: 'Enter value ($_minEstimatedTime-$_maxEstimatedTime)',
+                  hintText:
+                      'Enter value ($_minEstimatedTime-$_maxEstimatedTime)',
                   suffixText: 'mins',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Colors.orange, width: 2),
+                    borderSide:
+                        const BorderSide(color: Colors.orange, width: 2),
                   ),
                 ),
                 validator: (value) {
@@ -931,7 +923,8 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                   if (parsed == null) {
                     return 'Please enter a valid number';
                   }
-                  if (parsed < _minEstimatedTime || parsed > _maxEstimatedTime) {
+                  if (parsed < _minEstimatedTime ||
+                      parsed > _maxEstimatedTime) {
                     return 'Must be between $_minEstimatedTime-$_maxEstimatedTime';
                   }
                   return null;
@@ -963,7 +956,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
         ],
       ),
     );
-    
+
     if (result != null && result != _preparationTime) {
       setState(() => _preparationTime = result);
       _updatePreparationTime(result);
@@ -1079,7 +1072,8 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: Colors.deepPurple)),
+        body:
+            Center(child: CircularProgressIndicator(color: Colors.deepPurple)),
       );
     }
 
@@ -1106,7 +1100,7 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
 
     return ResponsiveLayout(
       mobile: _buildMobileLayout(),
-      desktop: _selectedBranchId != null 
+      desktop: _selectedBranchId != null
           ? RestaurantTimingScreenLarge(branchId: _selectedBranchId!)
           : _buildMobileLayout(),
     );
@@ -1184,17 +1178,17 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                 ],
               ),
             ),
-          
+
           Expanded(
             child: ListView(
               padding: const EdgeInsets.only(bottom: 80),
               children: [
                 // 1. Kitchen Operations (Estimated Time)
                 _buildKitchenOperationsCard(),
-                
+
                 // 2. Quick Actions
                 _buildBulkActions(),
-                
+
                 const Padding(
                   padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
                   child: Text(
@@ -1206,10 +1200,53 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
                     ),
                   ),
                 ),
-                
+
                 // 3. Daily Cards
                 ..._days.map((day) => _buildDayCard(day)).toList(),
               ],
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: Colors.grey.shade200)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 12,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: ElevatedButton.icon(
+                onPressed:
+                    _isSaving || !_hasUnsavedChanges ? null : _saveTimings,
+                icon: _isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: Text(_isSaving ? 'Saving...' : 'Save Timing Changes'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepPurple,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  disabledForegroundColor: Colors.grey.shade600,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
             ),
           ),
         ] else
@@ -1225,7 +1262,8 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
     );
   }
 
-  Widget _buildBranchHeader(UserScopeService userScope, BranchFilterService branchFilter) {
+  Widget _buildBranchHeader(
+      UserScopeService userScope, BranchFilterService branchFilter) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1258,18 +1296,21 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
               final result = await showDialog<List<String>>(
                 context: context,
                 builder: (context) => BranchSelectorDialog(
-                  initialSelectedBranchIds: _selectedBranchId != null ? [_selectedBranchId!] : [],
+                  initialSelectedBranchIds:
+                      _selectedBranchId != null ? [_selectedBranchId!] : [],
                   isMultiSelect: false,
                 ),
               );
-              
-              if (result != null && result.isNotEmpty && result.first != _selectedBranchId) {
+
+              if (result != null &&
+                  result.isNotEmpty &&
+                  result.first != _selectedBranchId) {
                 // Check for unsaved changes before switching
                 if (_hasUnsavedChanges) {
                   final shouldDiscard = await _onWillPop();
                   if (!shouldDiscard) return;
                 }
-                
+
                 setState(() {
                   _selectedBranchId = result.first;
                   _isLoading = true;
@@ -1286,19 +1327,22 @@ class _RestaurantTimingScreenState extends State<RestaurantTimingScreen> {
               ),
               child: Row(
                 children: [
-                   Icon(Icons.store, color: Colors.deepPurple.shade700, size: 20),
-                   const SizedBox(width: 12),
-                   Expanded(
-                     child: Text(
-                       branchFilter.getBranchName(_selectedBranchId ?? 'Select Branch'),
-                       style: TextStyle(
-                         color: Colors.deepPurple.shade900,
-                         fontWeight: FontWeight.bold,
-                         fontSize: 16,
-                       ),
-                     ),
-                   ),
-                   Icon(Icons.swap_horiz, color: Colors.deepPurple.shade700, size: 20),
+                  Icon(Icons.store,
+                      color: Colors.deepPurple.shade700, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      branchFilter
+                          .getBranchName(_selectedBranchId ?? 'Select Branch'),
+                      style: TextStyle(
+                        color: Colors.deepPurple.shade900,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.swap_horiz,
+                      color: Colors.deepPurple.shade700, size: 20),
                 ],
               ),
             ),

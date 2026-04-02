@@ -32,10 +32,18 @@ class KDSGridTile extends StatelessWidget {
         ? DateTime.now().difference(timestamp.toDate()).inMinutes
         : 0;
 
-    final orderNum = data['dailyOrderNumber']?.toString() ?? '?';
+    final orderNum = OrderNumberHelper.getDisplayNumber(
+      data,
+      orderId: orderDoc.id,
+    );
+    final orderNumLabel =
+        orderNum == OrderNumberHelper.loadingText || orderNum.startsWith('#')
+            ? orderNum
+            : '#$orderNum';
     final tableName = data['tableName']?.toString();
     final customerName = data['customerName']?.toString() ?? 'Guest';
-    final orderType = (data['Order_type'] ?? data['orderType'] ?? 'delivery').toString();
+    final orderType =
+        (data['Order_type'] ?? data['orderType'] ?? 'delivery').toString();
     final addOnRound = (data['addOnRound'] as int?) ?? 0;
     final hasActiveAddOns = data['hasActiveAddOns'] == true;
 
@@ -90,7 +98,7 @@ class KDSGridTile extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            '#$orderNum',
+                            orderNumLabel,
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w800,
@@ -101,10 +109,12 @@ class KDSGridTile extends StatelessWidget {
                         // Add-on badge
                         if (hasActiveAddOns)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 2),
                             decoration: BoxDecoration(
                               color: Colors.orange.withOpacity(0.15),
-                              border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                              border: Border.all(
+                                  color: Colors.orange.withOpacity(0.5)),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -159,13 +169,15 @@ class KDSGridTile extends StatelessWidget {
                           '${items.length} items',
                           style: TextStyle(
                             fontSize: 12,
-                            color: isDark ? Colors.white54 : Colors.grey.shade600,
+                            color:
+                                isDark ? Colors.white54 : Colors.grey.shade600,
                           ),
                         ),
                         const Spacer(),
                         // Timer badge
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: tileColor,
                             borderRadius: BorderRadius.circular(4),
@@ -173,7 +185,8 @@ class KDSGridTile extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.timer_outlined, size: 11, color: Colors.white),
+                              const Icon(Icons.timer_outlined,
+                                  size: 11, color: Colors.white),
                               const SizedBox(width: 2),
                               Text(
                                 '${elapsed}m',
@@ -197,7 +210,9 @@ class KDSGridTile extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: isDark ? Colors.white.withOpacity(0.03) : Colors.grey.shade50,
+                color: isDark
+                    ? Colors.white.withOpacity(0.03)
+                    : Colors.grey.shade50,
                 border: Border(
                   top: BorderSide(
                     color: isDark ? Colors.white10 : Colors.grey.shade200,
@@ -212,7 +227,8 @@ class KDSGridTile extends StatelessWidget {
                 children: [
                   // Status label
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: statusColor.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(4),
@@ -243,7 +259,8 @@ class KDSGridTile extends StatelessWidget {
     IconData icon;
     Color color;
 
-    if (status == AppConstants.statusPending || status == AppConstants.statusNeedsAssignment) {
+    if (status == AppConstants.statusPending ||
+        status == AppConstants.statusNeedsAssignment) {
       nextStatus = AppConstants.statusPreparing;
       icon = Icons.play_arrow_rounded;
       color = const Color(0xFF2196F3);
@@ -271,7 +288,8 @@ class KDSGridTile extends StatelessWidget {
           child: isProcessing
               ? const Padding(
                   padding: EdgeInsets.all(6),
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2),
                 )
               : Icon(icon, color: Colors.white, size: 18),
         ),
@@ -280,7 +298,8 @@ class KDSGridTile extends StatelessWidget {
   }
 
   String _statusLabel(String status) {
-    if (status == AppConstants.statusPending || status == AppConstants.statusNeedsAssignment) return 'WAITING';
+    if (status == AppConstants.statusPending ||
+        status == AppConstants.statusNeedsAssignment) return 'WAITING';
     if (status == AppConstants.statusPreparing) return 'COOKING';
     if (status == AppConstants.statusPrepared) return 'READY';
     if (status == AppConstants.statusServed) return 'SERVED';
@@ -288,7 +307,9 @@ class KDSGridTile extends StatelessWidget {
   }
 
   Color _statusAccentColor(String status) {
-    if (status == AppConstants.statusPending || status == AppConstants.statusNeedsAssignment) return const Color(0xFF2196F3);
+    if (status == AppConstants.statusPending ||
+        status == AppConstants.statusNeedsAssignment)
+      return const Color(0xFF2196F3);
     if (status == AppConstants.statusPreparing) return const Color(0xFFF57C00);
     if (status == AppConstants.statusPrepared) return const Color(0xFF4CAF50);
     if (status == AppConstants.statusServed) return const Color(0xFF7C4DFF);

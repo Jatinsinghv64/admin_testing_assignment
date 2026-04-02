@@ -2146,7 +2146,8 @@ class _RiderSelectionPanelState extends State<_RiderSelectionPanel> {
     }
 
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance
-        .collection('Drivers')
+        .collection('staff')
+        .where('staffType', isEqualTo: 'driver')
         .where('isAvailable', isEqualTo: true)
         .where('status', isEqualTo: 'online');
 

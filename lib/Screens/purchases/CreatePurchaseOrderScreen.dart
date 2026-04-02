@@ -11,7 +11,19 @@ import '../../services/inventory/PurchaseOrderService.dart';
 
 class CreatePurchaseOrderScreen extends StatefulWidget {
   final bool isDrawer;
-  const CreatePurchaseOrderScreen({super.key, this.isDrawer = false});
+  final String? initialSupplierId;
+  final String initialSupplierName;
+  final String initialSupplierEmail;
+  final Map<String, dynamic>? editingPo;
+
+  const CreatePurchaseOrderScreen({
+    super.key,
+    this.isDrawer = false,
+    this.initialSupplierId,
+    this.initialSupplierName = '',
+    this.initialSupplierEmail = '',
+    this.editingPo,
+  });
 
   @override
   State<CreatePurchaseOrderScreen> createState() =>
@@ -29,13 +41,44 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
   String _supplierName = '';
   String _supplierEmail = '';
   String _poNumber = '';
-  DateTime _orderDate = DateTime.now();
+  final DateTime _orderDate = DateTime.now();
   DateTime? _expectedDate;
   bool _isSaving = false;
+ 
+  UserScopeService get userScope => Provider.of<UserScopeService>(context, listen: false);
+  BranchFilterService get branchFilter => Provider.of<BranchFilterService>(context, listen: false);
 
   @override
   void initState() {
     super.initState();
+    if (widget.editingPo != null) {
+      final po = widget.editingPo!;
+      _supplierId = (po['supplierId'] ?? '').toString();
+      _supplierName = (po['supplierName'] ?? '').toString();
+      _poNumber = (po['poNumber'] ?? '').toString();
+      _notesCtrl.text = (po['notes'] ?? '').toString();
+      
+      final expected = po['expectedDeliveryDate'] as Timestamp?;
+      if (expected != null) _expectedDate = expected.toDate();
+
+      final lineItems = po['lineItems'] as List? ?? [];
+      if (lineItems.isNotEmpty) {
+        _lines.clear();
+        for (final item in lineItems) {
+          final line = _PoLine();
+          line.ingredientIdCtrl.text = (item['ingredientId'] ?? '').toString();
+          line.ingredientNameCtrl.text = (item['ingredientName'] ?? '').toString();
+          line.qtyCtrl.text = (item['orderedQty'] ?? '').toString();
+          line.unitCtrl.text = (item['unit'] ?? 'pieces').toString();
+          line.costCtrl.text = (item['unitCost'] ?? '').toString();
+          _lines.add(line);
+        }
+      }
+    } else {
+      _supplierId = widget.initialSupplierId;
+      _supplierName = widget.initialSupplierName;
+      _supplierEmail = widget.initialSupplierEmail;
+    }
   }
 
   @override
@@ -46,6 +89,20 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
       _service = Provider.of<PurchaseOrderService>(context, listen: false);
       _inventoryService = Provider.of<InventoryService>(context, listen: false);
       _preparePoNumber();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant CreatePurchaseOrderScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialSupplierId != oldWidget.initialSupplierId ||
+        widget.initialSupplierName != oldWidget.initialSupplierName ||
+        widget.initialSupplierEmail != oldWidget.initialSupplierEmail) {
+      setState(() {
+        _supplierId = widget.initialSupplierId;
+        _supplierName = widget.initialSupplierName;
+        _supplierEmail = widget.initialSupplierEmail;
+      });
     }
   }
 
@@ -65,8 +122,8 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     final userScope = context.read<UserScopeService>();
     final branchFilter = context.read<BranchFilterService>();
     final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
-    
-    // If branchIds is empty, we still try to generate, 
+
+    // If branchIds is empty, we still try to generate,
     // but we'll try again if it's still generating.
     final po = await _service.generatePoNumber(branchIds);
     if (mounted) {
@@ -79,7 +136,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
     final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
-    
+
     // ✅ RE-TRIGGER GENERATION IF IT FAILED DURING DIDCHANGEDEPENDENCIES
     if (_poNumber.isEmpty && branchIds.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _preparePoNumber());
@@ -87,8 +144,8 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: widget.isDrawer 
-          ? null 
+      appBar: widget.isDrawer
+          ? null
           : AppBar(
               title: const Text('Create Purchase Order'),
               backgroundColor: Colors.white,
@@ -106,9 +163,9 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                   const Text(
-                    'New Purchase Order',
-                    style: TextStyle(
+                  Text(
+                    widget.editingPo != null ? 'Edit Purchase Order' : 'New Purchase Order',
+                    style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                       color: Colors.deepPurple,
@@ -123,249 +180,271 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
             ),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _service.streamSuppliers(branchIds, isActive: true),
-        builder: (context, snapshot) {
-          final suppliers = snapshot.data ?? [];
-          final selectedSupplier = suppliers.firstWhere(
-            (s) => (s['id']?.toString() ?? '') == (_supplierId ?? ''),
-            orElse: () => <String, dynamic>{},
-          );
-          final supplierIngredientIds = List<String>.from(
-            selectedSupplier['ingredientIds'] as List? ?? [],
-          );
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _card(
-                child: Column(
+              stream: _service.streamSuppliers(branchIds, isActive: true),
+              builder: (context, snapshot) {
+                final suppliers = snapshot.data ?? [];
+                final selectedSupplier = suppliers.firstWhere(
+                  (s) => (s['id']?.toString() ?? '') == (_supplierId ?? ''),
+                  orElse: () => <String, dynamic>{},
+                );
+                if (_supplierId != null &&
+                    _supplierName.isEmpty &&
+                    selectedSupplier.isNotEmpty) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    setState(() {
+                      _supplierName =
+                          (selectedSupplier['companyName'] ?? '').toString();
+                      _supplierEmail =
+                          (selectedSupplier['email'] ?? '').toString();
+                    });
+                  });
+                }
+                final supplierIngredientIds = List<String>.from(
+                  selectedSupplier['ingredientIds'] as List? ?? [],
+                );
+                return ListView(
+                  padding: const EdgeInsets.all(16),
                   children: [
-                    _kv('PO Number',
-                        _poNumber.isNotEmpty ? _poNumber : 'Generating...'),
-                    const SizedBox(height: 12),
-                    _buildSelector(
-                      label: 'Supplier *',
-                      value: _supplierName.isEmpty
-                          ? 'Select Supplier'
-                          : _supplierName,
-                      items: suppliers
-                          .map((s) => (s['companyName'] ?? '').toString())
-                          .toList(),
-                      onChanged: (selectedName) {
-                        final hit = suppliers.firstWhere(
-                          (s) =>
-                              (s['companyName'] ?? '').toString() ==
-                              selectedName,
-                          orElse: () => {},
-                        );
-                        setState(() {
-                          _supplierId = hit['id']?.toString();
-                          _supplierName = selectedName;
-                          _supplierEmail = (hit['email'] ?? '').toString();
-                        });
-                      },
-                      icon: Icons.business_outlined,
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: ListTile(
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
-                        leading: const Icon(Icons.event_outlined,
-                            color: Colors.deepPurple),
-                        title: const Text('Expected delivery date',
-                            style: TextStyle(fontSize: 14)),
-                        subtitle: Text(
-                          _expectedDate == null
-                              ? 'Select date'
-                              : _expectedDate!
-                                  .toLocal()
-                                  .toString()
-                                  .split(' ')
-                                  .first,
-                          style: TextStyle(
-                            color: _expectedDate == null
-                                ? Colors.grey[500]
-                                : Colors.black87,
+                    _card(
+                      child: Column(
+                        children: [
+                          _kv(
+                              'PO Number',
+                              _poNumber.isNotEmpty
+                                  ? _poNumber
+                                  : 'Generating...'),
+                          const SizedBox(height: 12),
+                          _buildSelector(
+                            label: 'Supplier *',
+                            value: _supplierName.isEmpty
+                                ? 'Select Supplier'
+                                : _supplierName,
+                            items: suppliers
+                                .map((s) => (s['companyName'] ?? '').toString())
+                                .toList(),
+                            onChanged: (selectedName) {
+                              final hit = suppliers.firstWhere(
+                                (s) =>
+                                    (s['companyName'] ?? '').toString() ==
+                                    selectedName,
+                                orElse: () => {},
+                              );
+                              setState(() {
+                                _supplierId = hit['id']?.toString();
+                                _supplierName = selectedName;
+                                _supplierEmail =
+                                    (hit['email'] ?? '').toString();
+                              });
+                            },
+                            icon: Icons.business_outlined,
                           ),
-                        ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.calendar_today_outlined,
-                              color: Colors.deepPurple),
-                          onPressed: () async {
-                            final picked = await showDatePicker(
-                              context: context,
-                              initialDate: DateTime.now(),
-                              firstDate: DateTime.now()
-                                  .subtract(const Duration(days: 1)),
-                              lastDate:
-                                  DateTime.now().add(const Duration(days: 365)),
-                            );
-                            if (picked != null)
-                              setState(() => _expectedDate = picked);
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              StreamBuilder<List<dynamic>>(
-                stream: _inventoryService.streamIngredients(branchIds),
-                builder: (context, invSnapshot) {
-                  final ingredients = (invSnapshot.data ?? []).map((i) {
-                    return {
-                      'id': i.id,
-                      'name': i.name,
-                      'unit': i.unit,
-                      'costPerUnit': i.costPerUnit,
-                      'category': i.category,
-                    };
-                  }).toList();
-                  return _card(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Line Items',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.deepPurple,
-                              fontSize: 16),
-                        ),
-                        const SizedBox(height: 12),
-                        ..._lines.asMap().entries.map((entry) {
-                          final index = entry.key;
-                          final line = entry.value;
-                          return Container(
-                            key: ObjectKey(line),
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(12),
+                          const SizedBox(height: 12),
+                          Container(
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: Colors.grey.shade200),
+                              border: Border.all(color: Colors.grey.shade300),
                             ),
-                            child: Column(
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child:
-                                          _buildItemSelector(
-                                        line,
-                                        ingredients,
-                                        supplierIngredientIds,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      onPressed: _lines.length == 1
-                                          ? null
-                                          : () {
-                                              setState(() {
-                                                _garbageLines.add(line);
-                                                _lines.removeAt(index);
-                                              });
-                                            },
-                                      icon: const Icon(Icons.delete_outline,
-                                          color: Colors.red),
-                                    ),
-                                  ],
+                            child: ListTile(
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                              leading: const Icon(Icons.event_outlined,
+                                  color: Colors.deepPurple),
+                              title: const Text('Expected delivery date',
+                                  style: TextStyle(fontSize: 14)),
+                              subtitle: Text(
+                                _expectedDate == null
+                                    ? 'Select date'
+                                    : _expectedDate!
+                                        .toLocal()
+                                        .toString()
+                                        .split(' ')
+                                        .first,
+                                style: TextStyle(
+                                  color: _expectedDate == null
+                                      ? Colors.grey[500]
+                                      : Colors.black87,
                                 ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _buildTextInput(
-                                        controller: line.qtyCtrl,
-                                        label: 'Qty',
-                                        keyboardType: const TextInputType
-                                            .numberWithOptions(decimal: true),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: _buildTextInput(
-                                        controller: line.unitCtrl,
-                                        label: 'Unit',
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: _buildTextInput(
-                                        controller: line.costCtrl,
-                                        label: 'Cost',
-                                        keyboardType: const TextInputType
-                                            .numberWithOptions(decimal: true),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                              ),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.calendar_today_outlined,
+                                    color: Colors.deepPurple),
+                                onPressed: () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: DateTime.now(),
+                                    firstDate: DateTime.now()
+                                        .subtract(const Duration(days: 1)),
+                                    lastDate: DateTime.now()
+                                        .add(const Duration(days: 365)),
+                                  );
+                                  if (picked != null) {
+                                    setState(() => _expectedDate = picked);
+                                  }
+                                },
+                              ),
                             ),
-                          );
-                        }),
-                        TextButton.icon(
-                          onPressed: () =>
-                              setState(() => _lines.add(_PoLine())),
-                          icon: const Icon(Icons.add, color: Colors.deepPurple),
-                          label: const Text('Add line item',
-                              style: TextStyle(color: Colors.deepPurple)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    StreamBuilder<List<dynamic>>(
+                      stream: _inventoryService.streamIngredients(branchIds),
+                      builder: (context, invSnapshot) {
+                        final ingredients = (invSnapshot.data ?? []).map((i) {
+                          return {
+                            'id': i.id,
+                            'name': i.name,
+                            'unit': i.unit,
+                            'costPerUnit': i.costPerUnit,
+                            'category': i.category,
+                          };
+                        }).toList();
+                        return _card(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Line Items',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.deepPurple,
+                                    fontSize: 16),
+                              ),
+                              const SizedBox(height: 12),
+                              ..._lines.asMap().entries.map((entry) {
+                                final index = entry.key;
+                                final line = entry.value;
+                                return Container(
+                                  key: ObjectKey(line),
+                                  margin: const EdgeInsets.only(bottom: 12),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border:
+                                        Border.all(color: Colors.grey.shade200),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: _buildItemSelector(
+                                              line,
+                                              ingredients,
+                                              supplierIngredientIds,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            onPressed: _lines.length == 1
+                                                ? null
+                                                : () {
+                                                    setState(() {
+                                                      _garbageLines.add(line);
+                                                      _lines.removeAt(index);
+                                                    });
+                                                  },
+                                            icon: const Icon(
+                                                Icons.delete_outline,
+                                                color: Colors.red),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: _buildTextInput(
+                                              controller: line.qtyCtrl,
+                                              label: 'Qty',
+                                              keyboardType: const TextInputType
+                                                  .numberWithOptions(
+                                                  decimal: true),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: _buildTextInput(
+                                              controller: line.unitCtrl,
+                                              label: 'Unit',
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: _buildTextInput(
+                                              controller: line.costCtrl,
+                                              label: 'Cost',
+                                              keyboardType: const TextInputType
+                                                  .numberWithOptions(
+                                                  decimal: true),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                              TextButton.icon(
+                                onPressed: () =>
+                                    setState(() => _lines.add(_PoLine())),
+                                icon: const Icon(Icons.add,
+                                    color: Colors.deepPurple),
+                                label: const Text('Add line item',
+                                    style: TextStyle(color: Colors.deepPurple)),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    _card(
+                      child: _buildTextInput(
+                        controller: _notesCtrl,
+                        label: 'Notes / special instructions',
+                        icon: Icons.notes_outlined,
+                        maxLines: 3,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSaving
+                                ? null
+                                : () => _save(branchIds, status: 'draft'),
+                            child: const Text('Save as Draft'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _isSaving
+                                ? null
+                                : () => _save(branchIds, status: 'submitted'),
+                            child: _isSaving
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white, strokeWidth: 2),
+                                  )
+                                : const Text('Submit to Supplier'),
+                          ),
                         ),
                       ],
                     ),
-                  );
-                },
-              ),
-              const SizedBox(height: 12),
-              _card(
-                child: _buildTextInput(
-                  controller: _notesCtrl,
-                  label: 'Notes / special instructions',
-                  icon: Icons.notes_outlined,
-                  maxLines: 3,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _isSaving
-                          ? null
-                          : () => _save(branchIds, status: 'draft'),
-                      child: const Text('Save as Draft'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isSaving
-                          ? null
-                          : () => _save(branchIds, status: 'submitted'),
-                      child: _isSaving
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2),
-                            )
-                          : const Text('Submit to Supplier'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          );
-        },
-      ),
-      ),
-      ],
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -668,32 +747,52 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     if (_poNumber.isEmpty || _poNumber == 'Generating...') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Purchase order number is still generating. Please wait.'),
+          content:
+              Text('Purchase order number is still generating. Please wait.'),
           backgroundColor: Colors.orange,
         ),
       );
       return;
     }
 
+    final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
     setState(() => _isSaving = true);
     try {
-      await _service.createPurchaseOrder(
-        branchIds: branchIds,
-        data: {
-          'poNumber': _poNumber,
-          'supplierId': _supplierId,
-          'supplierName': _supplierName,
-          'lineItems': rows,
-          'totalAmount': total,
-          'status': status,
-          'orderDate': Timestamp.fromDate(_orderDate),
-          'expectedDeliveryDate':
-              _expectedDate != null ? Timestamp.fromDate(_expectedDate!) : null,
-          'receivedDate': null,
-          'notes': _notesCtrl.text.trim(),
-          'createdBy': context.read<UserScopeService>().userIdentifier,
-        },
-      );
+      if (widget.editingPo != null) {
+        await _service.updatePurchaseOrder(
+          id: widget.editingPo!['id'].toString(),
+          updates: {
+            'supplierId': _supplierId,
+            'supplierName': _supplierName,
+            'lineItems': rows,
+            'totalAmount': total,
+            'status': status,
+            'expectedDeliveryDate': _expectedDate != null ? Timestamp.fromDate(_expectedDate!) : null,
+            'notes': _notesCtrl.text.trim(),
+          },
+          userId: userScope.userIdentifier,
+          userName: userScope.userEmail,
+        );
+      } else {
+        await _service.createPurchaseOrder(
+          branchIds: branchIds,
+          data: {
+            'poNumber': _poNumber,
+            'supplierId': _supplierId,
+            'supplierName': _supplierName,
+            'lineItems': rows,
+            'totalAmount': total,
+            'status': status,
+            'orderDate': Timestamp.fromDate(_orderDate),
+            'expectedDeliveryDate':
+                _expectedDate != null ? Timestamp.fromDate(_expectedDate!) : null,
+            'receivedDate': null,
+            'notes': _notesCtrl.text.trim(),
+          },
+          userId: userScope.userIdentifier,
+          userName: userScope.userEmail,
+        );
+      }
       if (status == 'submitted') {
         await _openSupplierEmail(rows, total);
       }
@@ -703,7 +802,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
           SnackBar(
             content: Text(status == 'submitted'
                 ? 'Purchase order $_poNumber submitted'
-                : 'Purchase order $_poNumber saved as draft'),
+                : widget.editingPo != null ? 'Purchase order $_poNumber updated' : 'Purchase order $_poNumber saved as draft'),
             backgroundColor: Colors.green,
             action: SnackBarAction(
               label: 'COPY ID',
@@ -746,8 +845,8 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
       'Notes: ${_notesCtrl.text.trim().isEmpty ? "None" : _notesCtrl.text.trim()}\n',
     );
 
-    final emailUri =
-        Uri.parse('mailto:${_supplierEmail.trim()}?subject=$subject&body=$body');
+    final emailUri = Uri.parse(
+        'mailto:${_supplierEmail.trim()}?subject=$subject&body=$body');
     if (await canLaunchUrl(emailUri)) {
       await launchUrl(emailUri);
     }

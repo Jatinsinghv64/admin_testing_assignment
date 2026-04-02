@@ -10,6 +10,20 @@
                 },
                 {
                     "fieldPath": "timestamp",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "timestamp",
                     "order": "DESCENDING"
                 }
             ]
@@ -453,6 +467,228 @@
             ]
         },
         {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "riderId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "riderId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "Orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "riderId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "isAvailable",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "isAvailable",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "isAvailable",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "isAvailable",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
             "collectionGroup": "staff",
             "queryScope": "COLLECTION",
             "fields": [
@@ -462,6 +698,104 @@
                 },
                 {
                     "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "isAvailable",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "staff",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "staffType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "branchIds",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "isAvailable",
                     "order": "ASCENDING"
                 }
             ]

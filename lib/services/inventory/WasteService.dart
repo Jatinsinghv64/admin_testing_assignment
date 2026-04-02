@@ -196,10 +196,12 @@ class WasteService {
         final ingSnap = await tx.get(ingRef);
         if (ingSnap.exists) {
           final ing = ingSnap.data()!;
-          final before = (ing['currentStock'] as num?)?.toDouble() ?? 0.0;
+          final branchStocks = ing['branchStocks'] as Map<String, dynamic>? ?? {};
+          final targetBranch = branchId.isNotEmpty ? branchId : 'default';
+          final before = (branchStocks[targetBranch] as num?)?.toDouble() ?? 0.0;
           final after = before + qty;
           tx.update(ingRef, {
-            'currentStock': after,
+            'branchStocks.$targetBranch': after,
             'updatedAt': Timestamp.fromDate(DateTime.now()),
           });
           final movRef =

@@ -5,7 +5,6 @@ class AppConstants {
   static const String collectionOrders = 'Orders';
   static const String collectionStaff = 'staff';
   static const String collectionBranch = 'Branch';
-  static const String collectionDrivers = 'Drivers';
   static const String collectionRiderAssignments = 'rider_assignments';
   static const String collectionMenuItems = 'menu_items';
   static const String collectionMenuCategories = 'menu_categories';
@@ -19,6 +18,7 @@ class AppConstants {
   static const String collectionPurchaseOrders = 'purchase_orders';
   static const String collectionWasteEntries = 'waste_entries';
   static const String collectionStockMovements = 'stock_movements';
+  static const String collectionIngredientUsageHistory = 'ingredient_usage_history';
 
   // Order Statuses (Standardized)
   static const String statusPending = 'pending';

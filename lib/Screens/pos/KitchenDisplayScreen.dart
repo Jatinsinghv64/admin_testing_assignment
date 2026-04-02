@@ -1222,7 +1222,14 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     }
 
     // Order metadata
-    final orderNum = _data['dailyOrderNumber']?.toString() ?? '?';
+    final orderNum = OrderNumberHelper.getDisplayNumber(
+      _data,
+      orderId: widget.orderDoc.id,
+    );
+    final orderNumLabel =
+        orderNum == OrderNumberHelper.loadingText || orderNum.startsWith('#')
+            ? orderNum
+            : '#$orderNum';
     final tableName = _data['tableName']?.toString() ?? '';
     final tablePrefix = tableName.isNotEmpty ? tableName : 'Order';
     // Display name: prefer displayName > name split, never show email
@@ -1329,8 +1336,8 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       Expanded(
                         child: Text(
                           isCancelled
-                              ? '$tablePrefix (#$orderNum) CANCELLED'
-                              : '$tablePrefix (#$orderNum)',
+                              ? '$tablePrefix ($orderNumLabel) CANCELLED'
+                              : '$tablePrefix ($orderNumLabel)',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w800,
@@ -1520,8 +1527,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
         final isOldItem =
             !isItemCancelled && hasActiveAddOns && idx < previousItemCount;
         final isCut = isBumped || isOrderServed || isItemCancelled;
-        final canBumpItem =
-            !isItemCancelled && !isCancelled && !isOrderServed;
+        final canBumpItem = !isItemCancelled && !isCancelled && !isOrderServed;
 
         return GestureDetector(
           onTap: canBumpItem ? () => _bumpItem(idx) : null,

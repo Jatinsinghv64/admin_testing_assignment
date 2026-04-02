@@ -59,7 +59,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       if (userScope.branchIds.length > 1 && !branchFilter.isLoaded) {
         branchFilter.loadBranchNames(userScope.branchIds);
       }
-      
+
       if (AnalyticsScreen.autoShowExportDialog) {
         AnalyticsScreen.autoShowExportDialog = false;
         _showExportDialog(context);
@@ -109,29 +109,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         controller: _tabController,
         children: [
           // 1. Sales Tab
-          _buildSalesTab(
-              effectiveBranchIds, userScope, branchFilter),
+          _buildSalesTab(effectiveBranchIds, userScope, branchFilter),
           // 2. Inventory Tab
-          _buildInventoryTab(
-              effectiveBranchIds, userScope, branchFilter),
+          _buildInventoryTab(effectiveBranchIds, userScope, branchFilter),
           // 3. Food Cost Tab
-          _buildFoodCostTab(
-              effectiveBranchIds, userScope, branchFilter),
+          _buildFoodCostTab(effectiveBranchIds, userScope, branchFilter),
           // 4. Waste Tab
-          _buildWasteTab(
-              effectiveBranchIds, userScope, branchFilter),
+          _buildWasteTab(effectiveBranchIds, userScope, branchFilter),
           // 5. Purchases Tab
-          _buildPurchasesTab(
-              effectiveBranchIds, userScope, branchFilter),
+          _buildPurchasesTab(effectiveBranchIds, userScope, branchFilter),
         ],
       ),
     );
   }
 
-  Widget _buildSalesTab(
-      List<String> effectiveBranchIds,
-      UserScopeService userScope,
-      BranchFilterService branchFilter) {
+  Widget _buildSalesTab(List<String> effectiveBranchIds,
+      UserScopeService userScope, BranchFilterService branchFilter) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
       child: Column(
@@ -228,10 +221,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     );
   }
 
-  Widget _buildInventoryTab(
-      List<String> effectiveBranchIds,
-      UserScopeService userScope,
-      BranchFilterService branchFilter) {
+  Widget _buildInventoryTab(List<String> effectiveBranchIds,
+      UserScopeService userScope, BranchFilterService branchFilter) {
     final future = _getInventoryAnalyticsFuture(effectiveBranchIds);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
@@ -412,10 +403,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     );
   }
 
-  Widget _buildFoodCostTab(
-      List<String> effectiveBranchIds,
-      UserScopeService userScope,
-      BranchFilterService branchFilter) {
+  Widget _buildFoodCostTab(List<String> effectiveBranchIds,
+      UserScopeService userScope, BranchFilterService branchFilter) {
     final future = _getFoodCostAnalyticsFuture(effectiveBranchIds);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
@@ -712,10 +701,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     );
   }
 
-  Widget _buildWasteTab(
-      List<String> effectiveBranchIds,
-      UserScopeService userScope,
-      BranchFilterService branchFilter) {
+  Widget _buildWasteTab(List<String> effectiveBranchIds,
+      UserScopeService userScope, BranchFilterService branchFilter) {
     final future = _getWasteAnalyticsFuture(effectiveBranchIds);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
@@ -912,10 +899,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     );
   }
 
-  Widget _buildPurchasesTab(
-      List<String> effectiveBranchIds,
-      UserScopeService userScope,
-      BranchFilterService branchFilter) {
+  Widget _buildPurchasesTab(List<String> effectiveBranchIds,
+      UserScopeService userScope, BranchFilterService branchFilter) {
     final future = _getPurchasesAnalyticsFuture(effectiveBranchIds);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
@@ -1324,7 +1309,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     final ingredientById = {for (final i in ingredients) i.id: i};
     final totalValue = ingredients.fold<double>(
       0.0,
-      (sum, i) => sum + (i.currentStock * i.costPerUnit),
+      (sum, i) =>
+          sum +
+          (i.getStock(branchIds.isNotEmpty ? branchIds.first : "default") *
+              i.costPerUnit),
     );
 
     final usedCost = movements.where((m) {
@@ -1377,15 +1365,21 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         .toSet();
 
     final deadStockRows = ingredients
-        .where((i) => i.currentStock > 0 && !usedInRange.contains(i.id))
+        .where((i) =>
+            i.getStock(branchIds.isNotEmpty ? branchIds.first : "default") >
+                0 &&
+            !usedInRange.contains(i.id))
         .map((i) {
       final lastUsed = latestDeduction[i.id];
       final days =
           lastUsed == null ? null : DateTime.now().difference(lastUsed).inDays;
       return _DeadStockRow(
         name: i.name,
-        currentStock: i.currentStock,
-        currentValue: i.currentStock * i.costPerUnit,
+        currentStock:
+            i.getStock(branchIds.isNotEmpty ? branchIds.first : "default"),
+        currentValue:
+            i.getStock(branchIds.isNotEmpty ? branchIds.first : "default") *
+                i.costPerUnit,
         daysSinceLastUsed: days,
       );
     }).toList()
@@ -2654,7 +2648,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     final orderType = (data['Order_type'] as String?) ?? 'unknown';
     final totalAmount = (data['totalAmount'] as num?)?.toDouble() ?? 0;
     final timestamp = data['timestamp'] as Timestamp?;
-    final dailyOrderNumber = data['dailyOrderNumber'] as int? ?? 0;
+    final dailyOrderNumber =
+        OrderNumberHelper.getDisplayNumber(data, orderId: orderId);
     final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
     final customerName = data['customerName'] as String? ?? '';
     final customerPhone = data['customerPhone'] as String? ?? '';
@@ -2696,7 +2691,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
             ),
             child: Center(
               child: Text(
-                '#$dailyOrderNumber',
+                dailyOrderNumber == OrderNumberHelper.loadingText ||
+                        dailyOrderNumber.startsWith('#')
+                    ? dailyOrderNumber
+                    : '#$dailyOrderNumber',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
@@ -3559,7 +3557,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
               ..sort((a, b) => b.value.compareTo(a.value));
             final topRiders = sortedRiders.take(5).toList();
 
-            // Fetch rider names from Drivers collection
+            // Fetch rider names from staff collection
             return FutureBuilder<List<Map<String, dynamic>>>(
               future: _fetchRiderNames(topRiders),
               builder: (context, riderSnapshot) {
@@ -3665,7 +3663,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     for (var entry in riderEntries) {
       try {
         final driverDoc = await FirebaseFirestore.instance
-            .collection('Drivers')
+            .collection('staff')
             .doc(entry.key)
             .get();
         final name = driverDoc.data()?['name'] as String? ?? 'Unknown Rider';
@@ -4282,12 +4280,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       final topRiderIds = riderIdCounts.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
 
-      // Fetch rider names from Drivers collection
+      // Fetch rider names from staff collection
       final topRidersList = <Map<String, dynamic>>[];
       for (var entry in topRiderIds.take(5)) {
         try {
           final driverDoc = await FirebaseFirestore.instance
-              .collection('Drivers')
+              .collection('staff')
               .doc(entry.key)
               .get();
           final name = driverDoc.data()?['name'] as String? ?? 'Unknown Rider';

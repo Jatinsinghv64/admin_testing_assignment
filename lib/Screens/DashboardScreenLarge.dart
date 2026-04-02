@@ -10,6 +10,7 @@ import '../constants.dart';
 import '../main.dart';
 import '../services/DashboardThemeService.dart'; // ✅ Added for Dark/Light Theme
 import '../Widgets/ExportReportDialog.dart';
+import '../Widgets/BusinessPerformancePanel.dart';
 import '../services/inventory/InventoryService.dart';
 import '../Models/IngredientModel.dart';
 
@@ -53,14 +54,14 @@ class DashboardScreenLarge extends StatelessWidget {
         userScope: userScope, filterBranchIds: filterBranchIds);
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _getActiveDriversStream(
+  Stream<QuerySnapshot<Map<String, dynamic>>> _getActiveRidersStream(
       BuildContext context) {
     final userScope = Provider.of<UserScopeService>(context, listen: true);
     final branchFilter =
         Provider.of<BranchFilterService>(context, listen: true);
     final filterBranchIds =
         branchFilter.getFilterBranchIds(userScope.branchIds);
-    return OrderService().getActiveDriversStream(
+    return OrderService().getActiveRidersStream(
         userScope: userScope, filterBranchIds: filterBranchIds);
   }
 
@@ -110,6 +111,13 @@ class DashboardScreenLarge extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildKpiCardsRow(context, dashColors),
+                      const SizedBox(height: 32),
+                      BusinessPerformancePanel(
+                        branchIds: branchFilter.getFilterBranchIds(userScope.branchIds),
+                        primaryColor: dashColors.primary,
+                        surfaceColor: dashColors.surfaceDark,
+                        textColor: dashColors.textPrimary,
+                      ),
                       const SizedBox(height: 32),
                       _buildChartSection(context, dashColors),
                       const SizedBox(height: 32),
@@ -178,8 +186,7 @@ class DashboardScreenLarge extends StatelessWidget {
             dashColors: dashColors,
           ),
           const SizedBox(width: 12),
-          // Primary action
-          _buildPrimaryButton(context, dashColors),
+          // Primary action removed
         ],
       ),
     );
@@ -332,7 +339,7 @@ class DashboardScreenLarge extends StatelessWidget {
       ),
       // 2. Active Riders
       StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _getActiveDriversStream(context),
+        stream: _getActiveRidersStream(context),
         builder: (context, snapshot) {
           final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
           final isLoading = !snapshot.hasData;
@@ -479,7 +486,11 @@ class DashboardScreenLarge extends StatelessWidget {
         builder: (context, snapshot) {
           int count = 0;
           if (snapshot.hasData) {
-            count = snapshot.data!.where((ing) => ing.isLowStock || ing.isOutOfStock).length;
+            final userScope = context.read<UserScopeService>();
+            final branchFilter = context.read<BranchFilterService>();
+            final effectiveBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+            final branchId = effectiveBranchIds.isNotEmpty ? effectiveBranchIds.first : "default";
+            count = snapshot.data!.where((ing) => ing.isLowStock(branchId) || ing.isOutOfStock(branchId)).length;
           }
           final isLoading = !snapshot.hasData;
           return _KpiCard(
@@ -989,32 +1000,7 @@ class DashboardScreenLarge extends StatelessWidget {
     );
   }
 
-  Widget _buildPrimaryButton(BuildContext context, _DashColors dashColors) {
-    return ElevatedButton.icon(
-      onPressed: () {
-        // POS is usually index 0
-        onTabChange(0);
-      },
-      icon: const Icon(Icons.add, size: 18, color: Colors.white),
-      label: const Text(
-        'New Order',
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w600,
-          fontSize: 14,
-        ),
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: dashColors.primary,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-    );
-  }
+
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
   String _formatOrderType(String type) {

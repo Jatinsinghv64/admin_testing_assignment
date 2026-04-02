@@ -12,6 +12,7 @@ import 'AnalyticsScreen.dart';
 import 'analytics_screen_large.dart';
 import 'package:provider/provider.dart';
 import '../constants.dart';
+import '../Widgets/ExportReportDialog.dart';
 
 class BranchManagementScreenLarge extends StatefulWidget {
   const BranchManagementScreenLarge({super.key});
@@ -96,23 +97,52 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
                 ),
               ],
             ),
-            Row(
-              children: [
-                StreamBuilder<int>(
-                  stream: _metricsService.getActiveBranchesCount(),
-                  builder: (context, snap) => _buildKPI('Active Branches', (snap.data ?? 0).toString(), '+0%', primaryColor),
+            const SizedBox(width: 24),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                reverse: true,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    StreamBuilder<int>(
+                      stream: _metricsService.getActiveBranchesCount(),
+                      builder: (context, snap) => _buildKPI('Active Branches', (snap.data ?? 0).toString(), '+0%', primaryColor),
+                    ),
+                    const SizedBox(width: 12),
+                    StreamBuilder<double>(
+                      stream: _metricsService.getTodayVolume(userScope.branchIds),
+                      builder: (context, snap) => _buildKPI('Today Volume', 'QAR ${(snap.data ?? 0).toStringAsFixed(0)}', 'Live', primaryColor),
+                    ),
+                    const SizedBox(width: 12),
+                    StreamBuilder<String>(
+                      stream: _metricsService.getTodayAvgDeliveryTime(userScope.branchIds),
+                      builder: (context, snap) => _buildKPI('Avg Delivery', snap.data ?? '--', 'Static', appTertiary),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        ExportReportDialog.show(context, preSelectedSections: {
+                          'revenue_by_branch',
+                          'sales_summary',
+                        });
+                      },
+                      icon: const Icon(Icons.download_rounded, size: 16),
+                      label: const Text('Export Report', style: TextStyle(fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: appSurface,
+                        foregroundColor: primaryColor,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide(color: Colors.grey[200]!),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 16),
-                StreamBuilder<double>(
-                  stream: _metricsService.getTodayVolume(userScope.branchIds),
-                  builder: (context, snap) => _buildKPI('Today Volume', 'QAR ${(snap.data ?? 0).toStringAsFixed(0)}', 'Live', primaryColor),
-                ),
-                const SizedBox(width: 16),
-                StreamBuilder<String>(
-                  stream: _metricsService.getTodayAvgDeliveryTime(userScope.branchIds),
-                  builder: (context, snap) => _buildKPI('Avg Delivery', snap.data ?? '--', 'Static', appTertiary),
-                ),
-              ],
+              ),
             ),
           ],
         );
@@ -397,8 +427,8 @@ class _BranchManagementScreenLargeState extends State<BranchManagementScreenLarg
                 stream: _metricsService.getActiveOrdersCount(doc.id),
                 builder: (context, ordersSnap) {
                   final activeOrders = ordersSnap.data ?? 0;
-                  // Dummy Capacity Logic: (Active Orders / 50 max) capped at 100
-                  final int maxCapacity = 50; 
+                  // Use branch-specific max capacity from Firestore, default 50
+                  final int maxCapacity = (data['maxCapacity'] as num?)?.toInt() ?? 50; 
                   final capacity = (activeOrders / maxCapacity * 100).clamp(0, 100).toInt();
 
                   return Column(

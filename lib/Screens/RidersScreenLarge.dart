@@ -9,6 +9,7 @@ import '../Widgets/BranchFilterService.dart';
 import '../Widgets/ProfessionalErrorWidget.dart';
 import '../main.dart'; // UserScopeService
 import 'BranchManagement.dart'; // MultiBranchSelector
+import '../Widgets/ExportReportDialog.dart';
 
 class RidersScreenLarge extends StatefulWidget {
   const RidersScreenLarge({super.key});
@@ -22,6 +23,7 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
   String _searchQuery = '';
   String? _selectedDriverId;
   DocumentSnapshot? _selectedDriverDoc;
+  final Set<String> _loggedFirestoreErrors = <String>{};
 
   final MapController _mapController = MapController();
 
@@ -46,27 +48,52 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
   List<String>? _lastFilterBranchIds;
   String? _lastFilterStatus;
 
-  void _updateStableStreams(List<String> filterBranchIds, List<String> userBranchIds) {
-    final bool branchIdsChanged = _lastFilterBranchIds == null || 
+  void _logFirestoreQueryError(String queryName, Object? error) {
+    if (error == null) return;
+
+    final message = error.toString();
+    final cacheKey = '$queryName::$message';
+    if (_loggedFirestoreErrors.contains(cacheKey)) return;
+    _loggedFirestoreErrors.add(cacheKey);
+
+    final urlMatch = RegExp(r'https?://\S+').firstMatch(message);
+    final indexUrl = urlMatch?.group(0);
+
+    debugPrint('Firestore query failed for $queryName');
+    debugPrint(message);
+    if (indexUrl != null) {
+      debugPrint('Create index link: $indexUrl');
+    }
+  }
+
+  void _updateStableStreams(
+      List<String> filterBranchIds, List<String> userBranchIds) {
+    final bool branchIdsChanged = _lastFilterBranchIds == null ||
         _lastFilterBranchIds!.length != filterBranchIds.length ||
         !_lastFilterBranchIds!.every((id) => filterBranchIds.contains(id));
-    
+
     final bool statusChanged = _lastFilterStatus != _filterStatus;
 
     if (branchIdsChanged || statusChanged) {
       // 1. Directory Query
-      Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('Drivers').orderBy('name');
+      Query<Map<String, dynamic>> query = FirebaseFirestore.instance
+          .collection('staff')
+          .where('staffType', isEqualTo: 'driver')
+          .orderBy('name');
       if (filterBranchIds.isNotEmpty) {
         if (filterBranchIds.length == 1) {
-          query = query.where('branchIds', arrayContains: filterBranchIds.first);
+          query =
+              query.where('branchIds', arrayContains: filterBranchIds.first);
         } else {
-          query = query.where('branchIds', arrayContainsAny: filterBranchIds.take(10).toList());
+          query = query.where('branchIds',
+              arrayContainsAny: filterBranchIds.take(10).toList());
         }
       } else if (userBranchIds.isNotEmpty) {
         if (userBranchIds.length == 1) {
           query = query.where('branchIds', arrayContainsAny: userBranchIds);
         } else {
-          query = query.where('branchIds', arrayContainsAny: userBranchIds.take(10).toList());
+          query = query.where('branchIds',
+              arrayContainsAny: userBranchIds.take(10).toList());
         }
       }
 
@@ -83,28 +110,34 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
 
       // 2. Map Query (Always online or on_delivery + branch filter)
       Query<Map<String, dynamic>> mapQuery = FirebaseFirestore.instance
-          .collection('Drivers')
+          .collection('staff')
+          .where('staffType', isEqualTo: 'driver')
           .where('status', whereIn: ['online', 'on_delivery']);
-      
+
       if (filterBranchIds.isNotEmpty) {
         if (filterBranchIds.length == 1) {
-          mapQuery = mapQuery.where('branchIds', arrayContains: filterBranchIds.first);
+          mapQuery =
+              mapQuery.where('branchIds', arrayContains: filterBranchIds.first);
         } else {
-          mapQuery = mapQuery.where('branchIds', arrayContainsAny: filterBranchIds.take(10).toList());
+          mapQuery = mapQuery.where('branchIds',
+              arrayContainsAny: filterBranchIds.take(10).toList());
         }
       }
       _mapStream = mapQuery.snapshots();
 
       // 3. Tracking Query (Always on_delivery + branch filter)
       Query<Map<String, dynamic>> trackingQuery = FirebaseFirestore.instance
-          .collection('Drivers')
+          .collection('staff')
+          .where('staffType', isEqualTo: 'driver')
           .where('status', isEqualTo: 'on_delivery');
-      
+
       if (filterBranchIds.isNotEmpty) {
         if (filterBranchIds.length == 1) {
-          trackingQuery = trackingQuery.where('branchIds', arrayContains: filterBranchIds.first);
+          trackingQuery = trackingQuery.where('branchIds',
+              arrayContains: filterBranchIds.first);
         } else {
-          trackingQuery = trackingQuery.where('branchIds', arrayContainsAny: filterBranchIds.take(10).toList());
+          trackingQuery = trackingQuery.where('branchIds',
+              arrayContainsAny: filterBranchIds.take(10).toList());
         }
       }
       _trackingStream = trackingQuery.limit(5).snapshots();
@@ -117,7 +150,6 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
       _lastFilterStatus = _filterStatus;
     }
   }
-
 
   @override
   void initState() {
@@ -143,14 +175,17 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
 
     // 1. Active riders (online or on_delivery)
     Query<Map<String, dynamic>> ridersQuery = FirebaseFirestore.instance
-        .collection('Drivers')
+        .collection('staff')
+        .where('staffType', isEqualTo: 'driver')
         .where('status', whereIn: ['online', 'on_delivery']);
-    
+
     if (branchIds.isNotEmpty) {
       if (branchIds.length == 1) {
-        ridersQuery = ridersQuery.where('branchIds', arrayContains: branchIds.first);
+        ridersQuery =
+            ridersQuery.where('branchIds', arrayContains: branchIds.first);
       } else {
-        ridersQuery = ridersQuery.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+        ridersQuery = ridersQuery.where('branchIds',
+            arrayContainsAny: branchIds.take(10).toList());
       }
     }
 
@@ -166,17 +201,20 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     final today = DateTime.now();
     final startOfDay = DateTime(today.year, today.month, today.day);
     final endOfDay = startOfDay.add(const Duration(days: 1));
-    
+
     Query<Map<String, dynamic>> ordersQuery = FirebaseFirestore.instance
         .collection('Orders')
-        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+        .where('timestamp',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
         .where('timestamp', isLessThan: Timestamp.fromDate(endOfDay));
-    
+
     if (branchIds.isNotEmpty) {
       if (branchIds.length == 1) {
-        ordersQuery = ordersQuery.where('branchIds', arrayContains: branchIds.first);
+        ordersQuery =
+            ordersQuery.where('branchIds', arrayContains: branchIds.first);
       } else {
-        ordersQuery = ordersQuery.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+        ordersQuery = ordersQuery.where('branchIds',
+            arrayContainsAny: branchIds.take(10).toList());
       }
     }
 
@@ -192,12 +230,14 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     Query<Map<String, dynamic>> deliveredQuery = FirebaseFirestore.instance
         .collection('Orders')
         .where('status', isEqualTo: 'delivered');
-    
+
     if (branchIds.isNotEmpty) {
       if (branchIds.length == 1) {
-        deliveredQuery = deliveredQuery.where('branchIds', arrayContains: branchIds.first);
+        deliveredQuery =
+            deliveredQuery.where('branchIds', arrayContains: branchIds.first);
       } else {
-        deliveredQuery = deliveredQuery.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+        deliveredQuery = deliveredQuery.where('branchIds',
+            arrayContainsAny: branchIds.take(10).toList());
       }
     }
 
@@ -209,7 +249,7 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
 
       for (var doc in snapshot.docs) {
         final data = doc.data();
-        
+
         // Rating
         final rawRating = data['riderRating'];
         double? ratingVal;
@@ -234,7 +274,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
       if (mounted) {
         setState(() {
           _avgRating = ratedCount > 0 ? totalRating / ratedCount : 0;
-          _avgDeliveryTime = durationCount > 0 ? totalDuration / durationCount : 0;
+          _avgDeliveryTime =
+              durationCount > 0 ? totalDuration / durationCount : 0;
         });
       }
     });
@@ -243,12 +284,14 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     Query<Map<String, dynamic>> incidentsQuery = FirebaseFirestore.instance
         .collection('Orders')
         .where('status', whereIn: ['issue', 'cancelled']);
-    
+
     if (branchIds.isNotEmpty) {
       if (branchIds.length == 1) {
-        incidentsQuery = incidentsQuery.where('branchIds', arrayContains: branchIds.first);
+        incidentsQuery =
+            incidentsQuery.where('branchIds', arrayContains: branchIds.first);
       } else {
-        incidentsQuery = incidentsQuery.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+        incidentsQuery = incidentsQuery.where('branchIds',
+            arrayContainsAny: branchIds.take(10).toList());
       }
     }
 
@@ -261,14 +304,13 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     });
   }
 
-
   @override
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
     final theme = Theme.of(context);
 
-    final filterBranchIds = 
+    final filterBranchIds =
         branchFilter.getFilterBranchIds(userScope.branchIds);
 
     _updateStableStreams(filterBranchIds, userScope.branchIds);
@@ -280,56 +322,75 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
           children: [
             // ========== TOP APP BAR ==========
 
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            decoration: BoxDecoration(
-              color: theme.appBarTheme.backgroundColor ?? Colors.white,
-              border: Border(
-                bottom: BorderSide(color: theme.primaryColor.withOpacity(0.2)),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              decoration: BoxDecoration(
+                color: theme.appBarTheme.backgroundColor ?? Colors.white,
+                border: Border(
+                  bottom:
+                      BorderSide(color: theme.primaryColor.withOpacity(0.2)),
+                ),
+              ),
+              child: Row(
+                children: [
+                  // Logo / Title
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: theme.primaryColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(Icons.delivery_dining,
+                            color: theme.primaryColor, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Rider Management',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      ExportReportDialog.show(context,
+                          preSelectedSections: {'staff_summary'});
+                    },
+                    icon: const Icon(Icons.download_rounded),
+                    label: const Text('Export Report'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: theme.primaryColor,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(color: Colors.grey.shade300),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  // Add New Rider button
+                  ElevatedButton.icon(
+                    onPressed: () => _showDriverDialog(context, userScope),
+                    icon: const Icon(Icons.person_add),
+                    label: const Text('Add New Rider'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: theme.primaryColor,
+                      foregroundColor: theme.colorScheme.onPrimary,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ],
               ),
             ),
-            child: Row(
-              children: [
-                // Logo / Title
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: theme.primaryColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(Icons.delivery_dining,
-                          color: theme.primaryColor, size: 24),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Rider Management',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                // Add New Rider button
-                ElevatedButton.icon(
-                  onPressed: () => _showDriverDialog(context, userScope),
-                  icon: const Icon(Icons.person_add),
-                  label: const Text('Add New Rider'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.primaryColor,
-                    foregroundColor: theme.colorScheme.onPrimary,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
 
             // ========== MAIN CONTENT ==========
             Padding(
@@ -337,7 +398,6 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
                   // Top metrics info
                   Text(
                     'Monitoring $_activeRiderCount active riders across delivery zones.',
@@ -356,14 +416,13 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-
                         // LEFT COLUMN: Rider list
                         Container(
                           width: 320,
                           margin: const EdgeInsets.only(right: 16),
-                          child: _buildRiderList(_directoryStream!, theme.primaryColor),
+                          child: _buildRiderList(
+                              _directoryStream!, theme.primaryColor),
                         ),
-
 
                         // MIDDLE COLUMN: Map + Active tracking
                         Expanded(
@@ -389,29 +448,29 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                           flex: 3,
                           child: _selectedDriverDoc != null
                               ? _DriverDetailPaneNew(
-                            driverDoc: _selectedDriverDoc!,
-                            userScope: userScope,
-                            onClose: () => setState(() {
-                              _selectedDriverId = null;
-                              _selectedDriverDoc = null;
-                            }),
-                          )
+                                  driverDoc: _selectedDriverDoc!,
+                                  userScope: userScope,
+                                  onClose: () => setState(() {
+                                    _selectedDriverId = null;
+                                    _selectedDriverDoc = null;
+                                  }),
+                                )
                               : Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.two_wheeler,
-                                    size: 64, color: Colors.grey[400]),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'Select a rider to view details',
-                                  style: TextStyle(
-                                      color: Colors.grey[600],
-                                      fontSize: 16),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.two_wheeler,
+                                          size: 64, color: Colors.grey[400]),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        'Select a rider to view details',
+                                        style: TextStyle(
+                                            color: Colors.grey[600],
+                                            fontSize: 16),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ],
-                            ),
-                          ),
                         ),
                       ],
                     ),
@@ -425,40 +484,36 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     );
   }
 
-
-
-
-
   Widget _buildMetricsRow(Color primary) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-
-        _MetricCard(
-          title: 'Avg. Delivery Time',
-          value: '${_avgDeliveryTime.toStringAsFixed(1)} min',
-          change: '-4%', // You can compute real change if you have historical data
-          progress: 0.75,
-          color: primary,
-        ),
-        const SizedBox(width: 16),
-        _MetricCard(
-          title: 'Total Orders Today',
-          value: '$_totalOrdersToday',
-          change: '+12%',
-          progress: 0.88,
-          color: primary,
-        ),
-        const SizedBox(width: 16),
-        _MetricCard(
-          title: 'Customer Rating',
-          value: _avgRating.toStringAsFixed(2),
-          change: '+0.2',
-          progress: _avgRating / 5,
-          color: primary,
-        ),
-        const SizedBox(width: 16),
+          _MetricCard(
+            title: 'Avg. Delivery Time',
+            value: '${_avgDeliveryTime.toStringAsFixed(1)} min',
+            change:
+                '-4%', // You can compute real change if you have historical data
+            progress: 0.75,
+            color: primary,
+          ),
+          const SizedBox(width: 16),
+          _MetricCard(
+            title: 'Total Orders Today',
+            value: '$_totalOrdersToday',
+            change: '+12%',
+            progress: 0.88,
+            color: primary,
+          ),
+          const SizedBox(width: 16),
+          _MetricCard(
+            title: 'Customer Rating',
+            value: _avgRating.toStringAsFixed(2),
+            change: '+0.2',
+            progress: _avgRating / 5,
+            color: primary,
+          ),
+          const SizedBox(width: 16),
           _MetricCard(
             title: 'Active Incidents',
             value: '$_activeIncidents',
@@ -472,8 +527,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
     );
   }
 
-
-  Widget _buildRiderList(Stream<QuerySnapshot<Map<String, dynamic>>> stream, Color primary) {
+  Widget _buildRiderList(
+      Stream<QuerySnapshot<Map<String, dynamic>>> stream, Color primary) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -488,7 +543,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('Rider Directory',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -530,7 +586,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                   onChanged: (val) => setState(() => _searchQuery = val),
                   decoration: InputDecoration(
                     hintText: 'Search riders...',
-                    prefixIcon: Icon(Icons.search, size: 18, color: Colors.grey),
+                    prefixIcon:
+                        Icon(Icons.search, size: 18, color: Colors.grey),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide.none,
@@ -549,6 +606,7 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
               stream: stream,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
+                  _logFirestoreQueryError('Rider Directory', snapshot.error);
                   return ProfessionalErrorWidget(
                     title: 'Error',
                     message: snapshot.error.toString(),
@@ -567,7 +625,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                   docs = docs.where((doc) {
                     final data = doc.data();
                     final name = (data['name'] as String? ?? '').toLowerCase();
-                    final email = (data['email'] as String? ?? '').toLowerCase();
+                    final email =
+                        (data['email'] as String? ?? '').toLowerCase();
                     return name.contains(q) || email.contains(q);
                   }).toList();
                 }
@@ -631,8 +690,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                 Container(
                   width: 8,
                   height: 8,
-                  decoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle),
-
+                  decoration: BoxDecoration(
+                      color: Colors.green, shape: BoxShape.circle),
                 ),
                 const SizedBox(width: 8),
                 const Text(
@@ -699,12 +758,11 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                                           ? Colors.green
                                           : Colors.orange,
                                       width: 2),
-
                                 ),
                                 child: CircleAvatar(
                                   radius: 16,
-                                  backgroundImage:
-                                  data['profileImageUrl'] != null
+                                  backgroundImage: data['profileImageUrl'] !=
+                                          null
                                       ? NetworkImage(data['profileImageUrl'])
                                       : null,
                                   child: data['profileImageUrl'] == null
@@ -724,7 +782,6 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                                         : Colors.orange,
                                     shape: BoxShape.circle,
                                     border: Border.all(color: Colors.white),
-
                                   ),
                                 ),
                               ),
@@ -747,7 +804,7 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                   children: [
                     TileLayer(
                       urlTemplate:
-                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       userAgentPackageName: 'com.example.app',
                     ),
                     MarkerLayer(markers: markers),
@@ -760,7 +817,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Colors.grey[50],
-              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+              borderRadius:
+                  const BorderRadius.vertical(bottom: Radius.circular(12)),
             ),
             child: Row(
               children: [
@@ -769,7 +827,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                     Container(
                         width: 12,
                         height: 12,
-                        decoration: BoxDecoration(color: primary, shape: BoxShape.circle)),
+                        decoration: BoxDecoration(
+                            color: primary, shape: BoxShape.circle)),
                     const SizedBox(width: 4),
                     const Text('On Delivery', style: TextStyle(fontSize: 12)),
                   ],
@@ -780,7 +839,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                     Container(
                         width: 12,
                         height: 12,
-                        decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle)),
+                        decoration: const BoxDecoration(
+                            color: Colors.green, shape: BoxShape.circle)),
                     const SizedBox(width: 4),
                     const Text('Available', style: TextStyle(fontSize: 12)),
                   ],
@@ -874,7 +934,6 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                                   style: TextStyle(
                                       fontSize: 10, color: Colors.grey[600]),
                                 ),
-
                               ],
                             ),
                           ),
@@ -884,9 +943,9 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                               Text(
                                 '${(data['distanceToNext'] ?? '?')} km',
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.bold, color: Colors.orange),
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.orange),
                               ),
-
                               Text(
                                 'ETA: ${(data['eta'] ?? '?')} min',
                                 style: TextStyle(
@@ -911,7 +970,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
       {DocumentSnapshot<Map<String, dynamic>>? driverDoc}) {
     showDialog(
       context: context,
-      builder: (context) => _DriverDialog(userScope: userScope, driverDoc: driverDoc),
+      builder: (context) =>
+          _DriverDialog(userScope: userScope, driverDoc: driverDoc),
     );
   }
 
@@ -920,7 +980,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
       context: context,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 800, maxHeight: 600),
             child: Column(
@@ -933,7 +994,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                   backgroundColor: Theme.of(context).primaryColor,
                   foregroundColor: Colors.white,
                   shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(20)),
                   ),
                   leading: const Icon(Icons.location_on, color: Colors.white),
                   actions: [
@@ -951,7 +1013,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                         return const Center(child: CircularProgressIndicator());
                       }
 
-                      final data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+                      final data =
+                          snapshot.data!.data() as Map<String, dynamic>? ?? {};
                       final geoPoint = data['currentLocation'] as GeoPoint?;
                       final status = data['status'] ?? 'offline';
 
@@ -961,7 +1024,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.location_off, size: 64, color: Colors.grey),
+                              Icon(Icons.location_off,
+                                  size: 64, color: Colors.grey),
                               SizedBox(height: 16),
                               Text('No GPS data available for this driver'),
                             ],
@@ -969,7 +1033,8 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                         );
                       }
 
-                      final position = LatLng(geoPoint.latitude, geoPoint.longitude);
+                      final position =
+                          LatLng(geoPoint.latitude, geoPoint.longitude);
 
                       return FlutterMap(
                         options: MapOptions(
@@ -979,26 +1044,31 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                         children: [
                           TileLayer(
                             urlTemplate:
-                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                             userAgentPackageName: 'com.example.app',
                           ),
                           MarkerLayer(
                             markers: [
                               Marker(
                                 point: position,
-                                width: 120, // Increased to avoid clipping labels
+                                width:
+                                    120, // Increased to avoid clipping labels
                                 height: 80,
 
                                 child: Column(
                                   children: [
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 6),
                                       decoration: BoxDecoration(
-                                        color: status == 'online' ? Colors.green : Theme.of(context).primaryColor,
+                                        color: status == 'online'
+                                            ? Colors.green
+                                            : Theme.of(context).primaryColor,
                                         borderRadius: BorderRadius.circular(8),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: Colors.black.withOpacity(0.1),
+                                            color:
+                                                Colors.black.withOpacity(0.1),
                                             blurRadius: 4,
                                           )
                                         ],
@@ -1012,16 +1082,15 @@ class _RidersScreenLargeState extends State<RidersScreenLarge> {
                                         ),
                                       ),
                                     ),
-
-
                                     Icon(
                                       Icons.location_on,
                                       color: status == 'online'
                                           ? Colors.green
-                                          : (status == 'on_delivery' ? Colors.orange : Colors.grey),
+                                          : (status == 'on_delivery'
+                                              ? Colors.orange
+                                              : Colors.grey),
                                       size: 40,
                                     ),
-
                                   ],
                                 ),
                               ),
@@ -1080,7 +1149,8 @@ class _FilterChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? primary : primary.withOpacity(0.1),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? primary : primary.withOpacity(0.2)),
+          border:
+              Border.all(color: selected ? primary : primary.withOpacity(0.2)),
         ),
         child: Text(
           label,
@@ -1090,7 +1160,6 @@ class _FilterChip extends StatelessWidget {
             fontSize: 12,
           ),
         ),
-
       ),
     );
   }
@@ -1138,7 +1207,6 @@ class _DriverListTile extends StatelessWidget {
       statusLabel = 'Offline';
     }
 
-
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
@@ -1147,9 +1215,9 @@ class _DriverListTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: isSelected ? primaryColor : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: isSelected ? primaryColor : Colors.transparent),
+          border:
+              Border.all(color: isSelected ? primaryColor : Colors.transparent),
         ),
-
         child: Row(
           children: [
             Stack(
@@ -1192,7 +1260,6 @@ class _DriverListTile extends StatelessWidget {
                       color: isSelected ? Colors.white : Colors.black87,
                     ),
                   ),
-
                   const SizedBox(height: 4),
                   Text(
                     vehicleType,
@@ -1200,10 +1267,10 @@ class _DriverListTile extends StatelessWidget {
                     maxLines: 1,
                     style: TextStyle(
                         fontSize: 10,
-                        color: isSelected ? Colors.white.withOpacity(0.8) : Colors.grey[600]),
+                        color: isSelected
+                            ? Colors.white.withOpacity(0.8)
+                            : Colors.grey[600]),
                   ),
-
-
                 ],
               ),
             ),
@@ -1215,7 +1282,6 @@ class _DriverListTile extends StatelessWidget {
                 color: isSelected ? Colors.white : statusColor,
               ),
             ),
-
           ],
         ),
       ),
@@ -1253,48 +1319,45 @@ class _MetricCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(title,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isIncident
-                        ? Colors.red.withOpacity(0.1)
-                        : color.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    change,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: isIncident ? Colors.red : color,
-                    ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(title,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isIncident
+                      ? Colors.red.withOpacity(0.1)
+                      : color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  change,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: isIncident ? Colors.red : color,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(value,
-                style: const TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            LinearProgressIndicator(
-              value: progress.clamp(0.0, 1.0),
-              backgroundColor: Colors.grey[200],
-              valueColor: AlwaysStoppedAnimation<Color>(
-                  isIncident ? Colors.red : color),
-            ),
-          ],
-        ),
-      );
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(value,
+              style:
+                  const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          LinearProgressIndicator(
+            value: progress.clamp(0.0, 1.0),
+            backgroundColor: Colors.grey[200],
+            valueColor:
+                AlwaysStoppedAnimation<Color>(isIncident ? Colors.red : color),
+          ),
+        ],
+      ),
+    );
   }
-
-
 }
 
 // ========== DETAIL PANE ==========
@@ -1318,7 +1381,6 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
   double? _realAverageRating;
   StreamSubscription? _statsSub;
 
-
   @override
   void initState() {
     super.initState();
@@ -1330,7 +1392,6 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
     _statsSub?.cancel();
     super.dispose();
   }
-
 
   @override
   void didUpdateWidget(covariant _DriverDetailPaneNew oldWidget) {
@@ -1378,7 +1439,6 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
     });
   }
 
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1399,7 +1459,8 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
                 color: theme.primaryColor.withOpacity(0.1),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(12)),
               ),
               child: Stack(
                 children: [
@@ -1418,7 +1479,8 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
                       const SizedBox(height: 12),
                       Text(
                         name,
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
@@ -1433,7 +1495,7 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
                           builder: (context) => _DriverDialog(
                             userScope: widget.userScope,
                             driverDoc: widget.driverDoc
-                            as DocumentSnapshot<Map<String, dynamic>>,
+                                as DocumentSnapshot<Map<String, dynamic>>,
                           ),
                         );
                       },
@@ -1452,7 +1514,7 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
                   _DetailRow(
                       icon: Icons.motorcycle,
                       label:
-                      '${vehicle['type'] ?? 'Unknown'} • ${vehicle['number'] ?? ''}'),
+                          '${vehicle['type'] ?? 'Unknown'} • ${vehicle['number'] ?? ''}'),
                   _DetailRow(icon: Icons.email, label: data['email'] ?? 'N/A'),
                   const SizedBox(height: 16),
                   // Stats row
@@ -1468,7 +1530,8 @@ class _DriverDetailPaneNewState extends State<_DriverDetailPaneNew> {
                       Expanded(
                         child: _StatBox(
                           label: 'Rating',
-                          value: _realAverageRating?.toStringAsFixed(1) ?? '0.0',
+                          value:
+                              _realAverageRating?.toStringAsFixed(1) ?? '0.0',
                         ),
                       ),
                     ],
@@ -1664,14 +1727,14 @@ class _DriverDialogState extends State<_DriverDialog> {
           'number': _vehicleNumCtrl.text.trim(),
         },
         'assignedOrderId':
-        _isEdit ? widget.driverDoc!.data()!['assignedOrderId'] ?? '' : '',
+            _isEdit ? widget.driverDoc!.data()!['assignedOrderId'] ?? '' : '',
         'fcmToken': _isEdit ? widget.driverDoc!.data()!['fcmToken'] ?? '' : '',
         'rating': _isEdit ? widget.driverDoc!.data()!['rating'] ?? '0' : '0',
         'totalDeliveries':
-        _isEdit ? widget.driverDoc!.data()!['totalDeliveries'] ?? 0 : 0,
+            _isEdit ? widget.driverDoc!.data()!['totalDeliveries'] ?? 0 : 0,
         'currentLocation': _isEdit
             ? widget.driverDoc!.data()!['currentLocation'] ??
-            const GeoPoint(0, 0)
+                const GeoPoint(0, 0)
             : const GeoPoint(0, 0),
       };
 
@@ -1682,8 +1745,9 @@ class _DriverDialogState extends State<_DriverDialog> {
         if (docId.isEmpty) {
           throw Exception('Email is required to create a new driver.');
         }
+        driverData['staffType'] = 'driver';
         await FirebaseFirestore.instance
-            .collection('Drivers')
+            .collection('staff')
             .doc(docId)
             .set(driverData);
       }
@@ -1693,7 +1757,7 @@ class _DriverDialogState extends State<_DriverDialog> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content:
-              Text('Driver ${_isEdit ? 'updated' : 'added'} successfully!'),
+                  Text('Driver ${_isEdit ? 'updated' : 'added'} successfully!'),
               backgroundColor: Theme.of(context).primaryColor),
         );
       }
@@ -1746,7 +1810,7 @@ class _DriverDialogState extends State<_DriverDialog> {
               decoration: BoxDecoration(
                 color: primary,
                 borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(20)),
+                    const BorderRadius.vertical(top: Radius.circular(20)),
               ),
               child: Row(
                 children: [
@@ -1799,10 +1863,11 @@ class _DriverDialogState extends State<_DriverDialog> {
                         controller: _nameCtrl,
                         decoration: inputDecoration.copyWith(
                           labelText: 'Full Name',
-                          prefixIcon: Icon(Icons.person_outline, color: primary),
+                          prefixIcon:
+                              Icon(Icons.person_outline, color: primary),
                         ),
                         validator: (v) =>
-                        v!.isEmpty ? 'Name is required' : null,
+                            v!.isEmpty ? 'Name is required' : null,
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
@@ -1810,19 +1875,21 @@ class _DriverDialogState extends State<_DriverDialog> {
                         enabled: !_isEdit,
                         decoration: inputDecoration.copyWith(
                           labelText: 'Email (Login ID)',
-                          prefixIcon: Icon(Icons.email_outlined, color: primary),
+                          prefixIcon:
+                              Icon(Icons.email_outlined, color: primary),
                           helperText:
-                          _isEdit ? 'Email cannot be changed' : null,
+                              _isEdit ? 'Email cannot be changed' : null,
                         ),
                         validator: (v) =>
-                        v!.isEmpty ? 'Email is required' : null,
+                            v!.isEmpty ? 'Email is required' : null,
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
                         controller: _phoneCtrl,
                         decoration: inputDecoration.copyWith(
                           labelText: 'Phone Number',
-                          prefixIcon: Icon(Icons.phone_outlined, color: primary),
+                          prefixIcon:
+                              Icon(Icons.phone_outlined, color: primary),
                         ),
                         keyboardType: TextInputType.phone,
                       ),
@@ -1836,7 +1903,8 @@ class _DriverDialogState extends State<_DriverDialog> {
                               controller: _vehicleTypeCtrl,
                               decoration: inputDecoration.copyWith(
                                 labelText: 'Vehicle Type',
-                                prefixIcon: Icon(Icons.two_wheeler, color: primary),
+                                prefixIcon:
+                                    Icon(Icons.two_wheeler, color: primary),
                               ),
                             ),
                           ),
@@ -1859,7 +1927,8 @@ class _DriverDialogState extends State<_DriverDialog> {
                         value: _status,
                         decoration: inputDecoration.copyWith(
                           labelText: 'Status',
-                          prefixIcon: Icon(Icons.signal_wifi_4_bar, color: primary),
+                          prefixIcon:
+                              Icon(Icons.signal_wifi_4_bar, color: primary),
                         ),
                         items: ['online', 'offline', 'on_delivery'].map((s) {
                           IconData icon;
@@ -1936,8 +2005,8 @@ class _DriverDialogState extends State<_DriverDialog> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     const Text('Branch Assignment',
-                                        style:
-                                        TextStyle(fontWeight: FontWeight.bold)),
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold)),
                                     Text(
                                         '${widget.userScope.branchIds.length} branch(es) assigned',
                                         style: TextStyle(
@@ -1962,7 +2031,7 @@ class _DriverDialogState extends State<_DriverDialog> {
               decoration: BoxDecoration(
                 color: Colors.grey[50],
                 borderRadius:
-                const BorderRadius.vertical(bottom: Radius.circular(20)),
+                    const BorderRadius.vertical(bottom: Radius.circular(20)),
               ),
               child: Row(
                 children: [
@@ -1992,10 +2061,10 @@ class _DriverDialogState extends State<_DriverDialog> {
                       ),
                       child: _isLoading
                           ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.black))
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.black))
                           : Text(_isEdit ? 'Update Rider' : 'Add Rider'),
                     ),
                   ),
@@ -2119,9 +2188,7 @@ class _DriverOrderHistoryScreenState extends State<_DriverOrderHistoryScreen> {
             Text(
               'Order History',
               style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: primary,
-                  fontSize: 20),
+                  fontWeight: FontWeight.bold, color: primary, fontSize: 20),
             ),
             Text(
               widget.driverName,
@@ -2221,14 +2288,13 @@ class _DriverOrderHistoryScreenState extends State<_DriverOrderHistoryScreen> {
                 child: ElevatedButton(
                   onPressed: _fetchOrders,
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: primary,
-                      foregroundColor: Colors.black),
+                      backgroundColor: primary, foregroundColor: Colors.black),
                   child: _isLoading
                       ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.black))
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.black))
                       : const Text("Load More (6 Orders)"),
                 ),
               ),

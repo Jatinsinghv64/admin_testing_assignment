@@ -106,7 +106,7 @@ class RiderAssignmentService {
     try {
       await _firestore.runTransaction((transaction) async {
         final orderRef = _firestore.collection(AppConstants.collectionOrders).doc(orderId);
-        final riderRef = _firestore.collection(AppConstants.collectionDrivers).doc(riderId);
+        final riderRef = _firestore.collection(AppConstants.collectionStaff).doc(riderId);
         final assignmentRef = _firestore.collection(AppConstants.collectionRiderAssignments).doc(orderId);
 
         // ✅ ALL READS MUST COME FIRST (Firestore transaction rule)
@@ -233,7 +233,7 @@ class RiderAssignmentService {
         // Unlock the rider if one was assigned
         if (riderId != null && riderId.isNotEmpty && riderId != 'RETRY_SEARCH') {
           await _firestore
-              .collection(AppConstants.collectionDrivers)
+              .collection(AppConstants.collectionStaff)
               .doc(riderId)
               .update({
                 'isAvailable': true,

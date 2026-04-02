@@ -510,7 +510,8 @@ class RiderSelectionDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Query query = FirebaseFirestore.instance
-        .collection('Drivers')
+        .collection('staff')
+        .where('staffType', isEqualTo: 'driver')
         .where('isAvailable', isEqualTo: true)
         .where('status', isEqualTo: 'online');
 

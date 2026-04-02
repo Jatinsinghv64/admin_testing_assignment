@@ -31,7 +31,6 @@ class StaffService {
     return query.snapshots();
   }
 
-  /// Add a new staff member. Doc ID = email.
   Future<void> addStaff(Map<String, dynamic> data, String createdBy) async {
     final email = data['email'] as String;
     final docRef = _db.collection('staff').doc(email);
@@ -41,33 +40,76 @@ class StaffService {
       throw Exception('Staff member with email "$email" already exists.');
     }
 
-    await docRef.set({
+    final String staffType = data['role'] == 'driver' ? 'driver' : 'staff';
+
+    final Map<String, dynamic> staffData = {
       'name': data['name'],
       'email': email,
       'phone': data['phone'] ?? '',
       'role': data['role'],
+      'qid': data['qid'] ?? '',
+      'passportNumber': data['passportNumber'] ?? '',
+      'salary': data['salary'] ?? 0,
+      'roleFields': data['roleFields'] ?? {},
       'isActive': true,
       'branchIds': data['branchIds'] ?? [],
       'permissions': data['permissions'] ?? {},
       'createdAt': FieldValue.serverTimestamp(),
       'createdBy': createdBy,
       'lastUpdated': FieldValue.serverTimestamp(),
-    });
+      'staffType': staffType,
+    };
+
+    if (staffType == 'driver') {
+      staffData.addAll({
+        'assignedOrderId': '',
+        'currentLocation': const GeoPoint(0, 0),
+        'fcmToken': '',
+        'isAvailable': false,
+        'profileImageUrl': '',
+        'rating': 0.0,
+        'ratingCount': 0,
+        'status': 'offline',
+        'totalDeliveries': 0,
+        'totalRatings': 0,
+        'vehicle': {
+          'type': (data['roleFields'] as Map?)?['vehicleType'] ?? 'car',
+          'number': (data['roleFields'] as Map?)?['vehiclePlateNumber'] ?? '',
+        },
+      });
+    }
+
+    await docRef.set(staffData);
   }
 
-  /// Update an existing staff member.
   Future<void> updateStaff(
       String staffId, Map<String, dynamic> data, String updatedBy) async {
-    await _db.collection('staff').doc(staffId).update({
+    final String staffType = data['role'] == 'driver' ? 'driver' : 'staff';
+    
+    final Map<String, dynamic> updateData = {
       'name': data['name'],
       'phone': data['phone'] ?? '',
       'role': data['role'],
+      'qid': data['qid'] ?? '',
+      'passportNumber': data['passportNumber'] ?? '',
+      'salary': data['salary'] ?? 0,
+      'roleFields': data['roleFields'] ?? {},
       'isActive': data['isActive'],
       'branchIds': data['branchIds'] ?? [],
       'permissions': data['permissions'] ?? {},
       'lastUpdated': FieldValue.serverTimestamp(),
       'lastUpdatedBy': updatedBy,
-    });
+      'staffType': staffType,
+    };
+
+    if (staffType == 'driver') {
+      updateData['vehicle'] = {
+        'type': (data['roleFields'] as Map?)?['vehicleType'] ?? 'car',
+        'number': (data['roleFields'] as Map?)?['vehiclePlateNumber'] ?? '',
+      };
+    }
+
+    await _db.collection('staff').doc(staffId).update(updateData);
   }
 
   /// Deactivate a staff member (soft delete).
@@ -226,10 +268,27 @@ class StaffService {
       throw Exception('$staffName is already clocked in.');
     }
 
+    // If scheduledStart is missing, try to find it from the shift for today
+    String? effectiveScheduledStart = scheduledStart;
+    if (effectiveScheduledStart == null || effectiveScheduledStart.isEmpty) {
+      final dow = now.weekday; // 1=Mon, 7=Sun
+      final shiftDocs = await _db
+          .collection('shifts')
+          .where('staffId', isEqualTo: staffId)
+          .where('dayOfWeek', isEqualTo: dow)
+          .where('isOff', isEqualTo: false)
+          .limit(1)
+          .get();
+      
+      if (shiftDocs.docs.isNotEmpty) {
+        effectiveScheduledStart = shiftDocs.docs.first.data()['startTime'] as String?;
+      }
+    }
+
     // Determine status
     String status = 'on_time';
-    if (scheduledStart != null && scheduledStart.isNotEmpty) {
-      final parts = scheduledStart.split(':');
+    if (effectiveScheduledStart != null && effectiveScheduledStart.isNotEmpty) {
+      final parts = effectiveScheduledStart.split(':');
       if (parts.length == 2) {
         final scheduledHour = int.tryParse(parts[0]) ?? 0;
         final scheduledMinute = int.tryParse(parts[1]) ?? 0;
@@ -250,7 +309,7 @@ class StaffService {
       'clockIn': FieldValue.serverTimestamp(),
       'clockOut': null,
       'status': status,
-      'scheduledStart': scheduledStart ?? '',
+      'scheduledStart': effectiveScheduledStart ?? '',
       'notes': '',
     });
   }
@@ -328,11 +387,79 @@ class StaffService {
   }
 
   // ---------------------------------------------------------------------------
+  // DRIVERS (from 'Drivers' collection)
+  // ---------------------------------------------------------------------------
+
+  Stream<QuerySnapshot> getDriversStream({
+    required List<String> branchIds,
+    String? selectedBranchId,
+  }) {
+    Query query = _db.collection('staff').where('staffType', isEqualTo: 'driver');
+
+    if (selectedBranchId != null && selectedBranchId.isNotEmpty) {
+      query = query
+          .where('branchIds', arrayContains: selectedBranchId)
+          .orderBy('name');
+    } else if (branchIds.isNotEmpty && branchIds.length <= 10) {
+      query = query
+          .where('branchIds', arrayContainsAny: branchIds.take(10).toList())
+          .orderBy('name');
+    } else {
+      query = query.orderBy('name');
+    }
+
+    return query.snapshots();
+  }
+
+  /// Get count of active (online/on_delivery) drivers.
+  Stream<int> getActiveDriverCount(List<String> branchIds) {
+    Query query = _db
+        .collection('staff')
+        .where('staffType', isEqualTo: 'driver')
+        .where('status', whereIn: ['online', 'on_delivery']);
+    if (branchIds.isNotEmpty && branchIds.length <= 10) {
+      query = query.where('branchIds',
+          arrayContainsAny: branchIds.take(10).toList());
+    }
+    return query.snapshots().map((snap) => snap.docs.length);
+  }
+
+  /// Get total driver count for given branches.
+  Stream<int> getTotalDriverCount(List<String> branchIds) {
+    Query query = _db.collection('staff').where('staffType', isEqualTo: 'driver');
+    if (branchIds.isNotEmpty && branchIds.length <= 10) {
+      query = query.where('branchIds',
+          arrayContainsAny: branchIds.take(10).toList());
+    }
+    return query.snapshots().map((snap) => snap.docs.length);
+  }
+
+  // ---------------------------------------------------------------------------
   // HELPERS
   // ---------------------------------------------------------------------------
 
   String _todayString() {
     final now = DateTime.now();
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
+
+  String _dateString(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Stream attendance records within a specific date range.
+  /// Note: Filtering by branchIds is omitted at the database level to prevent 
+  /// requiring complex composite indexes (date + arrayContainsAny). 
+  Stream<QuerySnapshot> getAttendanceByDateRange(DateTime start, DateTime end,
+      {String? selectedBranchId, List<String>? branchIds}) {
+    final startStr = _dateString(start);
+    final endStr = _dateString(end);
+
+    Query query = _db
+        .collection('attendance')
+        .where('date', isGreaterThanOrEqualTo: startStr)
+        .where('date', isLessThanOrEqualTo: endStr);
+
+    return query.snapshots();
   }
 }

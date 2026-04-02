@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -2759,7 +2759,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
 
     // Rider assignment logic (ONLY for delivery orders)
-    if (isDelivery) {
+    if (isDelivery && !ResponsiveHelper.isMobile(context)) {
       if ((status == AppConstants.statusPreparing || needsManualAssignment) &&
           !isAutoAssigning) {
         buttons.add(
@@ -3389,7 +3389,7 @@ class _RiderSelectionDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Query query = FirebaseFirestore.instance
-        .collection(AppConstants.collectionDrivers)
+        .collection(AppConstants.collectionStaff).where('staffType', isEqualTo: 'driver')
         .where('isAvailable', isEqualTo: true)
         .where('status', isEqualTo: 'online');
 

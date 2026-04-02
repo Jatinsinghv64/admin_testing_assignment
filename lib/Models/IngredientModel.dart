@@ -7,8 +7,8 @@ class IngredientModel {
   final String category;
   final String unit;
   final double costPerUnit;
-  final double currentStock;
-  final double minStockThreshold;
+  final Map<String, double> branchStocks;
+  final Map<String, double> branchMinThresholds;
   final List<String> supplierIds;
   final List<String> allergenTags;
   final bool isPerishable;
@@ -28,8 +28,8 @@ class IngredientModel {
     required this.category,
     required this.unit,
     required this.costPerUnit,
-    required this.currentStock,
-    required this.minStockThreshold,
+    required this.branchStocks,
+    required this.branchMinThresholds,
     required this.supplierIds,
     required this.allergenTags,
     required this.isPerishable,
@@ -44,8 +44,43 @@ class IngredientModel {
   });
 
   // Stock status helpers
-  bool get isOutOfStock => currentStock <= 0;
-  bool get isLowStock => currentStock > 0 && currentStock <= minStockThreshold;
+  double getStock(String branchId) => branchStocks[branchId] ?? 0.0;
+  double getMinThreshold(String branchId) =>
+      branchMinThresholds[branchId] ?? 0.0;
+
+  double getStockForBranches(List<String> branchIds) {
+    final effectiveBranchIds = _effectiveBranchIds(branchIds);
+    if (effectiveBranchIds.isEmpty) {
+      return 0.0;
+    }
+    return effectiveBranchIds.fold<double>(
+      0.0,
+      (total, branchId) => total + getStock(branchId),
+    );
+  }
+
+  double getMinThresholdForBranches(List<String> branchIds) {
+    final effectiveBranchIds = _effectiveBranchIds(branchIds);
+    if (effectiveBranchIds.isEmpty) {
+      return 0.0;
+    }
+    return effectiveBranchIds.fold<double>(
+      0.0,
+      (total, branchId) => total + getMinThreshold(branchId),
+    );
+  }
+
+  bool isOutOfStock(String branchId) => getStock(branchId) <= 0;
+  bool isLowStock(String branchId) =>
+      getStock(branchId) > 0 && getStock(branchId) <= getMinThreshold(branchId);
+  bool isOutOfStockForBranches(List<String> branchIds) =>
+      getStockForBranches(branchIds) <= 0;
+  bool isLowStockForBranches(List<String> branchIds) {
+    final stock = getStockForBranches(branchIds);
+    final minThreshold = getMinThresholdForBranches(branchIds);
+    return stock > 0 && stock <= minThreshold;
+  }
+
   bool get isExpiringSoon {
     if (expiryDate == null) return false;
     final diff = expiryDate!.difference(DateTime.now()).inDays;
@@ -60,17 +95,18 @@ class IngredientModel {
   factory IngredientModel.fromFirestore(
       DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data()!;
-    
+
     // Robust branch parsing
     List<String> bIds = [];
     if (data['branchIds'] is List) {
       bIds = List<String>.from(data['branchIds'] as List);
     } else if (data['branchids'] is List) {
       bIds = List<String>.from(data['branchids'] as List);
-    } else if (data['branchId'] is String && (data['branchId'] as String).isNotEmpty) {
+    } else if (data['branchId'] is String &&
+        (data['branchId'] as String).isNotEmpty) {
       bIds = [data['branchId'] as String];
     }
-    
+
     return IngredientModel(
       id: doc.id,
       branchIds: bIds,
@@ -78,9 +114,8 @@ class IngredientModel {
       category: data['category'] as String? ?? 'other',
       unit: data['unit'] as String? ?? 'pieces',
       costPerUnit: (data['costPerUnit'] as num?)?.toDouble() ?? 0.0,
-      currentStock: (data['currentStock'] as num?)?.toDouble() ?? 0.0,
-      minStockThreshold: (data['minStockThreshold'] as num?)?.toDouble() ?? 
-                         (data['lowStockThreshold'] as num?)?.toDouble() ?? 0.0,
+      branchStocks: _parseBranchStocks(data),
+      branchMinThresholds: _parseBranchThresholds(data),
       supplierIds: List<String>.from(data['supplierIds'] as List? ?? []),
       allergenTags: List<String>.from(data['allergenTags'] as List? ?? []),
       isPerishable: data['isPerishable'] as bool? ?? false,
@@ -102,8 +137,8 @@ class IngredientModel {
       'category': category,
       'unit': unit,
       'costPerUnit': costPerUnit,
-      'currentStock': currentStock,
-      'minStockThreshold': minStockThreshold,
+      'branchStocks': branchStocks,
+      'branchMinThresholds': branchMinThresholds,
       'supplierIds': supplierIds,
       'allergenTags': allergenTags,
       'isPerishable': isPerishable,
@@ -125,8 +160,8 @@ class IngredientModel {
     String? category,
     String? unit,
     double? costPerUnit,
-    double? currentStock,
-    double? minStockThreshold,
+    Map<String, double>? branchStocks,
+    Map<String, double>? branchMinThresholds,
     List<String>? supplierIds,
     List<String>? allergenTags,
     bool? isPerishable,
@@ -146,8 +181,9 @@ class IngredientModel {
       category: category ?? this.category,
       unit: unit ?? this.unit,
       costPerUnit: costPerUnit ?? this.costPerUnit,
-      currentStock: currentStock ?? this.currentStock,
-      minStockThreshold: minStockThreshold ?? this.minStockThreshold,
+      branchStocks: branchStocks ?? Map.from(this.branchStocks),
+      branchMinThresholds:
+          branchMinThresholds ?? Map.from(this.branchMinThresholds),
       supplierIds: supplierIds ?? this.supplierIds,
       allergenTags: allergenTags ?? this.allergenTags,
       isPerishable: isPerishable ?? this.isPerishable,
@@ -160,6 +196,55 @@ class IngredientModel {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
+  }
+
+  static Map<String, double> _parseBranchStocks(Map<String, dynamic> data) {
+    if (data['branchStocks'] is Map) {
+      final map = data['branchStocks'] as Map;
+      return map.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
+    }
+    // Migration logic from old structure
+    if (data['currentStock'] != null &&
+        data['branchIds'] is List &&
+        (data['branchIds'] as List).isNotEmpty) {
+      final oldStock = (data['currentStock'] as num).toDouble();
+      final String firstBranch = (data['branchIds'] as List).first.toString();
+      return {firstBranch: oldStock};
+    }
+    return {};
+  }
+
+  static Map<String, double> _parseBranchThresholds(Map<String, dynamic> data) {
+    if (data['branchMinThresholds'] is Map) {
+      final map = data['branchMinThresholds'] as Map;
+      return map.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
+    }
+    // Migration logic
+    if (data['minStockThreshold'] != null &&
+        data['branchIds'] is List &&
+        (data['branchIds'] as List).isNotEmpty) {
+      final oldThreshold = (data['minStockThreshold'] as num).toDouble();
+      final String firstBranch = (data['branchIds'] as List).first.toString();
+      return {firstBranch: oldThreshold};
+    }
+    return {};
+  }
+
+  List<String> _effectiveBranchIds(List<String> branchIds) {
+    final resolved = <String>{}
+      ..addAll(branchIds.where((id) => id.trim().isNotEmpty))
+      ..addAll(this.branchIds.where((id) => id.trim().isNotEmpty));
+
+    if (resolved.isEmpty) {
+      resolved.addAll(branchStocks.keys.where((id) => id.trim().isNotEmpty));
+    }
+    if (resolved.isEmpty) {
+      resolved.addAll(
+        branchMinThresholds.keys.where((id) => id.trim().isNotEmpty),
+      );
+    }
+
+    return resolved.toList();
   }
 
   // --- Static lookup maps ---

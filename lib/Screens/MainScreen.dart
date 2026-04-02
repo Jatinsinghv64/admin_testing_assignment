@@ -41,6 +41,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isSidebarCollapsed = false;
   String _lastKnownPermissions =
       ''; // ✅ Tracks permission changes to avoid spurious nav rebuilds
+ 
+  BranchFilterService get branchFilter => Provider.of<BranchFilterService>(context, listen: false);
+  UserScopeService get userScope => Provider.of<UserScopeService>(context, listen: false);
 
   void _onTabChange(int index) {
     setState(() {
@@ -638,7 +641,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const VerticalDivider(thickness: 1, width: 1),
             Expanded(
               child: Scaffold(
-                appBar: _buildAppBar(appBarTitle, statusService, userScope,
+                appBar: _buildAppBar(appBarTitle, statusService,
                     isMobile: false),
                 body: mainBody,
               ),
@@ -649,7 +652,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Scaffold(
-      appBar: _buildAppBar(appBarTitle, statusService, userScope),
+      appBar: _buildAppBar(appBarTitle, statusService),
       body: mainBody,
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
@@ -759,14 +762,20 @@ class _HomeScreenState extends State<HomeScreen> {
               )),
         ],
         onSelected: (value) {
+          final sService = Provider.of<RestaurantStatusService>(context, listen: false);
           branchFilter.selectBranch(value);
+          if (value != BranchFilterService.allBranchesValue) {
+            sService.initialize(value, 
+              restaurantName: branchFilter.getBranchName(value));
+          }
         },
       ),
     );
   }
 
-  PreferredSizeWidget _buildAppBar(String appBarTitle,
-      RestaurantStatusService statusService, UserScopeService userScope,
+  PreferredSizeWidget _buildAppBar(
+      String appBarTitle,
+      RestaurantStatusService statusService,
       {bool isMobile = true}) {
     return AppBar(
       title: Text(appBarTitle),
@@ -778,7 +787,27 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 8.0),
           child: Row(
             children: [
-              if (statusService.isLoading)
+              if (branchFilter.selectedBranchId == null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.deepPurple.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.deepPurple,
+                      width: 1,
+                    ),
+                  ),
+                  child: const Text(
+                    "ALL BRANCHES",
+                    style: TextStyle(
+                      color: Colors.deepPurple,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 10,
+                    ),
+                  ),
+                )
+              else if (statusService.isLoading)
                 const Padding(
                   padding: EdgeInsets.only(right: 8),
                   child: SizedBox(
@@ -812,7 +841,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               const SizedBox(width: 8),
-              _buildRestaurantToggle(statusService),
+              if (branchFilter.selectedBranchId != null)
+                _buildRestaurantToggle(statusService),
               const SizedBox(width: 8),
             ],
           ),

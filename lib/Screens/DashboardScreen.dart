@@ -15,6 +15,7 @@ import '../Widgets/CancellationDialog.dart'; // ✅ Shared cancellation dialog
 import '../utils/responsive_helper.dart'; // ✅ Responsive utility
 import '../services/DashboardThemeService.dart'; // ✅ Added for Dark/Light Theme
 import 'DashboardScreenLarge.dart'; // ✅ Large Screen Implementation
+import '../Widgets/BusinessPerformancePanel.dart';
 
 class DashboardScreen extends StatefulWidget {
   final Function(int) onTabChange;
@@ -108,6 +109,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildEnhancedStatCardsGrid(context),
+                const SizedBox(height: 32),
+                BusinessPerformancePanel(
+                  branchIds: context.read<BranchFilterService>().getFilterBranchIds(
+                    context.read<UserScopeService>().branchIds
+                  ),
+                  isMobile: true,
+                  primaryColor: Colors.deepPurple,
+                  surfaceColor: surfaceColor,
+                  textColor: textColor,
+                ),
                 const SizedBox(height: 32),
                 _buildSectionHeader('Recent Orders (Current Shift)',
                     Icons.receipt_long_outlined),
@@ -206,7 +217,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           // 2. Active Riders
           _buildStatCardWrapper(
-            stream: _getActiveDriversStream(context),
+            stream: _getActiveRidersStream(context),
             builder: (context, snapshot) {
               final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
               return _EnhancedStatCard(
@@ -474,7 +485,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _getActiveDriversStream(
+  Stream<QuerySnapshot<Map<String, dynamic>>> _getActiveRidersStream(
       BuildContext context) {
     // ✅ FIX: Use listen: true to react to branch changes from backend
     final userScope = Provider.of<UserScopeService>(context, listen: true);
@@ -484,7 +495,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final filterBranchIds =
         branchFilter.getFilterBranchIds(userScope.branchIds);
 
-    return _orderService.getActiveDriversStream(
+    return _orderService.getActiveRidersStream(
       userScope: userScope,
       filterBranchIds: filterBranchIds,
     );
@@ -1045,7 +1056,7 @@ class _OrderPopupDialogState extends State<_OrderPopupDialog> {
     }
 
     // DELIVERY
-    if (orderTypeLower == 'delivery') {
+    if (orderTypeLower == 'delivery' && !ResponsiveHelper.isMobile(context)) {
       if ((status == AppConstants.statusPreparing || needsManualAssignment) &&
           !isAutoAssigning) {
         buttons.add(
@@ -1469,7 +1480,7 @@ class _RiderSelectionDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Query query = FirebaseFirestore.instance
-        .collection(AppConstants.collectionDrivers)
+        .collection(AppConstants.collectionStaff).where('staffType', isEqualTo: 'driver')
         .where('isAvailable', isEqualTo: true)
         .where('status', isEqualTo: 'online');
 

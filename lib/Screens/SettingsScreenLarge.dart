@@ -241,8 +241,6 @@ class _SettingsScreenLargeState extends State<SettingsScreenLarge> {
                 padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
                 child: Column(
                   children: [
-                    _buildContentHeader(effectiveSelectedSection),
-                    const SizedBox(height: 20),
                     Expanded(
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(28),

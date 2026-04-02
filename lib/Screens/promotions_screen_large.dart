@@ -9,6 +9,7 @@ import 'ComboMealsScreen.dart'; // For ComboMealAddEditScreen
 import 'PromoSalesScreen.dart'; // For PromoSaleAddEditScreen
 import 'CouponsScreen.dart'; // For CouponDialog
 import '../constants.dart';
+import '../Widgets/ExportReportDialog.dart';
 
 class PromotionsScreenLarge extends StatefulWidget {
   const PromotionsScreenLarge({super.key});
@@ -40,6 +41,7 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
   final TextEditingController _imageUrlController = TextEditingController();
 
   bool _isSaving = false;
+  final Set<String> _processingExpirations = {};
 
   // Stable stream references
   Stream<QuerySnapshot>? _orderKPIStream;
@@ -244,41 +246,68 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
                 return StreamBuilder<QuerySnapshot>(
                   stream: _couponKPIStream,
                   builder: (context, couponSnapshot) {
-                    int activePromos = (comboSnapshot.data?.docs.length ?? 0) +
-                        (salesSnapshot.data?.docs.length ?? 0) +
-                        (couponSnapshot.data?.docs.length ?? 0);
+                    bool hasBranch(Map<String, dynamic> docData) {
+                      if (filterBranchIds.isEmpty) return true;
+                      List<dynamic> bIds = docData['branchIds'] is List ? docData['branchIds'] : [];
+                      if (bIds.isEmpty) return true;
+                      return filterBranchIds.any((id) => bIds.contains(id));
+                    }
+
+                    int activePromos = 0;
+                    activePromos += (comboSnapshot.data?.docs.where((d) => hasBranch(d.data() as Map<String, dynamic>)).length ?? 0);
+                    activePromos += (salesSnapshot.data?.docs.where((d) => hasBranch(d.data() as Map<String, dynamic>)).length ?? 0);
+                    activePromos += (couponSnapshot.data?.docs.where((d) => hasBranch(d.data() as Map<String, dynamic>)).length ?? 0);
 
                     double totalRevenue = 0;
                     int ordersWithDiscount = 0;
-                    int totalOrders = (orderSnapshot.data?.docs.length ?? 0).clamp(1, 999999);
+                    int totalOrders = 0;
                     Set<String> uniqueCustomers = {};
 
+                    final billableStatuses = {
+                      AppConstants.statusDelivered,
+                      'completed',
+                      AppConstants.statusPaid,
+                      AppConstants.statusCollected,
+                    };
+
                     if (orderSnapshot.hasData) {
-                      for (var doc in orderSnapshot.data!.docs) {
+                      final validOrders = orderSnapshot.data!.docs.where((doc) {
+                         final data = doc.data() as Map<String, dynamic>;
+                         final status = (data['status'] ?? '').toString().toLowerCase();
+                         return billableStatuses.contains(status);
+                      }).toList();
+                      
+                      totalOrders = validOrders.length;
+
+                      for (var doc in validOrders) {
                         final data = doc.data() as Map<String, dynamic>;
-                        double discount = (data['discount'] as num?)?.toDouble() ?? 0;
+                        double discount = (data['discountAmount'] as num?)?.toDouble() ?? 
+                                          (data['discount'] as num?)?.toDouble() ?? 0;
                         if (discount > 0) {
                           totalRevenue += (data['totalAmount'] as num?)?.toDouble() ?? 0;
                           ordersWithDiscount++;
-                          uniqueCustomers.add(data['customerName'] ?? data['customerPhone'] ?? 'Guest');
+                          uniqueCustomers.add(data['customerName']?.toString() ?? data['customerPhone']?.toString() ?? 'Guest');
                         }
                       }
                     }
+                    
+                    totalOrders = totalOrders.clamp(1, 999999);
 
                     double redemptionRate = (ordersWithDiscount / totalOrders) * 100;
 
-                    return GridView.count(
-                      crossAxisCount: 4,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      crossAxisSpacing: 24,
-                      childAspectRatio: 1.3,
-                      children: [
-                        _buildKPICard('Deal Revenue', 'QAR ${totalRevenue.toStringAsFixed(2)}', '+12.4%', Icons.monetization_on, textTheme),
-                        _buildKPICard('Active Campaigns', activePromos.toString(), 'In Market', Icons.campaign, textTheme),
-                        _buildKPICard('Redemption Rate', '${redemptionRate.toStringAsFixed(1)}%', '${ordersWithDiscount} Uses', Icons.confirmation_number, textTheme, isProgress: true, progress: ordersWithDiscount / totalOrders),
-                        _buildKPICard('Customer Reach', uniqueCustomers.length.toString(), 'Unique users', Icons.groups, textTheme),
-                      ],
+                    return IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(child: _buildKPICard('Deal Revenue', 'QAR ${totalRevenue.toStringAsFixed(2)}', '+12.4%', Icons.monetization_on, textTheme)),
+                          const SizedBox(width: 24),
+                          Expanded(child: _buildKPICard('Active Campaigns', activePromos.toString(), 'In Market', Icons.campaign, textTheme)),
+                          const SizedBox(width: 24),
+                          Expanded(child: _buildKPICard('Redemption Rate', '${redemptionRate.toStringAsFixed(1)}%', '${ordersWithDiscount} Uses', Icons.confirmation_number, textTheme, isProgress: true, progress: totalOrders > 0 ? ordersWithDiscount / totalOrders : 0)),
+                          const SizedBox(width: 24),
+                          Expanded(child: _buildKPICard('Customer Reach', uniqueCustomers.length.toString(), 'Unique users', Icons.groups, textTheme)),
+                        ],
+                      ),
                     );
                   },
                 );
@@ -308,9 +337,34 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
           const Spacer(),
           _buildSearchBar(),
           const BranchFilterSelector(),
-          const SizedBox(width: 24),
+          const SizedBox(width: 16),
+          _buildExportBtn(),
+          const SizedBox(width: 16),
           _buildLaunchBtn(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildExportBtn() {
+    return ElevatedButton.icon(
+      onPressed: () {
+        ExportReportDialog.show(context, preSelectedSections: {
+          'promotions_performance',
+          'sales_summary',
+        });
+      },
+      icon: const Icon(Icons.download_rounded, size: 16),
+      label: const Text('Export Report', style: TextStyle(fontWeight: FontWeight.bold)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: appPrimary,
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.grey[200]!),
+        ),
       ),
     );
   }
@@ -417,7 +471,7 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(value, style: const TextStyle(color: appText, fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: -1), overflow: TextOverflow.ellipsis),
+              Text(value, style: const TextStyle(color: appText, fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: -1), overflow: TextOverflow.ellipsis, maxLines: 1),
               if (isProgress) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -572,6 +626,43 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
 
         var docs = snapshot.data!.docs;
 
+        // Auto-cleanup worker function
+        Future<void> autoDeactivateExpiredPromo(QueryDocumentSnapshot doc, String statusField) async {
+          if (_processingExpirations.contains(doc.id)) return;
+          _processingExpirations.add(doc.id);
+
+          try {
+            String collection = _selectedCategory == 'sales' ? 'promoSales' : (_selectedCategory == 'combos' ? 'combos' : 'coupons');
+            await FirebaseFirestore.instance.collection(collection).doc(doc.id).update({
+              statusField: false,
+            });
+
+            final data = doc.data() as Map<String, dynamic>;
+            if (collection == 'promoSales' && data['targetType'] == 'specific_items') {
+              final itemNames = List<String>.from(data['itemNames'] ?? data['targetItemIds'] ?? []);
+              if (itemNames.isNotEmpty) {
+                // Remove FieldValue.delete() due to some flutter web conflicts and instead set to null
+                final itemsQuery = await FirebaseFirestore.instance
+                    .collection('menuItems')
+                    .where('name', whereIn: itemNames.take(10).toList())
+                    .get();
+                
+                final batch = FirebaseFirestore.instance.batch();
+                for (var itemDoc in itemsQuery.docs) {
+                  batch.update(itemDoc.reference, {
+                    'discountedPrice': FieldValue.delete(),
+                  });
+                }
+                await batch.commit();
+              }
+            }
+          } catch (e) {
+            debugPrint('Error auto-deactivating promo ${doc.id}: $e');
+          } finally {
+            _processingExpirations.remove(doc.id);
+          }
+        }
+
         // Functional Search Filtering (Client-side for flexibility)
         if (_searchController.text.isNotEmpty) {
           final keyword = _searchController.text.toLowerCase();
@@ -603,12 +694,24 @@ class _PromotionsScreenLargeState extends State<PromotionsScreenLarge> {
           DateTime? endTime;
           if (end is Timestamp) endTime = end.toDate();
 
-          // --- Branch Filtering (Client-side to handle case variations) ---
+          // --- Branch Filtering ---
           if (filterBranchIds.isNotEmpty) {
-            final List bIds = data['branchIds'] as List? ?? data['branchids'] as List? ?? [];
+            final List bIds = data['branchIds'] as List? ?? [];
             if (!bIds.any((id) => filterBranchIds.contains(id.toString()))) {
               return false;
             }
+          }
+
+          // --- Expiry Sync Check ---
+          bool isExpired = endTime != null && endTime.isBefore(now);
+          if (isFieldActive && isExpired) {
+            // Trigger background cleanup and treat it as inactive for this render cycle
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              autoDeactivateExpiredPromo(doc, statusField);
+            });
+            // Act like it's inactive so it moves to Archived immediately for the user
+            if (_selectedFilter == 'Archived') return true;
+            if (_selectedFilter == 'Active' || _selectedFilter == 'Scheduled') return false;
           }
 
           if (_selectedFilter == 'Scheduled') {

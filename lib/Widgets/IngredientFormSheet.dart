@@ -53,8 +53,9 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
     final e = widget.existing;
     _nameCtr.text = e?.name ?? '';
     _costCtr.text = e != null ? e.costPerUnit.toString() : '';
-    _stockCtr.text = e != null ? e.currentStock.toString() : '';
-    _minThresholdCtr.text = e != null ? e.minStockThreshold.toString() : '';
+    final targetBranch = widget.branchIds.isNotEmpty ? widget.branchIds.first : "default";
+    _stockCtr.text = e != null ? e.getStock(targetBranch).toString() : '';
+    _minThresholdCtr.text = e != null ? e.getMinThreshold(targetBranch).toString() : '';
     _shelfLifeCtr.text = e?.shelfLifeDays?.toString() ?? '';
     _skuCtr.text = e?.sku ?? '';
     _barcodeCtr.text = e?.barcode ?? '';
@@ -116,14 +117,24 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
 
       final now = DateTime.now();
 
+      final targetBranch = widget.branchIds.isNotEmpty ? widget.branchIds.first : "default";
+      final parsedStock = double.parse(_stockCtr.text.trim());
+      final parsedMin = double.parse(_minThresholdCtr.text.trim());
+      
+      final existingStocks = Map<String, double>.from(widget.existing?.branchStocks ?? {});
+      existingStocks[targetBranch] = parsedStock;
+      
+      final existingMins = Map<String, double>.from(widget.existing?.branchMinThresholds ?? {});
+      existingMins[targetBranch] = parsedMin;
+
       final i = IngredientModel(
         id: docId,
         name: _nameCtr.text.trim(),
         category: _category,
         unit: _unit,
         costPerUnit: double.parse(_costCtr.text.trim()),
-        currentStock: double.parse(_stockCtr.text.trim()),
-        minStockThreshold: double.parse(_minThresholdCtr.text.trim()),
+        branchStocks: existingStocks,
+        branchMinThresholds: existingMins,
         isPerishable: _isPerishable,
         shelfLifeDays: _isPerishable && _shelfLifeCtr.text.isNotEmpty
             ? int.parse(_shelfLifeCtr.text.trim())
