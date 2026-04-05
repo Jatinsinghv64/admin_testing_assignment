@@ -462,7 +462,8 @@ class UserScopeService with ChangeNotifier {
     return r == 'super_admin' || r == 'superadmin';
   }
 
-  Future<bool> loadUserScope(User user, AuthService authService) async {
+  Future<bool> loadUserScope(User? user, AuthService authService) async {
+    if (user == null) return false;
     if (_isLoaded) return true;
     await _scopeSubscription?.cancel();
     _scopeSubscription = null;

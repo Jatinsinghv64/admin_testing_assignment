@@ -134,15 +134,25 @@ class OrderNotificationService with ChangeNotifier {
     return true;
   }
 
-  /// Clean up listeners when service is disposed
-  @override
-  void dispose() {
+  void reset() {
+    debugPrint("🧹 Resetting OrderNotificationService...");
     _backupSubscription?.cancel();
+    _backupSubscription = null;
+    _orderQueue.clear();
+    _isDialogOpen = false;
+    _currentOrderId = null;
+    _lastKnownBranchIds = [];
     if (_scopeService != null && _scopeListener != null) {
       _scopeService!.removeListener(_scopeListener!);
     }
     _scopeListener = null;
     _scopeService = null;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    reset();
     super.dispose();
   }
 
@@ -264,6 +274,8 @@ class OrderNotificationService with ChangeNotifier {
           } else {
             debugPrint("ℹ️ POS order $orderId was already handled (Status: $status)");
           }
+        }).timeout(const Duration(seconds: 10), onTimeout: () {
+          debugPrint("⏳ Auto-accept transaction timed out for $orderId");
         });
       } catch (e) {
         debugPrint("❌ Failed to auto-accept POS order $orderId: $e");
@@ -414,6 +426,8 @@ class OrderNotificationService with ChangeNotifier {
                     'acceptedBy': 'Auto-Accept System',
                     'acceptedAt': FieldValue.serverTimestamp(),
                   });
+                }).timeout(const Duration(seconds: 15), onTimeout: () {
+                  debugPrint("⏳ NewOrderDialog auto-accept transaction timed out for $orderId");
                 });
               } catch (e) {
                 debugPrint("❌ Auto-accept transaction failed: $e");

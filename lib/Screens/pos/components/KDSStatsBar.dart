@@ -105,7 +105,7 @@ class KDSStatsBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: isAlert ? color.withOpacity(0.15) : color.withOpacity(0.08),
+        color: isAlert ? color.withValues(alpha: 0.15) : color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
         border: isAlert ? Border.all(color: color, width: 1.5) : null,
       ),
@@ -125,7 +125,7 @@ class KDSStatsBar extends StatelessWidget {
             label,
             style: TextStyle(
               fontSize: 11,
-              color: isDark ? Colors.white54 : color.withOpacity(0.7),
+              color: isDark ? Colors.white54 : color.withValues(alpha: 0.7),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -140,7 +140,7 @@ class KDSStatsBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(

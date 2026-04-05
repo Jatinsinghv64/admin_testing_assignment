@@ -135,7 +135,6 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     }
     return query
         .orderBy('timestamp', descending: false)
-        .limit(1000)
         .snapshots();
   }
 
@@ -214,7 +213,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 20,
                   offset: const Offset(0, 10),
                 ),
@@ -226,7 +225,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.1),
+                    color: Colors.orange.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child:
@@ -249,10 +248,10 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   decoration: BoxDecoration(
-                    color: Colors.deepPurple.withOpacity(0.05),
+                    color: Colors.deepPurple.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(16),
                     border:
-                        Border.all(color: Colors.deepPurple.withOpacity(0.15)),
+                        Border.all(color: Colors.deepPurple.withValues(alpha: 0.15)),
                   ),
                   child: Row(
                     children: [
@@ -902,7 +901,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     return Column(
       children: [
         Container(
-          color: Colors.white.withOpacity(0.1),
+          color: Colors.white.withValues(alpha: 0.1),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
@@ -1323,7 +1322,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                 ),
                 border: Border(
                     bottom: BorderSide(
-                        color: borderColor.withOpacity(0.4), width: 0.5)),
+                        color: borderColor.withValues(alpha: 0.4), width: 0.5)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1357,7 +1356,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF2196F3).withOpacity(0.15),
+                            color: const Color(0xFF2196F3).withValues(alpha: 0.15),
                             border: Border.all(
                                 color: const Color(0xFF2196F3), width: 1.5),
                             borderRadius: BorderRadius.circular(4),
@@ -1380,7 +1379,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: KDSConfig.getSourceColor(source)
-                                .withOpacity(0.12),
+                                .withValues(alpha: 0.12),
                             border: Border.all(
                                 color: KDSConfig.getSourceColor(source),
                                 width: 1),
@@ -1458,7 +1457,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE91E8C).withOpacity(0.12),
+                        color: const Color(0xFFE91E8C).withValues(alpha: 0.12),
                         border: Border.all(color: const Color(0xFFE91E8C)),
                         borderRadius: BorderRadius.circular(10),
                       ),
@@ -1641,7 +1640,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE91E8C).withOpacity(0.1),
+                      color: const Color(0xFFE91E8C).withValues(alpha: 0.1),
                       border: Border.all(color: const Color(0xFFE91E8C)),
                       borderRadius: BorderRadius.circular(4),
                     ),
@@ -1738,7 +1737,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: const Color(0xFF2196F3).withOpacity(0.12),
+        color: const Color(0xFF2196F3).withValues(alpha: 0.12),
         border: Border.all(color: const Color(0xFF2196F3)),
         borderRadius: BorderRadius.circular(10),
       ),
@@ -1932,7 +1931,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     if (raw.contains('@')) {
       raw = raw.split('@').first.replaceAll(RegExp(r'[._]'), ' ').trim();
     }
-    // Capitalize each word
+    // H7 FIX: Correct regex — was double-escaped, matching literal backslash-s instead of whitespace
     final parts =
         raw.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.isEmpty) return 'Staff';

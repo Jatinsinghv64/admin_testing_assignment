@@ -55,7 +55,7 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.deepPurple.withOpacity(0.1),
+                  color: Colors.deepPurple.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Icon(Icons.table_bar,
@@ -564,19 +564,19 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
     
     if (isEditMode) {
       borderColor = Colors.blue;
-      bgColor = Colors.blue.withOpacity(0.08);
+      bgColor = Colors.blue.withValues(alpha: 0.08);
       textColor = Colors.blue[800]!;
     } else if (isAvailable) {
       borderColor = Colors.green;
-      bgColor = Colors.green.withOpacity(0.08);
+      bgColor = Colors.green.withValues(alpha: 0.08);
       textColor = Colors.green[800]!;
     } else if (isReserved) {
       borderColor = Colors.orange;
-      bgColor = Colors.orange.withOpacity(0.08);
+      bgColor = Colors.orange.withValues(alpha: 0.08);
       textColor = Colors.orange[800]!;
     } else {
       borderColor = Colors.red;
-      bgColor = Colors.red.withOpacity(0.08);
+      bgColor = Colors.red.withValues(alpha: 0.08);
       textColor = Colors.red[800]!;
     }
 
@@ -612,7 +612,7 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
               boxShadow: (isAvailable || isEditMode)
                   ? [
                       BoxShadow(
-                        color: borderColor.withOpacity(0.2),
+                        color: borderColor.withValues(alpha: 0.2),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       )
@@ -628,7 +628,7 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.2),
+                        color: Colors.blue.withValues(alpha: 0.2),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.edit, size: 14, color: Colors.blue),
@@ -727,7 +727,7 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: borderColor.withOpacity(0.15),
+                          color: borderColor.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(

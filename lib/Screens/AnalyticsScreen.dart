@@ -50,7 +50,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
 
     // Load branch names if needed (for multi-branch users)
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -118,6 +118,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           _buildWasteTab(effectiveBranchIds, userScope, branchFilter),
           // 5. Purchases Tab
           _buildPurchasesTab(effectiveBranchIds, userScope, branchFilter),
+          // 6. Registers Tab
+          _buildRegistersTab(effectiveBranchIds, userScope, branchFilter),
         ],
       ),
     );
@@ -1954,6 +1956,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           Tab(
             icon: Icon(Icons.shopping_cart_outlined, size: 18),
             text: 'Purchases',
+          ),
+          Tab(
+            icon: Icon(Icons.point_of_sale, size: 18),
+            text: 'Registers',
           ),
         ],
       ),
@@ -4860,9 +4866,370 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       }
     }
   }
+
+  // ---------------------------------------------------------
+  // Registers Tab
+  // ---------------------------------------------------------
+
+  Widget _buildRegistersTab(List<String> effectiveBranchIds,
+      UserScopeService userScope, BranchFilterService branchFilter) {
+    if (effectiveBranchIds.isEmpty) {
+      return const Center(child: Text('No branches selected.'));
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildDateRangeSelector(),
+          const SizedBox(height: 16),
+          FutureBuilder<_RegistersAnalyticsData>(
+            future: _loadRegistersAnalytics(effectiveBranchIds),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text('Error: ${snapshot.error}'));
+              }
+              final data = snapshot.data ?? _RegistersAnalyticsData.empty();
+
+              if (data.totalSessions == 0) {
+                return _buildEmptyState(
+                  icon: Icons.point_of_sale,
+                  message: 'No Register Sessions found. Adjust your date range or select a different branch.',
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Total Sessions',
+                          data.totalSessions.toString(),
+                          Icons.point_of_sale,
+                          Colors.purple,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Expected Cash',
+                          'QAR ${data.totalExpected.toStringAsFixed(2)}',
+                          Icons.account_balance_wallet,
+                          Colors.blue,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Actual Cash',
+                          'QAR ${data.totalActual.toStringAsFixed(2)}',
+                          Icons.attach_money,
+                          Colors.green,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildMetricCard(
+                          'Net Variance',
+                          'QAR ${data.totalVariance.toStringAsFixed(2)}',
+                          Icons.compare_arrows,
+                          data.totalVariance < 0 ? Colors.red : (data.totalVariance == 0 ? Colors.grey : Colors.green),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.04),
+                          blurRadius: 15,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Recent Register Sessions',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+                        ),
+                        const SizedBox(height: 16),
+                        ...data.sessions.map((session) {
+                          final variance = session.closingBalance - session.expectedBalance;
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[50],
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.grey[200]!),
+                            ),
+                            child: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: Colors.deepPurple.withOpacity(0.1),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(Icons.point_of_sale, color: Colors.deepPurple, size: 20),
+                                    ),
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            branchFilter.getBranchName(session.branchId),
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Opened by ${session.openedBy}',
+                                            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          if (session.closedAt != null)
+                                            Text(
+                                              'Closed: ${DateFormat('MMM dd, yyyy  h:mm a').format(session.closedAt!)}',
+                                              style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          'Actual: QAR ${session.closingBalance.toStringAsFixed(2)}',
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Expected: QAR ${session.expectedBalance.toStringAsFixed(2)}',
+                                          style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Variance: ${variance >= 0 ? '+' : ''}${variance.toStringAsFixed(2)}',
+                                          style: TextStyle(
+                                            color: variance < 0 ? Colors.red : (variance > 0 ? Colors.green : Colors.grey[600]),
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        if (session.isForceClosed) ...[
+                                          const SizedBox(height: 6),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.orange.withOpacity(0.1),
+                                              border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              'Force Closed (${session.activeOrdersAtClose} orders)',
+                                              style: TextStyle(color: Colors.orange[800], fontSize: 10, fontWeight: FontWeight.bold),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                if (session.closedAt != null) ...[
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 12),
+                                    child: Divider(height: 1),
+                                  ),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      _buildSessionMetricChip('Orders', session.totalOrders.toString(), Colors.blue),
+                                      _buildSessionMetricChip('Cash', 'QAR ${session.totalCashSales.toStringAsFixed(0)}', Colors.teal),
+                                      _buildSessionMetricChip('Card', 'QAR ${session.totalCardSales.toStringAsFixed(0)}', Colors.indigo),
+                                      _buildSessionMetricChip('Online', 'QAR ${session.totalOnlineSales.toStringAsFixed(0)}', Colors.cyan),
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSessionMetricChip(String label, String value, MaterialColor color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.circle, size: 8, color: color),
+        const SizedBox(width: 4),
+        Text('$label: ', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+        Text(value, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color[800])),
+      ],
+    );
+  }
+
+  Future<_RegistersAnalyticsData> _loadRegistersAnalytics(List<String> branchIds) async {
+    if (branchIds.isEmpty) return _RegistersAnalyticsData.empty();
+    
+    final query = await FirebaseFirestore.instance
+        .collection('pos_registers')
+        .where('openedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_dateRange.start))
+        .where('openedAt', isLessThanOrEqualTo: Timestamp.fromDate(DateTime(_dateRange.end.year, _dateRange.end.month, _dateRange.end.day, 23, 59, 59)))
+        .where('branchId', whereIn: branchIds.take(10).toList())
+        .get();
+        
+    final sessions = query.docs.map((doc) => _RegisterSessionPoint.fromFirestore(doc)).toList()
+      ..sort((a, b) => (b.closedAt ?? b.openedAt).compareTo((a.closedAt ?? a.openedAt)));
+
+    double totalExpected = 0;
+    double totalActual = 0;
+    int forceClosedCount = 0;
+    for (var s in sessions) {
+      if (s.closedAt != null) {
+        totalExpected += s.expectedBalance;
+        totalActual += s.closingBalance;
+      }
+      if (s.isForceClosed) {
+        forceClosedCount++;
+      }
+    }
+
+    return _RegistersAnalyticsData(
+      totalSessions: sessions.length,
+      totalExpected: totalExpected,
+      totalActual: totalActual,
+      totalVariance: totalActual - totalExpected,
+      sessions: sessions,
+      forceClosedCount: forceClosedCount,
+    );
+  }
+}
+
+class _RegisterSessionPoint {
+  final String id;
+  final String branchId;
+  final String openedBy;
+  final String closedBy;
+  final DateTime openedAt;
+  final DateTime? closedAt;
+  final double openingBalance;
+  final double closingBalance;
+  final double expectedBalance;
+  final String notes;
+  final int totalOrders;
+  final int totalCancelled;
+  final double totalCashSales;
+  final double totalCardSales;
+  final double totalOnlineSales;
+  final double totalRefunds;
+  final bool isForceClosed;
+  final String? overriddenBy;
+  final int activeOrdersAtClose;
+
+  _RegisterSessionPoint({
+    required this.id,
+    required this.branchId,
+    required this.openedBy,
+    required this.closedBy,
+    required this.openedAt,
+    this.closedAt,
+    required this.openingBalance,
+    required this.closingBalance,
+    required this.expectedBalance,
+    required this.notes,
+    this.totalOrders = 0,
+    this.totalCancelled = 0,
+    this.totalCashSales = 0.0,
+    this.totalCardSales = 0.0,
+    this.totalOnlineSales = 0.0,
+    this.totalRefunds = 0.0,
+    this.isForceClosed = false,
+    this.overriddenBy,
+    this.activeOrdersAtClose = 0,
+  });
+
+  factory _RegisterSessionPoint.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return _RegisterSessionPoint(
+      id: doc.id,
+      branchId: data['branchId'] ?? '',
+      openedBy: data['openedBy'] ?? '',
+      closedBy: data['closedBy'] ?? '',
+      openedAt: (data['openedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      closedAt: (data['closedAt'] as Timestamp?)?.toDate(),
+      openingBalance: (data['openingBalance'] as num?)?.toDouble() ?? 0.0,
+      closingBalance: (data['closingBalance'] as num?)?.toDouble() ?? 0.0,
+      expectedBalance: (data['expectedBalance'] as num?)?.toDouble() ?? 0.0,
+      notes: data['notes'] ?? '',
+      totalOrders: (data['totalOrders'] as num?)?.toInt() ?? 0,
+      totalCancelled: (data['totalCancelled'] as num?)?.toInt() ?? 0,
+      totalCashSales: (data['totalCashSales'] as num?)?.toDouble() ?? 0.0,
+      totalCardSales: (data['totalCardSales'] as num?)?.toDouble() ?? 0.0,
+      totalOnlineSales: (data['totalOnlineSales'] as num?)?.toDouble() ?? 0.0,
+      totalRefunds: (data['totalRefunds'] as num?)?.toDouble() ?? 0.0,
+      isForceClosed: data['isForceClosed'] == true,
+      overriddenBy: data['overriddenBy'],
+      activeOrdersAtClose: (data['activeOrdersAtClose'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class _RegistersAnalyticsData {
+  final int totalSessions;
+  final double totalExpected;
+  final double totalActual;
+  final double totalVariance;
+  final int forceClosedCount;
+  final List<_RegisterSessionPoint> sessions;
+
+  _RegistersAnalyticsData({
+    required this.totalSessions,
+    required this.totalExpected,
+    required this.totalActual,
+    required this.totalVariance,
+    required this.sessions,
+    this.forceClosedCount = 0,
+  });
+
+  factory _RegistersAnalyticsData.empty() => _RegistersAnalyticsData(
+        totalSessions: 0,
+        totalExpected: 0,
+        totalActual: 0,
+        totalVariance: 0,
+        sessions: const [],
+        forceClosedCount: 0,
+      );
 }
 
 class SalesData {
+
   final DateTime date;
   final double amount;
   final String label;

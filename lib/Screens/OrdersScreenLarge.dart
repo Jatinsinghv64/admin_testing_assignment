@@ -1076,6 +1076,14 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
       bool isTakeaway, String riderId, bool isAutoAssigning, bool needsManualAssignment) {
 
     final List<Widget> buttons = [];
+    final String paymentMethod = (data['payment_method'] ?? data['paymentMethod'] ?? '').toString().toLowerCase();
+    final bool isPrepaid = paymentMethod == 'online' ||
+        paymentMethod == 'card' ||
+        paymentMethod == 'prepaid' ||
+        paymentMethod == 'apple_pay' ||
+        paymentMethod == 'google_pay';
+    final bool isPaymentStatusPaid = (data['paymentStatus']?.toString().toLowerCase() == 'paid') || (data['status'] == AppConstants.statusPaid);
+    final bool isAlreadyPaid = isPrepaid || isPaymentStatusPaid;
 
     // Accept Order
     if (status == AppConstants.statusPending) {
@@ -1099,22 +1107,30 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
           buttons.add(_actionBtn('Collected', Icons.shopping_bag_outlined, Colors.green.shade700,
               () => _updateStatus(AppConstants.statusCollected)));
         } else if (isTakeaway) {
-          final isPaidStatus = status == AppConstants.statusPaid || status == AppConstants.statusCollected;
-          final needsRobustPayment = (isDineIn || isTakeaway) && !isPaidStatus;
-
-          buttons.add(_actionBtn('Mark Paid', Icons.payments, Colors.blue.shade700, () {
-            if (needsRobustPayment) {
+          if (isAlreadyPaid) {
+            buttons.add(_actionBtn('Collected', Icons.shopping_bag_outlined, Colors.green.shade700, () {
+              _updateStatus(AppConstants.statusCollected);
+            }));
+          } else {
+            buttons.add(_actionBtn('Mark Paid', Icons.payments, Colors.blue.shade700, () {
               _processPayment(widget.order, data);
-            } else {
-              _updateStatus(AppConstants.statusPaid);
-            }
-          }));
+            }));
+          }
         }
       }
+      
       if (status == AppConstants.statusServed && isDineIn) {
-        buttons.add(_actionBtn('Mark Paid', Icons.payments, Colors.blue.shade700, () {
-          _processPayment(widget.order, data);
-        }));
+        if (isAlreadyPaid) {
+          // If already paid, we may just want a way to finalize it or hide the button if it's considered done.
+          // In some flows, 'Collected' or 'Completed' (which may map to statusPaid or statusDelivered) is the final state.
+          buttons.add(_actionBtn('Complete Order', Icons.done_all, Colors.green.shade700, () {
+            _updateStatus(AppConstants.statusPaid);
+          }));
+        } else {
+          buttons.add(_actionBtn('Mark Paid', Icons.payments, Colors.blue.shade700, () {
+            _processPayment(widget.order, data);
+          }));
+        }
       }
 
       if (needsManualAssignment) {

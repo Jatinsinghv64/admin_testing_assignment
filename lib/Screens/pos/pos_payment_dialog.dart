@@ -246,9 +246,10 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
                     _buildSharesList(),
                     const SizedBox(height: 20),
                   ],
-                  if (!_isSplitBill || !_allSharesCollected) ...[
+                   if (!_isSplitBill || !_allSharesCollected) ...[
                     Text(
-                      _isSplitBill
+                      // H2 FIX: Guard against RangeError when all shares are paid
+                      _isSplitBill && _selectedUnpaidShareIndex >= 0
                           ? '${_shares[_selectedUnpaidShareIndex].label} Payment Method'
                           : 'Payment Method',
                       style: const TextStyle(
@@ -936,7 +937,8 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            _isSplitBill
+            // H2 FIX: Guard against RangeError when index is -1
+            _isSplitBill && _selectedUnpaidShareIndex >= 0
                 ? 'Collecting ${_shares[_selectedUnpaidShareIndex].label}'
                 : 'Payment Summary',
             style: const TextStyle(
@@ -1077,7 +1079,8 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            _isSplitBill
+            // H2 FIX: Guard against RangeError when index is -1
+            _isSplitBill && _selectedUnpaidShareIndex >= 0
                 ? 'Cash for ${_shares[_selectedUnpaidShareIndex].label}'
                 : 'Cash Tendered',
             style: TextStyle(
@@ -1357,6 +1360,8 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
         _inputAmount = key;
       } else {
         final candidate = _inputAmount + key;
+        // M10 FIX: Limit input length to prevent visual overflow
+        if (candidate.length > 10) return;
         final parsed = double.tryParse(candidate) ?? 0;
         if (parsed > AppConstants.maxOrderTotal) return;
         _inputAmount = candidate;

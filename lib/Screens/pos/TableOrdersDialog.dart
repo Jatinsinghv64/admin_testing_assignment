@@ -53,7 +53,7 @@ class TableOrdersDialog extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.deepPurple.withOpacity(0.04),
+        color: Colors.deepPurple.withValues(alpha: 0.04),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Row(
@@ -61,7 +61,7 @@ class TableOrdersDialog extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Colors.deepPurple.withOpacity(0.12),
+              color: Colors.deepPurple.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
             ),
             child:
@@ -87,7 +87,7 @@ class TableOrdersDialog extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.12),
+                        color: Colors.red.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Text(
@@ -421,7 +421,7 @@ class TableOrdersDialog extends StatelessWidget {
       ),
     );
 
-    if (result == null) return; // User cancelled
+    if (result == null || !context.mounted) return; // User cancelled or unmounted
 
     try {
       final userScope = context.read<UserScopeService>();
@@ -498,10 +498,10 @@ class _TableOrderCardState extends State<_TableOrderCard> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.grey.withOpacity(0.12)),
+            border: Border.all(color: Colors.grey.withValues(alpha: 0.12)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.03),
+                color: Colors.black.withValues(alpha: 0.03),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -523,7 +523,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.7),
+                color: Colors.white.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: const Center(
@@ -560,7 +560,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: statusColor.withOpacity(0.04),
+        color: statusColor.withValues(alpha: 0.04),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
       ),
       child: Row(
@@ -613,7 +613,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Row(
@@ -650,7 +650,9 @@ class _TableOrderCardState extends State<_TableOrderCard> {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: items.take(6).map((item) {
+        children: items.asMap().entries.take(6).map((entry) {
+          final index = entry.key;
+          final item = entry.value;
           final itemMap = item as Map<String, dynamic>;
           final name = itemMap['name']?.toString() ?? 'Item';
           final qty = itemMap['quantity'] ?? 1;
@@ -698,7 +700,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
                 const SizedBox(width: 4),
                 IconButton(
                   onPressed: () =>
-                      _confirmRemoveItem(context, items.indexOf(item)),
+                      _confirmRemoveItem(context, index),
                   icon: const Icon(Icons.delete_outline,
                       size: 16, color: Colors.redAccent),
                   tooltip: 'Remove Item',
@@ -738,7 +740,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: statusColor.withOpacity(0.12),
+        color: statusColor.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: statusColor, width: 0.5),
       ),
@@ -756,7 +758,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: color, width: 0.5),
       ),
@@ -802,9 +804,9 @@ class _TableOrderCardState extends State<_TableOrderCard> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.1),
+              color: statusColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: statusColor.withOpacity(0.3)),
+              border: Border.all(color: statusColor.withValues(alpha: 0.3)),
             ),
             child: Text(
               statusLabel,
@@ -954,7 +956,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
+                color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(Icons.warning_amber_rounded, color: Colors.red),

@@ -2154,6 +2154,30 @@ class _MenuItemCard extends StatelessWidget {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 20),
+                      _buildEnhancedMenuDetailSection(
+                        'Preparation Details',
+                        Icons.restaurant_menu,
+                        [
+                          _buildEnhancedMenuDetailRow(
+                            Icons.settings_outlined,
+                            'Item Type',
+                            data['itemType'] == 'recipe_based'
+                                ? 'Recipe Based'
+                                : 'Ready to Serve',
+                            color: data['itemType'] == 'recipe_based'
+                                ? Colors.deepPurple
+                                : Colors.blue,
+                          ),
+                          if (data['itemType'] == 'recipe_based')
+                            _buildEnhancedMenuDetailRow(
+                              Icons.menu_book,
+                              'Linked Recipe',
+                              data['recipeName'] ?? 'Unnamed Recipe',
+                              color: Colors.deepPurple,
+                            ),
+                        ],
+                      ),
                       if (variants.isNotEmpty) ...[
                         const SizedBox(height: 20),
                         _buildEnhancedMenuDetailSection(
@@ -2965,6 +2989,9 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
   List<IngredientModel> _allIngredients = [];
   bool _loadingIngredients = true;
 
+  // Industry-grade classification
+  String _itemType = 'ready_to_serve'; // 'ready_to_serve' or 'recipe_based'
+
   // Preparation time options in 5-minute intervals
   static const List<int> _prepTimeOptions = [
     5,
@@ -3052,6 +3079,7 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
 
     // Load existing recipe link
     _linkedRecipeId = data['recipeId'] as String?;
+    _itemType = data['itemType'] as String? ?? (_linkedRecipeId != null ? 'recipe_based' : 'ready_to_serve');
 
     // Fetch all recipes async for the picker
     FirebaseFirestore.instance
@@ -3229,6 +3257,9 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
       'branchIds': branchIdsToSave,
       'tags': _tags,
       'variants': variantsMap.isNotEmpty ? variantsMap : null,
+      'itemType': _itemType,
+      'recipeId': _itemType == 'recipe_based' ? _linkedRecipeId : null,
+      'recipeName': _itemType == 'recipe_based' ? _linkedRecipeName : null,
       'lastUpdated': FieldValue.serverTimestamp(),
       // Recipe link fields
       'recipeId': _linkedRecipeId,
@@ -4018,6 +4049,46 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
     );
   }
 
+  Widget _buildTypeToggleItem(String label, String type, IconData icon) {
+    final isSelected = _itemType == type;
+    return GestureDetector(
+      onTap: () => setState(() => _itemType = type),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2))
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: isSelected ? Colors.deepPurple : Colors.grey[600],
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                color: isSelected ? Colors.deepPurple : Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _showRecipePickerDialog() async {
     String localSearch = '';
     await showDialog<void>(
@@ -4320,6 +4391,82 @@ class _MenuItemDialogState extends State<_MenuItemDialog> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 24),
+                    _buildSectionHeader('Preparation Type', Icons.restaurant),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _buildTypeToggleItem(
+                              'Ready to Serve',
+                              'ready_to_serve',
+                              Icons.shopping_bag_outlined,
+                            ),
+                          ),
+                          Expanded(
+                            child: _buildTypeToggleItem(
+                              'Has Recipe',
+                              'recipe_based',
+                              Icons.menu_book_outlined,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_itemType == 'recipe_based') ...[
+                      const SizedBox(height: 12),
+                      InkWell(
+                        onTap: _showRecipePickerDialog,
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.deepPurple.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: Colors.deepPurple.withOpacity(0.2)),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.link,
+                                  color: Colors.deepPurple.shade600),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _linkedRecipeId == null
+                                          ? 'No Recipe Linked'
+                                          : 'Linked Recipe',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.deepPurple.shade700,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    Text(
+                                      _linkedRecipeName ?? 'Tap to select a recipe',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.arrow_forward_ios,
+                                  size: 16, color: Colors.grey),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 24),
                     _buildSectionHeader('Category', Icons.category),
                     const SizedBox(height: 12),

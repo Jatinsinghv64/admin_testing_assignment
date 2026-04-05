@@ -173,7 +173,7 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -199,13 +199,13 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
                         horizontal: 18, vertical: 10),
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? platform.color.withOpacity(0.12)
+                          ? platform.color.withValues(alpha: 0.12)
                           : Colors.grey[100],
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: isSelected
                             ? platform.color
-                            : Colors.grey.withOpacity(0.2),
+                            : Colors.grey.withValues(alpha: 0.2),
                         width: isSelected ? 1.5 : 1,
                       ),
                     ),
@@ -242,7 +242,7 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
             decoration: BoxDecoration(
               color: Colors.grey[100],
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey.withOpacity(0.2)),
+              border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -282,7 +282,7 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: Colors.black.withValues(alpha: 0.05),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   )
@@ -625,10 +625,10 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: widget.isSelected ? Colors.deepPurple.withOpacity(0.05) : Colors.white,
+        color: widget.isSelected ? Colors.deepPurple.withValues(alpha: 0.05) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: widget.isSelected ? Colors.deepPurple : Colors.grey.withOpacity(0.12),
+          color: widget.isSelected ? Colors.deepPurple : Colors.grey.withValues(alpha: 0.12),
           width: widget.isSelected ? 1.5 : 1,
         ),
       ),
@@ -650,7 +650,7 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.indigo.withOpacity(0.1),
+                          color: Colors.indigo.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
@@ -720,9 +720,9 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: badgeColor.withOpacity(0.12),
+        color: badgeColor.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: badgeColor.withOpacity(0.3)),
+        border: Border.all(color: badgeColor.withValues(alpha: 0.3)),
       ),
       child: Text(
         displayText,
@@ -740,10 +740,10 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: isPaid ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+        color: isPaid ? Colors.green.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: isPaid ? Colors.green.withOpacity(0.3) : Colors.orange.withOpacity(0.3),
+          color: isPaid ? Colors.green.withValues(alpha: 0.3) : Colors.orange.withValues(alpha: 0.3),
         ),
       ),
       child: Row(
@@ -992,9 +992,9 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
@@ -1007,7 +1007,7 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
                 Text(
                   'CURRENT STATUS',
                   style: TextStyle(
-                    color: color.withOpacity(0.6),
+                    color: color.withValues(alpha: 0.6),
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1.2,
@@ -1130,7 +1130,7 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
         border: Border(top: BorderSide(color: Colors.grey.shade100)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 10,
               offset: const Offset(0, -5))
         ],
@@ -1241,7 +1241,7 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           onTap: onTap,
@@ -1264,6 +1264,7 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
     // 2. Switch PosScreen view mode to 'pos'
     widget.onSwitchToPos();
     
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Order loaded into cart')),
     );
@@ -1296,16 +1297,16 @@ class _DeliveryOrderGridCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10), // Reduced padding
       decoration: BoxDecoration(
-        color: isSelected ? Colors.deepPurple.withOpacity(0.05) : Colors.white,
+        color: isSelected ? Colors.deepPurple.withValues(alpha: 0.05) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isSelected ? Colors.deepPurple : Colors.grey.withOpacity(0.12),
+          color: isSelected ? Colors.deepPurple : Colors.grey.withValues(alpha: 0.12),
           width: isSelected ? 2 : 1,
         ),
         boxShadow: isSelected
             ? [
                 BoxShadow(
-                  color: Colors.deepPurple.withOpacity(0.1),
+                  color: Colors.deepPurple.withValues(alpha: 0.1),
                   blurRadius: 8,
                   offset: const Offset(0, 4),
                 )
@@ -1337,7 +1338,7 @@ class _DeliveryOrderGridCard extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 4),
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.indigo.withOpacity(0.1),
+                color: Colors.indigo.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
@@ -1418,7 +1419,7 @@ class _DeliveryOrderGridCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: badgeColor.withOpacity(0.1),
+        color: badgeColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Center(
@@ -1439,10 +1440,10 @@ class _DeliveryOrderGridCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: isPaid ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+        color: isPaid ? Colors.green.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: isPaid ? Colors.green.withOpacity(0.3) : Colors.orange.withOpacity(0.3),
+          color: isPaid ? Colors.green.withValues(alpha: 0.3) : Colors.orange.withValues(alpha: 0.3),
         ),
       ),
       child: Row(

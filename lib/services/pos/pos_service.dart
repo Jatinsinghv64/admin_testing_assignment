@@ -67,12 +67,27 @@ class PosService extends ChangeNotifier {
   String? _existingOrderId; // Legacy: used to track the first active order
   List<DocumentSnapshot> _ongoingOrders = []; // Generalize to DocumentSnapshot
   String? _activeBranchId; // Explicit branch for this POS session
+  String? _registerSessionId; // Active register session ID for order attribution
   StreamSubscription? _ordersSubscription;
 
   @override
   void dispose() {
     _disposeSubscription();
     super.dispose();
+  }
+
+  /// ✅ NEW: Explicit reset for auth lifecycle
+  void reset() {
+    debugPrint("🧹 Resetting PosService...");
+    _disposeSubscription();
+    _cartItems.clear();
+    _ongoingOrders = [];
+    _activeBranchId = null;
+    _existingOrderId = null;
+    _selectedTableId = null;
+    _selectedTableName = null;
+    _isSubmitting = false;
+    notifyListeners();
   }
 
   // ── Getters ─────────────────────────────────────────────────
@@ -89,6 +104,11 @@ class PosService extends ChangeNotifier {
   bool get isAppendMode => _existingOrderId != null;
   List<DocumentSnapshot> get ongoingOrders => _ongoingOrders;
   String? get activeBranchId => _activeBranchId;
+  String? get registerSessionId => _registerSessionId;
+
+  void setRegisterSessionId(String? sessionId) {
+    _registerSessionId = sessionId;
+  }
 
   double get subtotal => double.parse(_cartItems
       .fold(0.0, (acc, item) => acc + item.subtotal)
@@ -481,7 +501,9 @@ class PosService extends ChangeNotifier {
     if (branchIds.isEmpty) {
       throw Exception('No branch selected');
     }
+    // POS orders should only be associated with a single branch to avoid cross-branch blocking.
     final primaryBranchId = branchIds.first;
+    final singleBranchList = [primaryBranchId];
     final isDineInSubmit =
         _orderType == PosOrderType.dineIn && _selectedTableId != null;
 
@@ -494,7 +516,7 @@ class PosService extends ChangeNotifier {
       try {
         return await _appendToExistingOrder(
           userScope: userScope,
-          branchIds: branchIds,
+          branchIds: singleBranchList,
           initialStatus: initialStatus,
         );
       } catch (e, stackTrace) {
@@ -509,11 +531,11 @@ class PosService extends ChangeNotifier {
         );
 
         if (isDineInSubmit) {
-          await _syncSelectedTableOrders(branchIds, notify: false);
+          await _syncSelectedTableOrders(singleBranchList, notify: false);
           if (_existingOrderId != null) {
             return _appendToExistingOrder(
               userScope: userScope,
-              branchIds: branchIds,
+              branchIds: singleBranchList,
               initialStatus: initialStatus,
             );
           }
@@ -575,7 +597,7 @@ class PosService extends ChangeNotifier {
           }
 
           final orderData =
-              _buildOrderData(branchIds, userScope, initialStatus);
+              _buildOrderData(singleBranchList, userScope, initialStatus);
 
           // 3. ALL WRITES (Strictly after all reads)
 
@@ -596,15 +618,14 @@ class PosService extends ChangeNotifier {
         }
       }).timeout(_firestoreWriteTimeout);
 
-      // ── Ingredient deduction (background) ──
+      // ── Ingredient deduction (with retry) ──
+      // C2 FIX: Ensure deduction is retried on failure so inventory stays accurate.
       final recordedBy = _getRecorder(userScope);
-      InventoryService()
-          .deductForOrder(
-            orderId: finalOrderId,
-            branchIds: branchIds,
-            recordedBy: recordedBy,
-          )
-          .catchError((e) => _logError('POS: Ingredient deduction failed', e));
+      _deductWithRetry(
+        orderId: finalOrderId,
+        branchIds: branchIds,
+        recordedBy: recordedBy,
+      );
 
       clearCart();
       return finalOrderId;
@@ -849,6 +870,10 @@ class PosService extends ChangeNotifier {
     if (branchIds.isEmpty) {
       throw Exception('No branch selected');
     }
+    // POS orders should only be associated with a single branch.
+    final primaryBranchId = branchIds.first;
+    final singleBranchList = [primaryBranchId];
+
     notifyListeners();
 
     try {
@@ -959,7 +984,7 @@ class PosService extends ChangeNotifier {
             await InventoryService().deductItemsInTransaction(
               transaction: transaction,
               items: itemsToDeduct,
-              branchIds: branchIds,
+              branchIds: singleBranchList,
               orderId: newOrderId ??
                   (existingOrders.isNotEmpty
                       ? existingOrders.first.id
@@ -971,7 +996,7 @@ class PosService extends ChangeNotifier {
           // 2. ALL WRITES
           if (newOrderDocRef != null && newOrderId != null) {
             final newOrderData = _buildOrderData(
-                branchIds, userScope, AppConstants.statusPending);
+                singleBranchList, userScope, AppConstants.statusPending);
             if (newOrderPayment == null) {
               throw Exception('Missing payment allocation for new order');
             }
@@ -1130,7 +1155,7 @@ class PosService extends ChangeNotifier {
       }).timeout(_firestoreWriteTimeout);
 
       for (final tableId in tablesToCleanup) {
-        await cleanupTableIfEmpty(branchIds: branchIds, tableId: tableId);
+        await cleanupTableIfEmpty(branchIds: singleBranchList, tableId: tableId);
       }
 
       clearCart();
@@ -1158,6 +1183,7 @@ class PosService extends ChangeNotifier {
     final bool isPendingKitchenDecision = status == AppConstants.statusPending;
     return {
       'branchIds': branchIds,
+      'branchId': branchIds.isNotEmpty ? branchIds.first : null,
       'source': 'pos',
       // ── SYNC FIX: Write BOTH field names so all screens can find this order ──
       'Order_type': _orderType.firestoreValue, // Queried by OrderService
@@ -1198,8 +1224,46 @@ class PosService extends ChangeNotifier {
           ? PosOrderLifecycle.kitchenDecisionPending
           : PosOrderLifecycle.kitchenDecisionAccepted,
       // POS orders should NEVER show popup alerts for admin accept/reject
-      'showPopupAlert': false
+      'showPopupAlert': false,
+      // C2 FIX: Explicitly track inventory deduction state for non-payment orders
+      'inventoryDeducted': false,
+      // Register session attribution for analytics
+      if (_registerSessionId != null) 'registerSessionId': _registerSessionId,
     };
+  }
+
+  /// C2 FIX: Retries inventory deduction up to 2 times on failure.
+  /// Prevents silent stock drift when fire-and-forget deduction fails.
+  void _deductWithRetry({
+    required String orderId,
+    required List<String> branchIds,
+    required String recordedBy,
+    int attempt = 1,
+  }) {
+    InventoryService()
+        .deductForOrder(
+          orderId: orderId,
+          branchIds: branchIds,
+          recordedBy: recordedBy,
+        )
+        .catchError((e) {
+      _logError('POS: Ingredient deduction failed (attempt $attempt)', e);
+      if (attempt < 3) {
+        Future.delayed(Duration(seconds: attempt * 2), () {
+          _deductWithRetry(
+            orderId: orderId,
+            branchIds: branchIds,
+            recordedBy: recordedBy,
+            attempt: attempt + 1,
+          );
+        });
+      } else {
+        _logError(
+          'POS: Ingredient deduction PERMANENTLY FAILED for order $orderId after 3 attempts',
+          e,
+        );
+      }
+    });
   }
 
   /// Complete payment for an existing order.
@@ -1401,11 +1465,13 @@ class PosService extends ChangeNotifier {
           'timestamps.${AppConstants.statusPreparing}':
               FieldValue.serverTimestamp(),
         });
-      }).timeout(_firestoreWriteTimeout);
+      }).timeout(const Duration(seconds: 15), onTimeout: () {
+        throw TimeoutException('KDS auto-accept took too long (Firestore contention?)');
+      });
 
       notifyListeners();
-    } catch (e) {
-      _logError('POS: Failed to accept pending kitchen order', e);
+    } catch (e, stackTrace) {
+      _logError('POS: Failed to accept pending kitchen order', e, stackTrace: stackTrace);
       rethrow;
     }
   }
@@ -1485,8 +1551,13 @@ class PosService extends ChangeNotifier {
         });
       }).timeout(_firestoreWriteTimeout);
 
+      // H1 FIX: Await cleanup to prevent ghost tables
       if (tableId != null && effectiveBranchIds.isNotEmpty) {
-        cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
+        try {
+          await cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
+        } catch (e) {
+          _logError('POS: Table cleanup failed after kitchen rejection', e);
+        }
       }
       notifyListeners();
     } catch (e) {
@@ -1543,12 +1614,15 @@ class PosService extends ChangeNotifier {
           }
         }
 
+        // L2 FIX: Use constants instead of string literals
         final isPaid = orderData['isPaid'] == true ||
-            getPaymentStatus(orderData) == 'paid';
+            getPaymentStatus(orderData) == PosOrderLifecycle.paymentPaid;
         transaction.update(orderRef, {
-          'status': 'cancelled',
-          'orderStatus': 'cancelled',
-          'paymentStatus': isPaid ? 'refunded' : 'unpaid',
+          'status': AppConstants.statusCancelled,
+          'orderStatus': PosOrderLifecycle.stageCancelled,
+          'paymentStatus': isPaid
+              ? PosOrderLifecycle.paymentRefunded
+              : PosOrderLifecycle.paymentUnpaid,
           'inventoryRestored': true,
           'cancelledAt': FieldValue.serverTimestamp(),
           'cancelledBy': recordedBy,
@@ -1557,8 +1631,13 @@ class PosService extends ChangeNotifier {
         });
       }).timeout(_firestoreWriteTimeout);
 
+      // H1 FIX: Await cleanup to prevent ghost tables
       if (tableId != null && effectiveBranchIds.isNotEmpty) {
-        cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
+        try {
+          await cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
+        } catch (e) {
+          _logError('POS: Table cleanup failed after cancellation', e);
+        }
       }
       notifyListeners();
     } catch (e) {
@@ -1638,21 +1717,25 @@ class PosService extends ChangeNotifier {
 
         if (items.isEmpty) {
           final wasPaid = PosOrderLifecycle.isPaymentCaptured(orderData);
+          // L2 FIX: Use constants instead of string literals
           transaction.update(orderRef, {
             'items': [],
             'cancelledItems': cancelledItems,
             'subtotal': 0,
             'totalAmount': 0,
-            'status': 'cancelled',
+            'status': AppConstants.statusCancelled,
             'orderStatus': PosOrderLifecycle.stageCancelled,
             'paymentStatus': wasPaid
                 ? PosOrderLifecycle.paymentRefunded
                 : PosOrderLifecycle.paymentUnpaid,
             'cancelledAt': FieldValue.serverTimestamp(),
             'timestamps.cancelled': FieldValue.serverTimestamp(),
+            // C3 FIX: Flag for accounting review if order was paid
+            if (wasPaid) 'requiresRefundReview': true,
           });
         } else {
-          transaction.update(orderRef, {
+          // C3 FIX: Adjust payment tracking when items are removed from paid orders
+          final updateFields = <String, dynamic>{
             'items': items,
             'cancelledItems': cancelledItems,
             'subtotal': newSubtotal,
@@ -1660,7 +1743,12 @@ class PosService extends ChangeNotifier {
             'discount': discountAmt,
             'itemCount': newItemCount,
             'lastUpdated': FieldValue.serverTimestamp(),
-          });
+          };
+          if (PosOrderLifecycle.isPaymentCaptured(orderData)) {
+            updateFields['paymentAppliedAmount'] = newTotal;
+            updateFields['requiresRefundReview'] = true;
+          }
+          transaction.update(orderRef, updateFields);
         }
       }).timeout(_firestoreWriteTimeout);
       notifyListeners();
@@ -1985,6 +2073,9 @@ class PosService extends ChangeNotifier {
     required String initialStatus,
   }) async {
     final orderId = _existingOrderId!;
+    // POS orders should only ever be associated with ONE branch.
+    final primaryBranchId = branchIds.first;
+    final singleBranchList = [primaryBranchId];
 
     _isSubmitting = true;
     notifyListeners();
@@ -2082,7 +2173,7 @@ class PosService extends ChangeNotifier {
       // ── Ingredient deduction (background, non-blocking but logged) for new items ──
       _deductForNewItems(
         newItems: currentCart.map((i) => i.toOrderItemMap()).toList(),
-        branchIds: branchIds,
+        branchIds: singleBranchList,
         orderId: orderId,
         recordedBy: _getRecorder(userScope),
       ).catchError((e) {

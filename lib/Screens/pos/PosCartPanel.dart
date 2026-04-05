@@ -75,7 +75,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
         if (widget.isSubmittingOrder || _isProcessingDeletion)
           Positioned.fill(
             child: Container(
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               child: Center(
                 child: CircularProgressIndicator(
                   color:
@@ -134,7 +134,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: Colors.amber.withOpacity(0.15),
+            color: Colors.amber.withValues(alpha: 0.15),
             child: Row(
               children: [
                 Icon(Icons.playlist_add, size: 16, color: Colors.amber[800]),
@@ -169,7 +169,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    backgroundColor: Colors.red.withOpacity(0.1),
+                    backgroundColor: Colors.red.withValues(alpha: 0.1),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(6)),
                   ),
@@ -194,7 +194,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Colors.deepPurple.withOpacity(0.1),
+                  color: Colors.deepPurple.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
@@ -215,7 +215,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.08),
+                    color: Colors.red.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
@@ -253,7 +253,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
+                color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(Icons.delete_sweep, color: Colors.red),
@@ -321,13 +321,13 @@ class _PosCartPanelState extends State<PosCartPanel> {
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: pos.selectedTableId != null
-                      ? Colors.deepPurple.withOpacity(0.1)
-                      : Colors.orange.withOpacity(0.1),
+                      ? Colors.deepPurple.withValues(alpha: 0.1)
+                      : Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: pos.selectedTableId != null
-                        ? Colors.deepPurple.withOpacity(0.3)
-                        : Colors.orange.withOpacity(0.3),
+                        ? Colors.deepPurple.withValues(alpha: 0.3)
+                        : Colors.orange.withValues(alpha: 0.3),
                   ),
                 ),
                 child: Row(
@@ -432,7 +432,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
   Widget _buildSectionHeader(String title, IconData icon, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      color: color.withOpacity(0.05),
+      color: color.withValues(alpha: 0.05),
       child: Row(
         children: [
           Icon(icon, size: 14, color: color),
@@ -562,7 +562,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -578,9 +578,9 @@ class _PosCartPanelState extends State<PosCartPanel> {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               margin: const EdgeInsets.only(bottom: 10),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
+                color: Colors.orange.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -704,7 +704,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.deepPurple.withOpacity(0.1),
+                color: Colors.deepPurple.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(Icons.person, color: Colors.deepPurple),
@@ -822,6 +822,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
     );
 
     if (confirmed == true) {
+      if (!context.mounted) return;
       // Local status check to avoid masked exception issues on Web
       for (final doc in pos.ongoingOrders) {
         final data = doc.data() as Map<String, dynamic>;
@@ -881,7 +882,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
+                color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(Icons.warning_amber_rounded, color: Colors.red),
@@ -932,12 +933,12 @@ class _OrderTypeChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: isSelected
               ? Colors.deepPurple
-              : Colors.deepPurple.withOpacity(0.05),
+              : Colors.deepPurple.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: isSelected
                 ? Colors.deepPurple
-                : Colors.deepPurple.withOpacity(0.15),
+                : Colors.deepPurple.withValues(alpha: 0.15),
           ),
         ),
         child: Center(
@@ -1072,6 +1073,7 @@ class _OngoingOrderItemTile extends StatelessWidget {
     );
 
     if (confirmed == true) {
+      if (!context.mounted) return;
       // Local status check to avoid masked exception issues on Web
       if (orderStatus == AppConstants.statusPrepared ||
           orderStatus == AppConstants.statusServed) {
@@ -1367,9 +1369,9 @@ class _QuantityButton extends StatelessWidget {
         width: 30,
         height: 30,
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withOpacity(0.3)),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Icon(icon, size: 16, color: color),
       ),
@@ -1411,7 +1413,7 @@ class _FloorPlanDialogState extends State<_FloorPlanDialog> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.deepPurple.withOpacity(0.1),
+                    color: Colors.deepPurple.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(Icons.map_outlined,
@@ -1708,15 +1710,15 @@ class _FloorPlanTable extends StatelessWidget {
     Color textColor;
     if (isAvailable) {
       borderColor = Colors.green;
-      bgColor = Colors.green.withOpacity(0.08);
+      bgColor = Colors.green.withValues(alpha: 0.08);
       textColor = Colors.green[800]!;
     } else if (isReserved) {
       borderColor = Colors.orange;
-      bgColor = Colors.orange.withOpacity(0.08);
+      bgColor = Colors.orange.withValues(alpha: 0.08);
       textColor = Colors.orange[800]!;
     } else {
       borderColor = Colors.red;
-      bgColor = Colors.red.withOpacity(0.08);
+      bgColor = Colors.red.withValues(alpha: 0.08);
       textColor = Colors.red[800]!;
     }
 
@@ -1746,7 +1748,7 @@ class _FloorPlanTable extends StatelessWidget {
               boxShadow: isAvailable
                   ? [
                       BoxShadow(
-                        color: Colors.green.withOpacity(0.15),
+                        color: Colors.green.withValues(alpha: 0.15),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       )
@@ -1995,7 +1997,7 @@ class _FloorPlanTable extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
-                          color: borderColor.withOpacity(0.15),
+                          color: borderColor.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(

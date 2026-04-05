@@ -13,6 +13,7 @@ import '../Widgets/ExportReportDialog.dart';
 import '../Widgets/BusinessPerformancePanel.dart';
 import '../services/inventory/InventoryService.dart';
 import '../Models/IngredientModel.dart';
+import '../services/pos/pos_register_service.dart';
 
 // ─── Theme Colors ───────────────────────────────────────────────────────────
 class _DashColors {
@@ -83,6 +84,15 @@ class DashboardScreenLarge extends StatelessWidget {
     return InventoryService().streamIngredients(
       filterBranchIds.isEmpty ? userScope.branchIds : filterBranchIds,
       isSuperAdmin: userScope.isSuperAdmin,
+    );
+  }
+
+  Stream<int> _getOpenRegistersStream(BuildContext context) {
+    final userScope = Provider.of<UserScopeService>(context, listen: true);
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: true);
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    return PosRegisterService().streamOpenRegisterCount(
+      filterBranchIds.isEmpty ? userScope.branchIds : filterBranchIds,
     );
   }
 
@@ -456,26 +466,20 @@ class DashboardScreenLarge extends StatelessWidget {
           );
         },
       ),
-      // 7. Takeaway Orders Today
-      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _getTodayOrdersStream(context),
+      // 7. Active Registers
+      StreamBuilder<int>(
+        stream: _getOpenRegistersStream(context),
         builder: (context, snapshot) {
-          int count = 0;
-          if (snapshot.hasData) {
-            count = snapshot.data!.docs.where((doc) {
-              final type = doc.data()['Order_type'] as String? ?? '';
-              return type.toLowerCase() == 'takeaway';
-            }).length;
-          }
+          final count = snapshot.hasData ? snapshot.data! : 0;
           final isLoading = !snapshot.hasData;
           return _KpiCard(
-            title: 'Takeaway Orders',
+            title: 'Active Registers',
             value: isLoading ? '...' : count.toString(),
-            icon: Icons.shopping_basket_outlined,
-            iconColor: Colors.indigo,
-            badge: isLoading ? null : 'Today',
-            badgeColor: Colors.indigo,
-            onTap: () => onTabChange(2),
+            icon: Icons.point_of_sale_outlined,
+            iconColor: Colors.deepPurpleAccent,
+            badge: isLoading ? null : 'Open Sessions',
+            badgeColor: count > 0 ? Colors.green : Colors.grey,
+            onTap: () {}, // Optional navigation to registers tab
             dashColors: dashColors,
           );
         },

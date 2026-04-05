@@ -104,13 +104,13 @@ class _VariantSelectionDialogState extends State<VariantSelectionDialog> {
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? Colors.deepPurple.withOpacity(0.05)
+                                ? Colors.deepPurple.withValues(alpha: 0.05)
                                 : Colors.white,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: isSelected
                                   ? Colors.deepPurple
-                                  : Colors.grey.withOpacity(0.2),
+                                  : Colors.grey.withValues(alpha: 0.2),
                               width: isSelected ? 2 : 1,
                             ),
                           ),
@@ -127,7 +127,7 @@ class _VariantSelectionDialogState extends State<VariantSelectionDialog> {
                                   border: Border.all(
                                     color: isSelected
                                         ? Colors.deepPurple
-                                        : Colors.grey.withOpacity(0.5),
+                                        : Colors.grey.withValues(alpha: 0.5),
                                     width: 2,
                                   ),
                                 ),

@@ -58,7 +58,7 @@ class _PosScreenState extends State<PosScreen> {
   // ── Register Session ──
   final PosRegisterService _registerService = PosRegisterService();
   PosRegisterSession? _currentRegisterSession;
-  // REMOVED: bool _registerChecked = false; in favor of _checkedBranchId
+  String? _lastRegisterBranchId;
 
   // ── Stream Caching ──
   Stream<QuerySnapshot>? _categoryStream;
@@ -340,6 +340,18 @@ class _PosScreenState extends State<PosScreen> {
 
     final globalBranchId = branchFilter.selectedBranchId;
 
+    // M6 FIX: Reset register opt-out when branch changes
+    if (_lastRegisterBranchId != globalBranchId) {
+      _lastRegisterBranchId = globalBranchId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _optedOutRegisterOpen = false;
+          });
+        }
+      });
+    }
+
     // 1. If global filter is a SINGLE branch, sync and allow POS
     if (globalBranchId != null &&
         globalBranchId != BranchFilterService.allBranchesValue) {
@@ -358,13 +370,27 @@ class _PosScreenState extends State<PosScreen> {
             if (!mounted) return;
             if (_currentRegisterSession?.id != session?.id) {
               setState(() => _currentRegisterSession = session);
+              // Sync register session ID to PosService for order attribution
+              final pos = context.read<PosService>();
+              pos.setRegisterSessionId(session?.id);
             }
             // Guard: only show if no register dialog (open or close) is already visible
             if (regSnapshot.connectionState != ConnectionState.waiting &&
                 session == null &&
                 !_isRegisterDialogOpen &&
                 !_optedOutRegisterOpen) {
-              _showOpenRegisterDialog(context);
+              
+              // 🛠️ UX FIX: Only auto-pop register dialog if user has a single branch.
+              // If they have multiple, show the "Register Closed" overlay first
+              // so they can change branch in the top bar before opening.
+              final branches = userScope.branchIds;
+              if (branches.length == 1) {
+                _showOpenRegisterDialog(context);
+              } else {
+                // For super-admins/multi-branch users, don't auto-pop.
+                // They will see the overlay which has an "Open Register" button.
+                _optedOutRegisterOpen = true;
+              }
             }
           });
           
@@ -388,7 +414,7 @@ class _PosScreenState extends State<PosScreen> {
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 20,
                 offset: const Offset(0, 10),
               ),
@@ -400,7 +426,7 @@ class _PosScreenState extends State<PosScreen> {
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
+                  color: Colors.orange.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.storefront,
@@ -423,10 +449,10 @@ class _PosScreenState extends State<PosScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 decoration: BoxDecoration(
-                  color: Colors.deepPurple.withOpacity(0.05),
+                  color: Colors.deepPurple.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(16),
                   border:
-                      Border.all(color: Colors.deepPurple.withOpacity(0.15)),
+                      Border.all(color: Colors.deepPurple.withValues(alpha: 0.15)),
                 ),
                 child: Row(
                   children: [
@@ -464,7 +490,7 @@ class _PosScreenState extends State<PosScreen> {
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 20,
                 offset: const Offset(0, 10),
               ),
@@ -476,7 +502,7 @@ class _PosScreenState extends State<PosScreen> {
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
+                  color: Colors.orange.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.lock_outline,
@@ -520,13 +546,18 @@ class _PosScreenState extends State<PosScreen> {
 
   // ── POS Header Bar with Toggle ─────────────────────────────────
   Widget _buildPosHeader(BuildContext context) {
+    final branchFilter = context.watch<BranchFilterService>();
+    final userScope = context.watch<UserScopeService>();
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    final isSpecificBranchSelected = filterBranchIds.length == 1;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -586,7 +617,7 @@ class _PosScreenState extends State<PosScreen> {
               ),
             ),
           // ── Register Button ──
-          if (_viewMode == PosViewMode.pos) ...[
+          if (_viewMode == PosViewMode.pos && isSpecificBranchSelected) ...[
             const SizedBox(width: 12),
             _buildRegisterButton(context),
           ],
@@ -662,7 +693,7 @@ class _PosScreenState extends State<PosScreen> {
       final branchName = branchFilter.branchNames[activeBranchId] ?? 'Branch';
       final result = await showDialog<dynamic>(
         context: context,
-        barrierDismissible: false,
+        barrierDismissible: true, // Allow clicking outside to dismiss (opts out)
         builder: (_) => PosRegisterOpeningDialog(
           branchId: activeBranchId,
           branchName: branchName,
@@ -693,12 +724,48 @@ class _PosScreenState extends State<PosScreen> {
   Future<void> _showCloseRegisterDialog(BuildContext context) async {
     if (_currentRegisterSession == null) return;
     if (_isRegisterDialogOpen) return;
-    _isRegisterDialogOpen = true;
+
+    // ✅ NEW: Prevent closing register from "All Branches" view
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
+    if (branchFilter.selectedBranchId == BranchFilterService.allBranchesValue) {
+      if (mounted) {
+        _showMenuItemBlockedDialog(
+          context,
+          title: 'Select a Branch First',
+          message:
+              'You are currently viewing "All Branches". Please select the specific branch associated with this register session before attemptimg to close it.',
+        );
+      }
+      return;
+    }
 
     // Capture session reference before any async gap
     final session = _currentRegisterSession!;
+    final userScope = Provider.of<UserScopeService>(context, listen: false);
+    final isSuperAdmin = userScope.isSuperAdmin;
 
-    // Show a loading overlay while we calculate sales
+    // ── Check if there are active ongoing orders that need completing ──
+    List<String> activeOrderNumbers = [];
+    try {
+      activeOrderNumbers = await _registerService.getActiveOrderIds(session.branchId);
+    } catch (e) {
+      debugPrint('Error checking ongoing orders: $e');
+    }
+
+    if (activeOrderNumbers.isNotEmpty && !isSuperAdmin) {
+      if (!mounted) return;
+      _showMenuItemBlockedDialog(
+        context,
+        title: 'Active Orders Remaining',
+        message:
+            'The register cannot be closed because of ongoing orders: ${activeOrderNumbers.join(", ")}.\n\nPlease complete, cancel, or settle these orders before closing.',
+      );
+      return;
+    }
+
+    _isRegisterDialogOpen = true;
+
+    // Show loading overlay while computing session metrics
     late final OverlayEntry loadingOverlay;
     loadingOverlay = OverlayEntry(
       builder: (_) => Container(
@@ -709,15 +776,18 @@ class _PosScreenState extends State<PosScreen> {
     Overlay.of(context).insert(loadingOverlay);
 
     double totalSales = 0.0;
+    RegisterSessionMetrics? metrics;
     try {
-      totalSales = await _registerService.getSessionSales(
-        session.branchId,
-        session.openedAt,
-      );
+      final results = await Future.wait([
+        _registerService.getSessionSales(session.branchId, session.openedAt),
+        _registerService.computeSessionMetrics(session.branchId, session.openedAt),
+      ]);
+      totalSales = results[0] as double;
+      metrics = results[1] as RegisterSessionMetrics;
     } catch (e) {
-      debugPrint('Error calculating sales: \$e');
+      debugPrint('Error calculating sales: $e');
     } finally {
-      loadingOverlay.remove(); // Always removes the correct overlay
+      loadingOverlay.remove();
     }
 
     if (!mounted) {
@@ -733,6 +803,10 @@ class _PosScreenState extends State<PosScreen> {
         userEmail: context.read<UserScopeService>().userEmail,
         registerService: _registerService,
         totalSales: totalSales,
+        metrics: metrics,
+        isForceClosed: activeOrderNumbers.isNotEmpty,
+        activeOrderCount: activeOrderNumbers.length,
+        isSuperAdmin: isSuperAdmin,
       ),
     );
     if (result == true && mounted) {
@@ -740,6 +814,9 @@ class _PosScreenState extends State<PosScreen> {
         _currentRegisterSession = null;
         // StreamBuilder will detect null session and re-show dialog
       });
+      // Clear the registerSessionId on PosService
+      final pos = context.read<PosService>();
+      pos.setRegisterSessionId(null);
     }
     _isRegisterDialogOpen = false;
   }
@@ -750,7 +827,7 @@ class _PosScreenState extends State<PosScreen> {
       decoration: BoxDecoration(
         color: Colors.grey[100],
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -930,7 +1007,7 @@ class _PosScreenState extends State<PosScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           decoration: BoxDecoration(
             color:
-                isSelected ? color.withOpacity(0.15) : color.withOpacity(0.02),
+                isSelected ? color.withValues(alpha: 0.15) : color.withValues(alpha: 0.02),
             border: Border(
               left: BorderSide(
                 color: isSelected ? color : Colors.transparent,
@@ -943,7 +1020,7 @@ class _PosScreenState extends State<PosScreen> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: isSelected ? color : color.withOpacity(0.1),
+                  color: isSelected ? color : color.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -959,7 +1036,7 @@ class _PosScreenState extends State<PosScreen> {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                  color: isSelected ? color.withOpacity(0.9) : Colors.grey[800],
+                  color: isSelected ? color.withValues(alpha: 0.9) : Colors.grey[800],
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -988,6 +1065,7 @@ class _PosScreenState extends State<PosScreen> {
         query = query.where('categoryId', isEqualTo: _selectedCategoryId);
       }
 
+      query = query.orderBy('name');
       _productStream = query.snapshots();
     }
 
@@ -1507,6 +1585,19 @@ class _PosScreenState extends State<PosScreen> {
 
   // ── Actions ─────────────────────────────────────────────────
   Future<void> _submitOrder(BuildContext context, String activeBranchId) async {
+    // ── REGISTER GUARD: Block orders when register is closed ──
+    if (_currentRegisterSession == null) {
+      if (mounted) {
+        _showMenuItemBlockedDialog(
+          context,
+          title: 'Register Not Open',
+          message:
+              'You must open the register before submitting orders. This ensures accurate cash tracking and end-of-day reconciliation.',
+        );
+      }
+      return;
+    }
+
     final pos = context.read<PosService>();
     final userScope = context.read<UserScopeService>();
 
@@ -1566,6 +1657,19 @@ class _PosScreenState extends State<PosScreen> {
 
   Future<void> _openPaymentDialog(
       BuildContext context, String activeBranchId) async {
+    // ── REGISTER GUARD: Block payment when register is closed ──
+    if (_currentRegisterSession == null) {
+      if (mounted) {
+        _showMenuItemBlockedDialog(
+          context,
+          title: 'Register Not Open',
+          message:
+              'You must open the register before processing payments. This ensures accurate cash tracking and end-of-day reconciliation.',
+        );
+      }
+      return;
+    }
+
     final pos = context.read<PosService>();
 
     if (pos.orderType == PosOrderType.dineIn && pos.selectedTableId == null) {

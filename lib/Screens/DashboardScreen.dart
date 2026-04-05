@@ -13,7 +13,8 @@ import '../Widgets/BranchFilterService.dart'; // ✅ Branch filter
 import '../Widgets/OrderUIComponents.dart'; // ✅ Shared UI components
 import '../Widgets/CancellationDialog.dart'; // ✅ Shared cancellation dialog
 import '../utils/responsive_helper.dart'; // ✅ Responsive utility
-import '../services/DashboardThemeService.dart'; // ✅ Added for Dark/Light Theme
+import '../services/DashboardThemeService.dart';
+import '../services/pos/pos_register_service.dart'; // ✅ Added for Dark/Light Theme
 import 'DashboardScreenLarge.dart'; // ✅ Large Screen Implementation
 import '../Widgets/BusinessPerformancePanel.dart';
 
@@ -247,17 +248,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
               );
             },
           ),
-          // 4. Menu Items
-          _buildStatCardWrapper(
-            stream: _getAvailableMenuItemsStream(context),
+          // 4. Active Registers
+          StreamBuilder<int>(
+            stream: _getOpenRegistersStream(context),
             builder: (context, snapshot) {
-              final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const _EnhancedLoadingStatCard();
+              }
+              if (snapshot.hasError) {
+                return const _EnhancedErrorStatCard(errorMessage: 'Error');
+              }
+              final count = snapshot.data ?? 0;
               return _EnhancedStatCard(
-                title: 'Menu Items',
+                title: 'Active Registers',
                 value: count.toString(),
-                icon: Icons.restaurant_menu,
-                color: Colors.purpleAccent,
-                onTap: () => _navigateToMenuManagement(context),
+                icon: Icons.point_of_sale_outlined,
+                color: Colors.deepPurpleAccent,
+                onTap: () {}, // Optional navigation to registers tab
               );
             },
           ),
@@ -514,6 +521,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return _orderService.getAvailableMenuItemsStream(
       userScope: userScope,
       filterBranchIds: filterBranchIds,
+    );
+  }
+
+  Stream<int> _getOpenRegistersStream(BuildContext context) {
+    final userScope = Provider.of<UserScopeService>(context, listen: true);
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: true);
+    final filterBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    return PosRegisterService().streamOpenRegisterCount(
+      filterBranchIds.isEmpty ? userScope.branchIds : filterBranchIds,
     );
   }
 }

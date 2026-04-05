@@ -155,7 +155,7 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(widget.isDark ? 0.3 : 0.08),
+            color: Colors.black.withValues(alpha: widget.isDark ? 0.3 : 0.08),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -188,7 +188,7 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                         horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
                       color: widget.isDark
-                          ? Colors.white.withOpacity(0.03)
+                          ? Colors.white.withValues(alpha: 0.03)
                           : Colors.grey.shade50,
                       border: Border(
                         bottom: BorderSide(
@@ -272,7 +272,7 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 6, vertical: 3),
                             decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.15),
+                              color: Colors.orange.withValues(alpha: 0.15),
                               border:
                                   Border.all(color: Colors.orange, width: 1.5),
                               borderRadius: BorderRadius.circular(4),
@@ -293,7 +293,7 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                               horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: KDSConfig.getSourceColor(source)
-                                .withOpacity(0.12),
+                                .withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
@@ -312,7 +312,7 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: Colors.green.withOpacity(0.12),
+                              color: Colors.green.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(color: Colors.green, width: 1),
                             ),
@@ -406,11 +406,11 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                 vertical: 4, horizontal: 4),
                             decoration: isCurrentAddOn
                                 ? BoxDecoration(
-                                    color: Colors.orange.withOpacity(
+                                    color: Colors.orange.withValues(alpha: 
                                         widget.isDark ? 0.08 : 0.05),
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
-                                        color: Colors.orange.withOpacity(0.3)),
+                                        color: Colors.orange.withValues(alpha: 0.3)),
                                   )
                                 : null,
                             child: Row(
@@ -424,12 +424,12 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                   decoration: BoxDecoration(
                                     color: (showGrey || isActuallyCancelled)
                                         ? (isActuallyCancelled
-                                            ? Colors.red.withOpacity(0.1)
-                                            : Colors.green.withOpacity(0.15))
+                                            ? Colors.red.withValues(alpha: 0.1)
+                                            : Colors.green.withValues(alpha: 0.15))
                                         : isCurrentAddOn
-                                            ? Colors.orange.withOpacity(0.15)
+                                            ? Colors.orange.withValues(alpha: 0.15)
                                             : (widget.isDark
-                                                ? Colors.white.withOpacity(0.06)
+                                                ? Colors.white.withValues(alpha: 0.06)
                                                 : Colors.grey.shade100),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
@@ -511,7 +511,7 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                                       vertical: 2),
                                               decoration: BoxDecoration(
                                                 color: Colors.grey
-                                                    .withOpacity(0.15),
+                                                    .withValues(alpha: 0.15),
                                                 borderRadius:
                                                     BorderRadius.circular(4),
                                               ),
@@ -537,7 +537,7 @@ class _KDSOrderCardState extends State<KDSOrderCard> {
                                                       vertical: 2),
                                               decoration: BoxDecoration(
                                                 color: Colors.orange
-                                                    .withOpacity(0.15),
+                                                    .withValues(alpha: 0.15),
                                                 border: Border.all(
                                                     color: Colors.orange,
                                                     width: 1),

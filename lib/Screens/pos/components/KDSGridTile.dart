@@ -59,13 +59,13 @@ class KDSGridTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: elapsed >= KDSConfig.gridWarningMinutes
-                ? Colors.red.withOpacity(0.7)
+                ? Colors.red.withValues(alpha: 0.7)
                 : (isDark ? const Color(0xFF333355) : Colors.grey.shade300),
             width: elapsed >= KDSConfig.gridWarningMinutes ? 2 : 1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(isDark ? 0.3 : 0.08),
+              color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
               blurRadius: 6,
               offset: const Offset(0, 2),
             ),
@@ -112,9 +112,9 @@ class KDSGridTile extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 5, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.15),
+                              color: Colors.orange.withValues(alpha: 0.15),
                               border: Border.all(
-                                  color: Colors.orange.withOpacity(0.5)),
+                                  color: Colors.orange.withValues(alpha: 0.5)),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -211,7 +211,7 @@ class KDSGridTile extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
                 color: isDark
-                    ? Colors.white.withOpacity(0.03)
+                    ? Colors.white.withValues(alpha: 0.03)
                     : Colors.grey.shade50,
                 border: Border(
                   top: BorderSide(
@@ -230,7 +230,7 @@ class KDSGridTile extends StatelessWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.12),
+                      color: statusColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(

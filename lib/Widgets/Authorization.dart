@@ -8,6 +8,8 @@ import '../Screens/LoginScreen.dart';
 import '../main.dart';
 import '../constants.dart';
 import 'FCM_Service.dart'; // ✅ Import FCM Service for token cleanup
+import 'notification.dart'; 
+import '../services/pos/pos_service.dart';
 
 // Auth Service
 class AuthService {
@@ -106,14 +108,18 @@ class AuthService {
 
   // ✅ UPDATED: Sign Out with Token Cleanup & Safety
   Future<void> signOut() async {
+    // Capture user context BEFORE sign-out for safe async cleanup
+    final user = _auth.currentUser;
+    if (user == null) {
+      await _auth.signOut();
+      return;
+    }
+
     try {
       // 1. Delete the specific device token from Firestore
-      // This prevents the "Shared Device" issue (receiving notifs for the previous user).
-      debugPrint("🚪 Attempting to delete FCM token before sign out...");
+      debugPrint("🚪 Attempting to delete FCM token for ${user.uid}...");
       await FcmService().deleteToken();
     } catch (e) {
-      // If offline, token deletion might fail. We catch the error
-      // so the user can still sign out locally.
       debugPrint("⚠️ Error deleting token (likely offline): $e");
     }
 
@@ -197,7 +203,11 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
             // This prevents the "Access Denied" glitch and "setState during build" errors.
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (context.mounted) {
+                // ✅ CRITICAL FIX: Reset all services to stop background listeners 
+                // BEFORE the user is nulled out in the UI tree.
                 context.read<UserScopeService>().clearScope();
+                context.read<OrderNotificationService>().reset();
+                context.read<PosService>().reset();
               }
             });
 

@@ -109,13 +109,18 @@ service cloud.firestore {
       // Read access: staff and riders only (not public)
       allow read: if isAuthenticated() && (isStaff() || isRider());
       
-      // Update: Staff can update with validation, Riders can update non-status fields
+      // Update: Staff can update with validation, Riders restricted to delivery fields only
       // SECURITY: All writes must pass data validation
+      // H4 FIX: Riders can ONLY update delivery-related fields, not financial data
       allow update: if isAuthenticated() && isValidOrderData() && (
         // Staff can update anything
         isStaff() ||
-        // Riders can update only non-status fields
-        (isRider() && !isStatusBeingChanged())
+        // Riders can ONLY update whitelisted delivery fields
+        (isRider() && !isStatusBeingChanged() &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['location', 'deliveredAt', 'deliveryPhoto', 'riderNotes',
+                      'riderLocation', 'lastRiderUpdate', 'deliveryAttempt'])
+        )
       );
       
       // Only staff can create/delete orders, must pass validation
@@ -296,7 +301,8 @@ service cloud.firestore {
     // =====================
     match /purchase_orders/{docId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated(); // all staff can create/receive POs
+      // H5 FIX: Only staff can create/modify purchase orders (was isAuthenticated)
+      allow write: if isStaff();
     }
 
     // =====================
@@ -304,7 +310,8 @@ service cloud.firestore {
     // =====================
     match /waste_entries/{docId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated(); // all staff can log waste
+      // H5 FIX: Only staff can log waste (was isAuthenticated)
+      allow write: if isStaff();
     }
 
     // =====================

@@ -67,7 +67,7 @@ class KDSHeader extends StatelessWidget {
               height: 32,
               padding: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
-                color: isDark ? Colors.white.withOpacity(0.06) : Colors.grey[100],
+                color: isDark ? Colors.white.withValues(alpha: 0.06) : Colors.grey[100],
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: isDark ? Colors.white12 : Colors.grey[300]!),
               ),
@@ -120,7 +120,7 @@ class KDSHeader extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? Colors.deepPurple : (isDark ? Colors.white.withOpacity(0.06) : Colors.grey[100]),
+          color: selected ? Colors.deepPurple : (isDark ? Colors.white.withValues(alpha: 0.06) : Colors.grey[100]),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: selected ? Colors.deepPurple : (isDark ? Colors.white12 : Colors.grey[300]!),
@@ -158,7 +158,7 @@ class KDSHeader extends StatelessWidget {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
-            color: isDark ? Colors.white.withOpacity(0.04) : Colors.grey[50],
+            color: isDark ? Colors.white.withValues(alpha: 0.04) : Colors.grey[50],
             borderRadius: BorderRadius.circular(6),
           ),
           child: Text(
