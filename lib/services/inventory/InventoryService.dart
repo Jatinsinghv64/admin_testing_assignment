@@ -22,21 +22,35 @@ class InventoryService {
 
   Stream<List<IngredientModel>> streamIngredients(List<String> branchIds, {bool isSuperAdmin = false}) {
     if (branchIds.isEmpty && !isSuperAdmin) return const Stream.empty();
-    Query<Map<String, dynamic>> q =
-        _ingredientsCol.where('isActive', isEqualTo: true);
     
+    Query<Map<String, dynamic>> q = _ingredientsCol.where('isActive', isEqualTo: true);
+    
+    // If we have more than 10 branches, arrayContainsAny will fail.
+    // For SuperAdmins or large sets, we fetch and filter client-side to be safe and consistent.
+    if (branchIds.length > 10 || (isSuperAdmin && branchIds.isEmpty)) {
+      return q.snapshots().map((snap) {
+        final list = snap.docs.map((d) => IngredientModel.fromFirestore(d)).toList();
+        
+        // Filter client-side if specific branches were requested
+        final filtered = branchIds.isEmpty 
+            ? list 
+            : list.where((i) => i.branchIds.any((bid) => branchIds.contains(bid))).toList();
+            
+        filtered.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        return filtered;
+      });
+    }
+
     if (branchIds.isNotEmpty) {
       if (branchIds.length == 1) {
         q = q.where('branchIds', arrayContains: branchIds.first);
       } else {
-        q = q.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+        q = q.where('branchIds', arrayContainsAny: branchIds);
       }
     }
 
     return q.snapshots().map((snap) {
-      final list =
-          snap.docs.map((d) => IngredientModel.fromFirestore(d)).toList();
-      // Client-side sorting
+      final list = snap.docs.map((d) => IngredientModel.fromFirestore(d)).toList();
       list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       return list;
     });
@@ -66,22 +80,33 @@ class InventoryService {
     bool isSuperAdmin = false,
   }) async {
     if (branchIds.isEmpty && !isSuperAdmin) return [];
+    
     Query<Map<String, dynamic>> q = includeInactive
         ? _ingredientsCol
         : _ingredientsCol.where('isActive', isEqualTo: true);
     
+    if (branchIds.length > 10 || (isSuperAdmin && branchIds.isEmpty)) {
+      final snap = await q.get();
+      final list = snap.docs.map((d) => IngredientModel.fromFirestore(d)).toList();
+      
+      final filtered = branchIds.isEmpty 
+          ? list 
+          : list.where((i) => i.branchIds.any((bid) => branchIds.contains(bid))).toList();
+          
+      filtered.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      return filtered;
+    }
+
     if (branchIds.isNotEmpty) {
       if (branchIds.length == 1) {
         q = q.where('branchIds', arrayContains: branchIds.first);
       } else {
-        q = q.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+        q = q.where('branchIds', arrayContainsAny: branchIds);
       }
     }
 
     final snap = await q.get();
-    final list =
-        snap.docs.map((d) => IngredientModel.fromFirestore(d)).toList();
-    // Client-side sorting
+    final list = snap.docs.map((d) => IngredientModel.fromFirestore(d)).toList();
     list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return list;
   }
@@ -362,7 +387,7 @@ class InventoryService {
           await restoreItemsInTransaction(
             transaction: transaction,
             items: rawItems.map((e) => Map<String, dynamic>.from(e as Map)).toList(),
-            branchIds: branchIds.isNotEmpty ? branchIds : List<String>.from(orderData['branchIds'] ?? []),
+            branchIds: branchIds.isNotEmpty ? branchIds : (orderData['branchIds'] is List ? List<String>.from(orderData['branchIds']) : []),
             orderId: orderId,
             recordedBy: recordedBy,
             reason: 'Order cancellation restoration',

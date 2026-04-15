@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import '../../Models/IngredientModel.dart';
 import '../../Widgets/BranchFilterService.dart';
 import '../../main.dart';
@@ -631,6 +634,158 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // PRINT SHEET — generates a PDF stocktake sheet with blank actual-count column
+  // ---------------------------------------------------------------------------
+  Future<void> _printStocktakeSheet(
+      List<IngredientModel> items, List<String> branchIds, UserScopeService userScope) async {
+    final branchFilter = context.read<BranchFilterService>();
+    final branchName = branchFilter.selectedBranchId != null
+        ? branchFilter.getBranchName(branchFilter.selectedBranchId!)
+        : 'All Branches';
+    final dateStr = DateFormat('dd MMM yyyy, HH:mm').format(DateTime.now());
+
+    final pdf = pw.Document();
+    final font = await PdfGoogleFonts.nunitoSansRegular();
+    final fontBold = await PdfGoogleFonts.nunitoSansBold();
+
+    // Split items into pages of ~30 rows
+    const rowsPerPage = 30;
+    for (int page = 0; page < (items.length / rowsPerPage).ceil(); page++) {
+      final pageItems = items.skip(page * rowsPerPage).take(rowsPerPage).toList();
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(24),
+          build: (pw.Context ctx) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                // Header
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Physical Stocktake Sheet',
+                        style: pw.TextStyle(font: fontBold, fontSize: 16)),
+                    pw.Text(dateStr,
+                        style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.grey600)),
+                  ],
+                ),
+                pw.SizedBox(height: 4),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Branch: $branchName',
+                        style: pw.TextStyle(font: font, fontSize: 10)),
+                    pw.Text('Recorder: ${userScope.userIdentifier}',
+                        style: pw.TextStyle(font: font, fontSize: 10)),
+                  ],
+                ),
+                pw.SizedBox(height: 12),
+                pw.Divider(thickness: 0.5),
+                pw.SizedBox(height: 8),
+
+                // Table
+                pw.TableHelper.fromTextArray(
+                  context: ctx,
+                  headerStyle: pw.TextStyle(font: fontBold, fontSize: 8),
+                  cellStyle: pw.TextStyle(font: font, fontSize: 8),
+                  headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                  cellHeight: 22,
+                  columnWidths: {
+                    0: const pw.FlexColumnWidth(3),
+                    1: const pw.FlexColumnWidth(2),
+                    2: const pw.FlexColumnWidth(1),
+                    3: const pw.FlexColumnWidth(1.5),
+                    4: const pw.FlexColumnWidth(1.5),
+                    5: const pw.FlexColumnWidth(2),
+                  },
+                  headers: ['Ingredient', 'Category', 'Unit', 'System Qty', 'Actual Count', 'Notes'],
+                  data: pageItems.map((item) {
+                    final stock = item.getStock(branchIds.first);
+                    return [
+                      item.name,
+                      IngredientModel.categoryLabel(item.category),
+                      item.unit,
+                      stock.toStringAsFixed(2),
+                      '',
+                      '',
+                    ];
+                  }).toList(),
+                ),
+
+                pw.Spacer(),
+
+                // Footer
+                pw.Divider(thickness: 0.5),
+                pw.SizedBox(height: 8),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Signature: ____________________________',
+                        style: pw.TextStyle(font: font, fontSize: 9)),
+                    pw.Text('Page ${page + 1} of ${(items.length / rowsPerPage).ceil()}',
+                        style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.grey500)),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
+    await Printing.layoutPdf(
+      onLayout: (format) async => pdf.save(),
+      name: 'Stocktake_${DateFormat('yyyyMMdd').format(DateTime.now())}',
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // EXPORT CSV — stocktake-specific export with actual counts & variances
+  // ---------------------------------------------------------------------------
+  void _exportStocktakeCsv(
+      BuildContext context, List<IngredientModel> items, List<String> branchIds) {
+    final rows = <List<dynamic>>[
+      [
+        'Ingredient',
+        'Category',
+        'Unit',
+        'System Stock',
+        'Actual Count',
+        'Variance',
+        'Variance %',
+        'Reason',
+        'Notes',
+      ]
+    ];
+
+    for (final item in items) {
+      final systemStock = item.getStock(branchIds.first);
+      final actualText = _actualControllers[item.id]?.text.trim() ?? '';
+      final actual = double.tryParse(actualText) ?? systemStock;
+      final variance = actual - systemStock;
+      final variancePct =
+          systemStock > 0 ? ((variance / systemStock) * 100) : 0.0;
+      final reason = _reasons[item.id] ?? '';
+      final notes = _noteControllers[item.id]?.text.trim() ?? '';
+
+      rows.add([
+        item.name,
+        IngredientModel.categoryLabel(item.category),
+        item.unit,
+        systemStock.toStringAsFixed(2),
+        actual.toStringAsFixed(2),
+        variance.toStringAsFixed(2),
+        '${variancePct.toStringAsFixed(1)}%',
+        reason == 'Select reason...' ? '' : reason,
+        notes,
+      ]);
+    }
+
+    CsvExportService.exportStocktakeFromRows(context, rows);
+  }
+
   Widget _buildActionBar(List<IngredientModel> allItems,
       UserScopeService userScope, String draftKey, List<String> branchIds) {
     return Container(
@@ -645,7 +800,18 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
         children: [
           Row(
             children: [
-              _actionBtn('Print Sheet', Icons.print, onTap: () {}),
+              _actionBtn('Print Sheet', Icons.print, onTap: () {
+                if (branchIds.isEmpty || allItems.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No stocktake data to print.'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                  return;
+                }
+                _printStocktakeSheet(allItems, branchIds, userScope);
+              }),
               const SizedBox(width: 16),
               _actionBtn('Export CSV', Icons.cloud_download, onTap: () {
                 if (branchIds.isEmpty || allItems.isEmpty) {
@@ -657,11 +823,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                   );
                   return;
                 }
-                CsvExportService.exportInventoryStockFromData(
-                  context,
-                  allItems,
-                  branchId: branchIds.first,
-                );
+                _exportStocktakeCsv(context, allItems, branchIds);
               }),
             ],
           ),

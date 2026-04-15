@@ -1,8 +1,8 @@
 // lib/Screens/pos/components/VariantSelectionDialog.dart
 
 import 'package:flutter/material.dart';
-import '../../../constants.dart';
-import '../../../services/pos/pos_models.dart';
+import '../../../../../constants.dart';
+import '../../../../../services/pos/pos_models.dart';
 
 class VariantSelectionDialog extends StatefulWidget {
   final String productName;
@@ -83,7 +83,9 @@ class _VariantSelectionDialogState extends State<VariantSelectionDialog> {
                     final variantId = entry.key;
                     final variantData = entry.value as Map<String, dynamic>;
                     final name = variantData['name'] ?? '';
-                    final price = (variantData['variantprice'] as num?)?.toDouble() ?? 0.0;
+                    final price =
+                        (variantData['variantprice'] as num?)?.toDouble() ??
+                            0.0;
                     final isSelected = _selectedVariantIds.contains(variantId);
 
                     return Padding(

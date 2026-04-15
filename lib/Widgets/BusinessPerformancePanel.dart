@@ -1,7 +1,8 @@
 // lib/Widgets/BusinessPerformancePanel.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import '../../constants.dart';
+import '../constants.dart';
+import '../Models/IngredientModel.dart'; // Standardized stock validation
 
 class BusinessPerformancePanel extends StatelessWidget {
   final List<String> branchIds;
@@ -31,7 +32,11 @@ class BusinessPerformancePanel extends StatelessWidget {
         .orderBy('timestamp', descending: true);
         
     if (branchIds.isNotEmpty) {
-      ordersQuery = ordersQuery.where('branchIds', arrayContainsAny: branchIds);
+      if (branchIds.length == 1) {
+        ordersQuery = ordersQuery.where('branchIds', arrayContains: branchIds.first);
+      } else {
+        ordersQuery = ordersQuery.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+      }
     }
 
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -229,22 +234,20 @@ class BusinessPerformancePanel extends StatelessWidget {
   Future<Map<String, int>> _fetchOutAndLowStock() async {
     try {
       final snap = await FirebaseFirestore.instance.collection(AppConstants.collectionIngredients).get();
-      final branchId = branchIds.isNotEmpty ? branchIds.first : 'default';
 
       int outStock = 0;
       int lowStock = 0;
 
-      for (var doc in snap.docs) {
-        final data = doc.data();
-        final stockMap = data['stock'] as Map<String, dynamic>? ?? {};
-        final stock = (stockMap[branchId] as num?)?.toDouble() ?? (data['currentStock'] as num?)?.toDouble() ?? 0;
-        
-        final thresholdMap = data['minThreshold'] as Map<String, dynamic>? ?? {};
-        final minThreshold = (thresholdMap[branchId] as num?)?.toDouble() ?? (data['minThreshold'] as num?)?.toDouble() ?? 0;
+      // Determine effective branch IDs to check
+      final effectiveBranchIds = branchIds.isNotEmpty ? branchIds : ['default'];
 
-        if (stock <= 0) {
+      for (var doc in snap.docs) {
+        // Enforce centralized robust validation from IngredientModel
+        final ingredient = IngredientModel.fromFirestore(doc as DocumentSnapshot<Map<String, dynamic>>);
+
+        if (ingredient.isOutOfStockInAnyBranch(effectiveBranchIds)) {
           outStock++;
-        } else if (minThreshold > 0 && stock <= minThreshold) {
+        } else if (ingredient.isLowStockInAnyBranch(effectiveBranchIds)) {
           lowStock++;
         }
       }

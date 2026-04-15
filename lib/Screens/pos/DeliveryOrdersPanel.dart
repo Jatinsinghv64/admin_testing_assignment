@@ -5,14 +5,14 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../main.dart';
-import '../../constants.dart';
-import '../../Widgets/BranchFilterService.dart';
-import '../../Widgets/OrderUIComponents.dart';
-import '../../Widgets/PrintingService.dart';
-import '../../Widgets/TimeUtils.dart';
-import '../../services/pos/pos_service.dart';
-import '../../services/pos/pos_models.dart';
+import '../../../../main.dart';
+import '../../../../constants.dart';
+import '../../../../Widgets/BranchFilterService.dart';
+import '../../../../Widgets/OrderUIComponents.dart';
+import '../../../../Widgets/PrintingService.dart';
+import '../../../../Widgets/TimeUtils.dart';
+import '../../../../services/pos/pos_service.dart';
+import '../../../../services/pos/pos_models.dart';
 
 // ── Platform Filter ─────────────────────────────────────────────
 enum DeliveryPlatform { all, snoonu, talabat, keta, takeaway, dineIn }
@@ -92,7 +92,8 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: DeliveryPlatform.values.length, vsync: this);
+    _tabController =
+        TabController(length: DeliveryPlatform.values.length, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
         setState(() {
@@ -121,7 +122,8 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
                 flex: 4,
                 child: Container(
                   decoration: BoxDecoration(
-                    border: Border(right: BorderSide(color: Colors.grey.shade200)),
+                    border:
+                        Border(right: BorderSide(color: Colors.grey.shade200)),
                   ),
                   child: _buildOrdersList(),
                 ),
@@ -144,7 +146,8 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey[300]),
+            Icon(Icons.receipt_long_outlined,
+                size: 64, color: Colors.grey[300]),
             const SizedBox(height: 16),
             Text(
               'Select an order to view details',
@@ -214,9 +217,8 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
                       children: [
                         Icon(platform.icon,
                             size: 18,
-                            color: isSelected
-                                ? platform.color
-                                : Colors.grey[600]),
+                            color:
+                                isSelected ? platform.color : Colors.grey[600]),
                         const SizedBox(width: 8),
                         Text(
                           platform.label,
@@ -224,9 +226,8 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
                             fontSize: 13,
                             fontWeight:
                                 isSelected ? FontWeight.bold : FontWeight.w500,
-                            color: isSelected
-                                ? platform.color
-                                : Colors.grey[700],
+                            color:
+                                isSelected ? platform.color : Colors.grey[700],
                           ),
                         ),
                       ],
@@ -410,14 +411,16 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
         query = query.where('source', isEqualTo: 'keta');
         break;
       case DeliveryPlatform.takeaway:
-        query = query.where('Order_type', isEqualTo: AppConstants.orderTypeTakeaway);
+        query = query.where('Order_type',
+            isEqualTo: AppConstants.orderTypeTakeaway);
         break;
       case DeliveryPlatform.dineIn:
-        query = query.where('Order_type', isEqualTo: AppConstants.orderTypeDineIn);
+        query =
+            query.where('Order_type', isEqualTo: AppConstants.orderTypeDineIn);
         break;
       case DeliveryPlatform.all:
       default:
-        // By default, if "All" is selected in this specific panel, we might want 
+        // By default, if "All" is selected in this specific panel, we might want
         // to show all ACTIVE orders across these categories.
         // But the previous logic was specifically for delivery aggregators.
         // User wants "all on going orders of snoonu, keta, talabat, takeaway and dine"
@@ -449,12 +452,16 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
     // Client-side filter for "All" view to include user's requested types
     if (_selectedPlatform == DeliveryPlatform.all) {
       final isRequestedSource = ['snoonu', 'talabat', 'keta'].contains(source);
-      final isRequestedType = [AppConstants.orderTypeDineIn, AppConstants.orderTypeTakeaway].contains(orderType);
+      final isRequestedType = [
+        AppConstants.orderTypeDineIn,
+        AppConstants.orderTypeTakeaway
+      ].contains(orderType);
       if (!isRequestedSource && !isRequestedType) return false;
     }
 
     // Show paid/collected orders in the list even though they are terminal statuses
-    if (status == AppConstants.statusPaid || status == AppConstants.statusCollected) {
+    if (status == AppConstants.statusPaid ||
+        status == AppConstants.statusCollected) {
       return true;
     }
 
@@ -533,7 +540,8 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
                 color: Colors.red[50],
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.error_outline, size: 40, color: Colors.red[400]),
+              child:
+                  Icon(Icons.error_outline, size: 40, color: Colors.red[400]),
             ),
             const SizedBox(height: 20),
             const Text(
@@ -595,8 +603,8 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
 
   String get _source =>
       (widget.data['source']?.toString() ?? 'unknown').toLowerCase();
-  String get _status =>
-      AppConstants.normalizeStatus(widget.data['status']?.toString() ?? AppConstants.statusPending);
+  String get _status => AppConstants.normalizeStatus(
+      widget.data['status']?.toString() ?? AppConstants.statusPending);
 
   Color get _platformColor {
     if (_source == 'snoonu') return const Color(0xFF00C853);
@@ -612,23 +620,27 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
 
   @override
   Widget build(BuildContext context) {
-    final orderNumber =
-        OrderNumberHelper.getDisplayNumber(widget.data, orderId: widget.orderId);
-    final customerName =
-        widget.data['customerName']?.toString() ?? 'Customer';
+    final orderNumber = OrderNumberHelper.getDisplayNumber(widget.data,
+        orderId: widget.orderId);
+    final customerName = widget.data['customerName']?.toString() ?? 'Customer';
     final totalAmount = (widget.data['totalAmount'] ?? 0).toDouble();
     final timestamp = widget.data['timestamp'];
-    final tableNum = widget.data['tableNumber']?.toString() ?? widget.data['tableName']?.toString();
+    final tableNum = widget.data['tableNumber']?.toString() ??
+        widget.data['tableName']?.toString();
     final orderType = widget.data['Order_type']?.toString() ?? 'delivery';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: widget.isSelected ? Colors.deepPurple.withValues(alpha: 0.05) : Colors.white,
+        color: widget.isSelected
+            ? Colors.deepPurple.withValues(alpha: 0.05)
+            : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: widget.isSelected ? Colors.deepPurple : Colors.grey.withValues(alpha: 0.12),
+          color: widget.isSelected
+              ? Colors.deepPurple
+              : Colors.grey.withValues(alpha: 0.12),
           width: widget.isSelected ? 1.5 : 1,
         ),
       ),
@@ -643,19 +655,24 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
                   children: [
                     Text(
                       '#$orderNumber',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                     if (tableNum != null) ...[
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.indigo.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
                           'T-$tableNum',
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.indigo),
+                          style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.indigo),
                         ),
                       ),
                     ],
@@ -679,7 +696,10 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
             children: [
               Text(
                 '${AppConstants.currencySymbol}${totalAmount.toStringAsFixed(2)}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple),
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Colors.deepPurple),
               ),
               const SizedBox(height: 4),
               _buildStatusBadge(),
@@ -689,7 +709,6 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
       ),
     );
   }
-
 
   Widget _buildStatusBadge() {
     final displayText = AppConstants.getStatusDisplayText(_status);
@@ -740,10 +759,14 @@ class _DeliveryOrderCardState extends State<_DeliveryOrderCard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: isPaid ? Colors.green.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1),
+        color: isPaid
+            ? Colors.green.withValues(alpha: 0.1)
+            : Colors.orange.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: isPaid ? Colors.green.withValues(alpha: 0.3) : Colors.orange.withValues(alpha: 0.3),
+          color: isPaid
+              ? Colors.green.withValues(alpha: 0.3)
+              : Colors.orange.withValues(alpha: 0.3),
         ),
       ),
       child: Row(
@@ -904,7 +927,9 @@ class _OrderDetailView extends StatefulWidget {
 class _OrderDetailViewState extends State<_OrderDetailView> {
   bool _isUpdating = false;
 
-  String get _status => (widget.order.data() as Map<String, dynamic>?)?['status']?.toString() ?? 'pending';
+  String get _status =>
+      (widget.order.data() as Map<String, dynamic>?)?['status']?.toString() ??
+      'pending';
 
   @override
   Widget build(BuildContext context) {
@@ -920,7 +945,8 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
 
         final doc = snapshot.data!;
         final data = doc.data() as Map<String, dynamic>? ?? {};
-        final orderNum = OrderNumberHelper.getDisplayNumber(data, orderId: doc.id);
+        final orderNum =
+            OrderNumberHelper.getDisplayNumber(data, orderId: doc.id);
         final status = data['status']?.toString() ?? 'pending';
         final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
         final total = (data['totalAmount'] as num? ?? 0).toDouble();
@@ -1057,7 +1083,8 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(name, style: const TextStyle(fontWeight: FontWeight.w500)),
-                Text('Qty: $qty', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                Text('Qty: $qty',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500])),
               ],
             ),
           ),
@@ -1090,7 +1117,8 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
     );
   }
 
-  Widget _buildFooter(BuildContext context, DocumentSnapshot doc, Map<String, dynamic> data) {
+  Widget _buildFooter(
+      BuildContext context, DocumentSnapshot doc, Map<String, dynamic> data) {
     String? nextStatus;
     String statusLabel = '';
     Color statusColor = Colors.green;
@@ -1143,9 +1171,8 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
               width: double.infinity,
               constraints: const BoxConstraints(minHeight: 64),
               child: ElevatedButton.icon(
-                onPressed: _isUpdating
-                    ? null
-                    : () => _updateOrderStatus(nextStatus!),
+                onPressed:
+                    _isUpdating ? null : () => _updateOrderStatus(nextStatus!),
                 icon: _isUpdating
                     ? const SizedBox(
                         width: 24,
@@ -1260,10 +1287,10 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
     final pos = Provider.of<PosService>(context, listen: false);
     // 1. Load data into service using the LATEST snapshot from stream
     await pos.loadExistingOrder(doc);
-    
+
     // 2. Switch PosScreen view mode to 'pos'
     widget.onSwitchToPos();
-    
+
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Order loaded into cart')),
@@ -1287,20 +1314,26 @@ class _DeliveryOrderGridCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final orderNumber = OrderNumberHelper.getDisplayNumber(data, orderId: orderId);
+    final orderNumber =
+        OrderNumberHelper.getDisplayNumber(data, orderId: orderId);
     final customerName = data['customerName']?.toString() ?? 'Customer';
     final totalAmount = (data['totalAmount'] ?? 0).toDouble();
-    final tableNum = data['tableNumber']?.toString() ?? data['tableName']?.toString();
+    final tableNum =
+        data['tableNumber']?.toString() ?? data['tableName']?.toString();
     final source = (data['source']?.toString() ?? 'unknown').toLowerCase();
     final status = data['status']?.toString() ?? AppConstants.statusPending;
 
     return Container(
       padding: const EdgeInsets.all(10), // Reduced padding
       decoration: BoxDecoration(
-        color: isSelected ? Colors.deepPurple.withValues(alpha: 0.05) : Colors.white,
+        color: isSelected
+            ? Colors.deepPurple.withValues(alpha: 0.05)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isSelected ? Colors.deepPurple : Colors.grey.withValues(alpha: 0.12),
+          color: isSelected
+              ? Colors.deepPurple
+              : Colors.grey.withValues(alpha: 0.12),
           width: isSelected ? 2 : 1,
         ),
         boxShadow: isSelected
@@ -1322,7 +1355,8 @@ class _DeliveryOrderGridCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   '#$orderNumber',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -1440,10 +1474,14 @@ class _DeliveryOrderGridCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: isPaid ? Colors.green.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1),
+        color: isPaid
+            ? Colors.green.withValues(alpha: 0.1)
+            : Colors.orange.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: isPaid ? Colors.green.withValues(alpha: 0.3) : Colors.orange.withValues(alpha: 0.3),
+          color: isPaid
+              ? Colors.green.withValues(alpha: 0.3)
+              : Colors.orange.withValues(alpha: 0.3),
         ),
       ),
       child: Row(

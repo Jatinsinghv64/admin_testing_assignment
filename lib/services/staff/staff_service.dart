@@ -367,6 +367,24 @@ class StaffService {
     return query.snapshots().map((snap) => snap.docs.length);
   }
 
+  /// Get total attendance count for today — includes staff who have already
+  /// clocked out (unlike [getClockedInTodayCount]).
+  Stream<int> getTotalAttendanceToday(
+      {String? selectedBranchId, List<String>? branchIds}) {
+    final today = _todayString();
+    Query query =
+        _db.collection('attendance').where('date', isEqualTo: today);
+
+    if (selectedBranchId != null && selectedBranchId.isNotEmpty) {
+      query = query.where('branchIds', arrayContains: selectedBranchId);
+    } else if (branchIds != null && branchIds.isNotEmpty) {
+      query = query.where('branchIds',
+          arrayContainsAny: branchIds.take(10).toList());
+    }
+
+    return query.snapshots().map((snap) => snap.docs.length);
+  }
+
   /// Get today's shift count.
   Stream<int> getTodayShiftCount(
       {String? selectedBranchId, List<String>? branchIds}) {

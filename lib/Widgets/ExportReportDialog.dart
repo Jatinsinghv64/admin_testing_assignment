@@ -49,6 +49,7 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
     {'key': 'inventory_stock', 'label': 'Inventory & Stock', 'icon': Icons.inventory_2, 'desc': 'Stock levels, low alerts'},
     {'key': 'staff_summary', 'label': 'Staff Summary', 'icon': Icons.groups, 'desc': 'Team count & attendance'},
     {'key': 'promotions_performance', 'label': 'Promotions', 'icon': Icons.campaign, 'desc': 'Active deals & usage'},
+    {'key': 'expense_summary', 'label': 'Expense Summary', 'icon': Icons.receipt_long, 'desc': 'Paid expenses list'},
   ];
 
   @override

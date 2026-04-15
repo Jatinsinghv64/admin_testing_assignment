@@ -19,6 +19,14 @@ class AppConstants {
   static const String collectionWasteEntries = 'waste_entries';
   static const String collectionStockMovements = 'stock_movements';
   static const String collectionIngredientUsageHistory = 'ingredient_usage_history';
+  
+  // --- Expense Management ---
+  static const String collectionExpenses = 'expenses';
+  static const String collectionExpenseSummaries = 'expense_summaries';
+
+  // --- Order Number Counters (per-branch atomic counters) ---
+  /// Each document id = branchId, field: { counter: int }
+  static const String collectionOrderCounters = 'orderCounters';
 
   // Order Statuses (Standardized)
   static const String statusPending = 'pending';
@@ -106,6 +114,11 @@ class AppConstants {
   static const String orderTypeTakeaway = 'takeaway';
   static const String orderTypeDineIn = 'dine_in';
 
+  // Auto-Assignment Configuration
+  static const String collectionDrivers = 'Drivers'; // Legacy, use staff now
+  static const int assignmentTimeoutSeconds = 120;
+  static const int maxTriedRiders = 5;
+  static const int maxSearchRetries = 5;
   /// Normalize order type for consistent comparison
   /// Handles variations like 'dine-in', 'dine_in', 'DineIn', 'Dine In', etc.
   static String normalizeOrderType(String? orderType) {
@@ -301,43 +314,46 @@ class OrderNumberHelper {
   /// Loading indicator text shown while order number is being generated
   static const String loadingText = 'Generating...';
 
-  /// Get display order number from order data
-  /// Returns the dailyOrderNumber if available, otherwise shows loading
+  /// Get display order number from order data.
   ///
-  /// The Cloud Function generates formatted order numbers like "ZKD-260107-001"
-  /// If the number hasn't been assigned yet, we show "Generating..." instead
-  /// of a misleading fallback like the document ID
+  /// Priority:
+  ///   1. `orderNumber` (int) — set client-side in the same Firestore
+  ///      transaction as order creation (per-branch atomic counter).
+  ///   2. `dailyOrderNumber` (String) — legacy Cloud Function field.
+  ///   3. Abbreviated doc ID — fallback for very old orders.
   static String getDisplayNumber(Map<String, dynamic>? data,
       {String? orderId}) {
     if (data == null) return loadingText;
 
-    final dailyOrderNumber = data['dailyOrderNumber'];
-
-    // If we have a proper order number, display it
-    if (dailyOrderNumber != null && dailyOrderNumber.toString().isNotEmpty) {
-      return dailyOrderNumber.toString();
+    // 1. New client-side per-branch counter (integer)
+    final orderNum = data['orderNumber'];
+    if (orderNum != null) {
+      final n = orderNum is int ? orderNum : int.tryParse(orderNum.toString());
+      if (n != null && n > 0) return '#$n';
     }
 
-    // Check if the order was just created (within last 5 seconds)
-    // If so, the Cloud Function is likely still processing
+    // 2. Legacy Cloud Function string
+    final dailyOrderNumber = data['dailyOrderNumber'];
+    if (dailyOrderNumber != null &&
+        dailyOrderNumber.toString().trim().isNotEmpty) {
+      final s = dailyOrderNumber.toString().trim();
+      // Already prefixed by Cloud Function or analytics screen — return as-is
+      return s.startsWith('#') ? s : '#$s';
+    }
+
+    // 3. If the order was JUST created (< 5 s), Cloud Function / counter
+    //    may still be in flight — show loading spinner text.
     final timestamp = data['timestamp'];
     if (timestamp != null) {
       try {
         final orderTime = (timestamp as dynamic).toDate() as DateTime;
-        final now = DateTime.now();
-        final difference = now.difference(orderTime);
-
-        // If order is less than 5 seconds old, show loading
-        if (difference.inSeconds < 5) {
+        if (DateTime.now().difference(orderTime).inSeconds < 5) {
           return loadingText;
         }
-      } catch (_) {
-        // If we can't parse the timestamp, continue to fallback
-      }
+      } catch (_) {}
     }
 
-    // If order is older and still no number, show abbreviated order ID
-    // (This is the fallback for legacy orders or Cloud Function failures)
+    // 4. Abbreviated doc ID (legacy orders / counter failure)
     if (orderId != null && orderId.isNotEmpty) {
       return '#${orderId.substring(0, 6).toUpperCase()}';
     }
@@ -345,10 +361,18 @@ class OrderNumberHelper {
     return loadingText;
   }
 
-  /// Check if the order number is still being generated
+  /// Check if the order number is still being generated.
   static bool isLoading(Map<String, dynamic>? data) {
     if (data == null) return true;
+    // New counter field
+    final orderNum = data['orderNumber'];
+    if (orderNum != null) {
+      final n = orderNum is int ? orderNum : int.tryParse(orderNum.toString());
+      if (n != null && n > 0) return false;
+    }
+    // Legacy Cloud Function field
     final dailyOrderNumber = data['dailyOrderNumber'];
-    return dailyOrderNumber == null || dailyOrderNumber.toString().isEmpty;
+    return dailyOrderNumber == null ||
+        dailyOrderNumber.toString().trim().isEmpty;
   }
 }

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../Models/IngredientModel.dart';
 import '../../Widgets/BranchFilterService.dart';
@@ -7,9 +8,9 @@ import '../../main.dart';
 import '../../services/inventory/InventoryService.dart';
 import '../../services/CsvExportService.dart';
 import '../../utils/responsive_helper.dart';
-import '../MenuManagementWidgets.dart';
+import '../management/MenuManagementWidgets.dart';
 import '../purchases/CreatePurchaseOrderScreen.dart';
-import '../DishEditScreenLarge.dart';
+import '../large/DishEditScreenLarge.dart';
 import 'IngredientStockListScreen.dart';
 import 'StocktakeScreen.dart';
 import 'WasteDashboardScreen.dart';
@@ -20,6 +21,9 @@ import '../../services/inventory/ExcelImportService.dart';
 import '../settings/RecipesScreen.dart';
 import '../../services/ExportReportService.dart';
 import 'ingredient_import_format_dialog.dart';
+import 'QuickStockInScreen.dart';
+import '../../Widgets/ai/reorder_predictions_panel.dart';
+import '../../Widgets/ai/trending_suggestions_panel.dart';
 
 // ─── Theme Colors (matching app ThemeData: light bg, deepPurple primary) ─────
 class _InvColors {
@@ -55,6 +59,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
     'Categories',
     'Menu Items',
     'Recipes',
+    'Trending ✨',
   ];
   static const _tabIcons = [
     Icons.dashboard_outlined,
@@ -64,12 +69,13 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
     Icons.category_outlined,
     Icons.restaurant_menu_outlined,
     Icons.menu_book_outlined,
+    Icons.auto_awesome_outlined,
   ];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 7, vsync: this);
+    _tabController = TabController(length: 8, vsync: this);
     _tabController.addListener(_onTabChanged);
   }
 
@@ -408,6 +414,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                 _CategoriesManagementTab(searchQuery: _searchQuery),
                 _MenuItemsManagementTab(searchQuery: _searchQuery),
                 const RecipesScreen(),
+                const TrendingSuggestionsPanel(),
               ],
             ),
           ),
@@ -460,6 +467,15 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                 ),
                 // Export button
                 if (idx == 0 || idx == 1) ...[
+                  _headerButton(
+                    icon: Icons.qr_code_scanner,
+                    label: 'Quick Stock-In',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const QuickStockInScreen()),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
                   if (idx == 1) ...[
                     _headerButton(
                       icon: Icons.upload_file_rounded,
@@ -508,33 +524,45 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
               ],
             ),
             const SizedBox(height: 18),
-            // Tab pills
+            // Tab pills (Filter Bar)
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: Row(
-                children: List.generate(7, (i) {
-                  final selected = _tabController.index == i;
-                  return Padding(
-                    padding: EdgeInsets.only(right: i < 6 ? 8 : 0),
-                    child: Material(
-                      color: Colors.transparent,
+              physics: const BouncingScrollPhysics(),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: List.generate(_tabLabels.length, (i) {
+                    final selected = _tabController.index == i;
+                    return Padding(
+                      padding: EdgeInsets.only(
+                          right: i == _tabLabels.length - 1 ? 0 : 12),
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(20),
                         onTap: () => _tabController.animateTo(i),
+                        borderRadius: BorderRadius.circular(12),
                         child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
+                          duration: const Duration(milliseconds: 250),
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
+                              horizontal: 16, vertical: 10),
                           decoration: BoxDecoration(
                             color: selected
-                                ? _InvColors.primary.withOpacity(0.15)
-                                : _InvColors.surfaceDark,
-                            borderRadius: BorderRadius.circular(20),
+                                ? _InvColors.primary
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: selected
-                                  ? _InvColors.primary.withOpacity(0.4)
+                                  ? _InvColors.primary
                                   : _InvColors.borderDark,
+                              width: 1.2,
                             ),
+                            boxShadow: selected
+                                ? [
+                                    BoxShadow(
+                                      color: _InvColors.primary.withOpacity(0.2),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 4),
+                                    )
+                                  ]
+                                : [],
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -543,29 +571,29 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                                 _tabIcons[i],
                                 size: 16,
                                 color: selected
-                                    ? _InvColors.primary
+                                    ? Colors.white
                                     : _InvColors.textMuted,
                               ),
-                              const SizedBox(width: 6),
+                              const SizedBox(width: 8),
                               Text(
                                 _tabLabels[i],
-                                style: TextStyle(
+                                style: GoogleFonts.outfit(
                                   fontSize: 13,
                                   fontWeight: selected
-                                      ? FontWeight.w600
-                                      : FontWeight.w500,
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
                                   color: selected
-                                      ? _InvColors.primary
-                                      : _InvColors.textMuted,
+                                      ? Colors.white
+                                      : _InvColors.textMain,
                                 ),
                               ),
                             ],
                           ),
                         ),
                       ),
-                    ),
-                  );
-                }),
+                    );
+                  }),
+                ),
               ),
             ),
           ],
@@ -689,15 +717,15 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
               total + (i.getStockForBranches(branchIds) * i.costPerUnit),
         );
         final lowCount =
-            items.where((i) => i.isLowStockForBranches(branchIds)).length;
+            items.where((i) => i.isLowStockInAnyBranch(branchIds)).length;
         final outCount =
-            items.where((i) => i.isOutOfStockForBranches(branchIds)).length;
+            items.where((i) => i.isOutOfStockInAnyBranch(branchIds)).length;
         final expiringCount =
             items.where((i) => i.isExpiringSoon || i.isExpired).length;
 
         return StreamBuilder<List<Map<String, dynamic>>>(
           stream: _service.streamRecentMovements(branchIds,
-              limit: 50, isSuperAdmin: userScope.isSuperAdmin),
+              limit: 500, isSuperAdmin: userScope.isSuperAdmin),
           builder: (context, movSnap) {
             final movements = movSnap.data ?? [];
             final now = DateTime.now();
@@ -732,154 +760,155 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                   onTapOut: widget.onGoStockList,
                   onTapExpiring: widget.onGoStockList,
                 ),
-                const SizedBox(height: 20),
-                // ─── Stock Movement Summary ────────────────────
-                _card(
-                  title: 'Stock Movement Summary',
-                  child: Column(
+                const SizedBox(height: 24),
+                // ─── AI Reorder + Stock Movement Side-by-Side ──
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        children: [
-                          _rangeChip('Today', 1),
-                          const SizedBox(width: 8),
-                          _rangeChip('7 Days', 7),
-                          const SizedBox(width: 8),
-                          _rangeChip('30 Days', 30),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                              child: _countTile(
-                                  'Received', received, Colors.green)),
-                          const SizedBox(width: 10),
-                          Expanded(
-                              child:
-                                  _countTile('Deducted', deducted, Colors.red)),
-                          const SizedBox(width: 10),
-                          Expanded(
-                              child: _countTile(
-                                  'Adjustments', adjusted, Colors.orange)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-                // ─── Recent Movements ──────────────────────────
-                _card(
-                  title: 'Recent Movements',
-                  trailing: TextButton(
-                    onPressed: widget.onGoStockList,
-                    child: Text(
-                      'View All',
-                      style: TextStyle(
-                          color: _InvColors.primary,
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  child: movements.isEmpty
-                      ? const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text(
-                            'No movement records yet.',
-                            style: TextStyle(color: _InvColors.textMuted),
+                      Expanded(
+                        flex: 3,
+                        child: _card(
+                          title: 'AI Smart Reorder',
+                          trailing: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [Colors.deepPurple.shade400, Colors.deepPurple.shade700],
+                              ),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(Icons.auto_awesome, color: Colors.white, size: 12),
+                                SizedBox(width: 4),
+                                Text('AI Powered', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
                           ),
-                        )
-                      : Column(
-                          children: movements.take(10).map((m) {
-                            final qty =
-                                (m['quantity'] as num?)?.toDouble() ?? 0.0;
-                            final createdAt =
-                                (m['createdAt'] as Timestamp?)?.toDate();
-                            return Container(
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  bottom: BorderSide(
-                                    color:
-                                        _InvColors.borderDark.withOpacity(0.5),
-                                  ),
+                          child: const ReorderPredictionsPanel(),
+                        ),
+                      ),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        flex: 2,
+                        child: _card(
+                          title: 'Stock Movement Summary',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    _rangeChip('Today', 1),
+                                    const SizedBox(width: 8),
+                                    _rangeChip('7 Days', 7),
+                                    const SizedBox(width: 8),
+                                    _rangeChip('30 Days', 30),
+                                  ],
                                 ),
                               ),
-                              child: Row(
+                              const SizedBox(height: 14),
+                              // Side-by-side count tiles
+                              Row(
                                 children: [
-                                  Container(
-                                    width: 28,
-                                    height: 28,
-                                    decoration: BoxDecoration(
-                                      color:
-                                          (qty >= 0 ? Colors.green : Colors.red)
-                                              .withOpacity(0.15),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Icon(
-                                      qty >= 0
-                                          ? Icons.arrow_downward
-                                          : Icons.arrow_upward,
-                                      color:
-                                          qty >= 0 ? Colors.green : Colors.red,
-                                      size: 14,
-                                    ),
+                                  Expanded(child: _countTile('Received', received, Colors.green)),
+                                  const SizedBox(width: 10),
+                                  Expanded(child: _countTile('Deducted', deducted, Colors.red)),
+                                  const SizedBox(width: 10),
+                                  Expanded(child: _countTile('Adjusted', adjusted, Colors.orange)),
+                                ],
+                              ),
+                              if (movements.isNotEmpty) ...[
+                                const SizedBox(height: 18),
+                                Divider(color: _InvColors.borderDark, height: 1),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Recent Activity',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: _InvColors.textMuted,
+                                    letterSpacing: 0.4,
                                   ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                                ),
+                                const SizedBox(height: 10),
+                                ...ranged.take(5).map((m) {
+                                  final qty = (m['quantity'] as num?)?.toDouble() ?? 0.0;
+                                  final isPositive = qty >= 0;
+                                  final name = (m['ingredientName'] ?? '').toString();
+                                  final type = (m['movementType'] ?? '').toString().replaceAll('_', ' ');
+                                  final dt = (m['createdAt'] as Timestamp?)?.toDate();
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 10),
+                                    child: Row(
                                       children: [
-                                        Text(
-                                          (m['ingredientName'] ?? '')
-                                              .toString(),
-                                          style: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: _InvColors.textMain,
+                                        Container(
+                                          width: 30,
+                                          height: 30,
+                                          decoration: BoxDecoration(
+                                            color: (isPositive ? Colors.green : Colors.red).withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Icon(
+                                            isPositive ? Icons.add_rounded : Icons.remove_rounded,
+                                            size: 14,
+                                            color: isPositive ? Colors.green.shade600 : Colors.red.shade600,
                                           ),
                                         ),
-                                        Text(
-                                          (m['movementType'] ?? '').toString(),
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            color: _InvColors.textMuted,
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                name,
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: _InvColors.textMain,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              Text(
+                                                type,
+                                                style: const TextStyle(fontSize: 10, color: _InvColors.textMuted),
+                                              ),
+                                            ],
                                           ),
+                                        ),
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          children: [
+                                            Text(
+                                              '${isPositive ? '+' : ''}${qty.toStringAsFixed(1)}',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: isPositive ? Colors.green.shade600 : Colors.red.shade600,
+                                              ),
+                                            ),
+                                            if (dt != null)
+                                              Text(
+                                                dt.toLocal().toString().split(' ').first,
+                                                style: const TextStyle(fontSize: 10, color: _InvColors.textMuted),
+                                              ),
+                                          ],
                                         ),
                                       ],
                                     ),
-                                  ),
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(
-                                        '${qty >= 0 ? '+' : ''}${qty.toStringAsFixed(2)}',
-                                        style: TextStyle(
-                                          color: qty >= 0
-                                              ? Colors.green
-                                              : Colors.red,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      Text(
-                                        createdAt
-                                                ?.toLocal()
-                                                .toString()
-                                                .split('.')
-                                                .first ??
-                                            '-',
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          color: _InvColors.textMuted,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            );
-                          }).toList(),
+                                  );
+                                }),
+                              ],
+                            ],
+                          ),
                         ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 20),
                 // ─── Quick Actions ─────────────────────────────
@@ -1054,13 +1083,14 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
     required VoidCallback onTapOut,
     required VoidCallback onTapExpiring,
   }) {
+    final isDesktop = ResponsiveHelper.isDesktop(context);
     return GridView.count(
       physics: const NeverScrollableScrollPhysics(),
       shrinkWrap: true,
-      crossAxisCount: ResponsiveHelper.isDesktop(context) ? 4 : 2,
+      crossAxisCount: isDesktop ? 5 : 2,
       crossAxisSpacing: 12,
       mainAxisSpacing: 12,
-      childAspectRatio: ResponsiveHelper.isDesktop(context) ? 1.6 : 1.35,
+      childAspectRatio: isDesktop ? 1.4 : 1.35,
       children: [
         _kpiCard(
           title: 'Total Items',
@@ -1075,10 +1105,18 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
           color: Colors.blue,
         ),
         _kpiCard(
+          title: 'Out of Stock',
+          value: '$outCount',
+          icon: Icons.highlight_off_rounded,
+          color: Colors.red.shade700,
+          isAlert: outCount > 0,
+          onTap: onTapOut,
+        ),
+        _kpiCard(
           title: 'Low Stock',
           value: '$lowCount',
           icon: Icons.warning_amber_rounded,
-          color: Colors.red,
+          color: Colors.orange,
           isAlert: lowCount > 0,
           onTap: onTapLow,
         ),
@@ -1086,7 +1124,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
           title: 'Expiring Soon',
           value: '$expiringCount',
           icon: Icons.event_busy_outlined,
-          color: Colors.orange,
+          color: Colors.orange.shade700,
           onTap: onTapExpiring,
         ),
       ],
@@ -1156,6 +1194,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
     required String title,
     required Widget child,
     Widget? trailing,
+    bool fillContent = false,
   }) {
     return Container(
       padding: const EdgeInsets.all(18),
@@ -1183,7 +1222,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
             ],
           ),
           const SizedBox(height: 14),
-          child,
+          if (fillContent) Expanded(child: child) else child,
         ],
       ),
     );

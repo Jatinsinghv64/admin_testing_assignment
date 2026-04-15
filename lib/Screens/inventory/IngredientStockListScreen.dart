@@ -10,6 +10,7 @@ import '../../Widgets/IngredientFormSheet.dart';
 import '../../main.dart';
 import '../../services/ingredients/IngredientService.dart';
 import '../../services/inventory/InventoryService.dart';
+import '../purchases/CreatePurchaseOrderScreen.dart';
 
 class IngredientStockListScreen extends StatefulWidget {
   const IngredientStockListScreen({super.key});
@@ -120,8 +121,8 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                         : Column(
                             children: [
                               if (allItems.any((i) =>
-                                      i.isLowStockForBranches(branchIds) ||
-                                      i.isOutOfStockForBranches(branchIds)) &&
+                                      i.isLowStockInAnyBranch(branchIds) ||
+                                      i.isOutOfStockInAnyBranch(branchIds)) &&
                                   _filter == 'all' &&
                                   _search.isEmpty)
                                 _buildAlertBanner(allItems, branchIds),
@@ -240,9 +241,9 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
       (total, i) => total + (i.costPerUnit * i.getStockForBranches(branchIds)),
     );
     final lowStockCount =
-        all.where((i) => i.isLowStockForBranches(branchIds)).length;
+        all.where((i) => i.isLowStockInAnyBranch(branchIds)).length;
     final outOfStockCount =
-        all.where((i) => i.isOutOfStockForBranches(branchIds)).length;
+        all.where((i) => i.isOutOfStockInAnyBranch(branchIds)).length;
 
     return Row(
       children: [
@@ -626,13 +627,25 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
       }
     }
 
+    // Determine left-border accent colour for stock indicators
+    Color? rowAccentColor;
+    if (i.isOutOfStockForBranches(branchIds))
+      rowAccentColor = Colors.red.shade400;
+    else if (i.isLowStockForBranches(branchIds))
+      rowAccentColor = Colors.orange.shade400;
+
     return Material(
       color: Colors.white,
       child: InkWell(
         onTap: () => _openEditIngredientForm(context, i),
         child: Container(
           decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: Colors.grey.shade100))),
+              border: Border(
+            bottom: BorderSide(color: Colors.grey.shade100),
+            left: rowAccentColor != null
+                ? BorderSide(color: rowAccentColor, width: 4)
+                : BorderSide.none,
+          )),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Row(
             children: [
@@ -747,7 +760,10 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                                 child: Container())
                           ],
                         ),
-                      )
+                      ),
+                      // ── Per-branch breakdown when viewing All branches ──
+                      if (branchIds.length > 1)
+                        ..._buildPerBranchStockChips(i, branchIds),
                     ],
                   ),
                 ),
@@ -839,6 +855,32 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
+                      // Restock button – shown prominently for out-of-stock/low-stock
+                      if (i.isOutOfStockForBranches(branchIds) ||
+                          i.isLowStockForBranches(branchIds))
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ElevatedButton.icon(
+                            onPressed: () =>
+                                _openRestockOrder(context, i, branchIds),
+                            icon: const Icon(Icons.add_shopping_cart, size: 14),
+                            label: const Text('Restock',
+                                style: TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.bold)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor:
+                                  i.isOutOfStockForBranches(branchIds)
+                                      ? Colors.red.shade600
+                                      : Colors.orange.shade600,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                              elevation: 0,
+                            ),
+                          ),
+                        ),
                       IconButton(
                         icon: Icon(Icons.edit,
                             size: 20, color: Colors.blue.shade400),
@@ -1198,9 +1240,9 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
   Widget _buildAlertBanner(
       List<IngredientModel> allItems, List<String> branchIds) {
     final outOfStock =
-        allItems.where((i) => i.isOutOfStockForBranches(branchIds)).length;
+        allItems.where((i) => i.isOutOfStockInAnyBranch(branchIds)).length;
     final lowStock =
-        allItems.where((i) => i.isLowStockForBranches(branchIds)).length;
+        allItems.where((i) => i.isLowStockInAnyBranch(branchIds)).length;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -1281,7 +1323,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
 
   List<IngredientModel> _filterItems(
       List<IngredientModel> all, List<String> branchIds) {
-    return all.where((i) {
+    final filtered = all.where((i) {
       final matchSearch = _search.isEmpty ||
           i.name.toLowerCase().contains(_search) ||
           (i.sku != null && i.sku!.toLowerCase().contains(_search)) ||
@@ -1292,16 +1334,174 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
 
       switch (_filter) {
         case 'low':
-          return i.isLowStockForBranches(branchIds);
+          return i.isLowStockInAnyBranch(branchIds);
         case 'out':
-          return i.isOutOfStockForBranches(branchIds);
+          return i.isOutOfStockInAnyBranch(branchIds);
         case 'expiring':
           return i.isExpiringSoon || i.isExpired;
         default:
           return true;
       }
-    }).toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+    }).toList();
+
+    // Sort: out-of-stock first → low-stock → the rest (alphabetical within groups)
+    filtered.sort((a, b) {
+      int priority(IngredientModel item) {
+        if (item.isOutOfStockInAnyBranch(branchIds)) return 0;
+        if (item.isLowStockInAnyBranch(branchIds)) return 1;
+        return 2;
+      }
+
+      final pa = priority(a), pb = priority(b);
+      if (pa != pb) return pa.compareTo(pb);
+      return a.name.compareTo(b.name);
+    });
+    return filtered;
+  }
+
+  Future<void> _openRestockOrder(BuildContext context,
+      IngredientModel ingredient, List<String> branchIds) async {
+    final candidates = branchIds
+        .where((id) => ingredient.branchIds.contains(id))
+        .toSet()
+        .toList();
+
+    if (candidates.isEmpty) {
+      _showSnackBar(
+        'No branch is available for ${ingredient.name}.',
+        backgroundColor: Colors.orange,
+      );
+      return;
+    }
+
+    final targetBranchId = candidates.length == 1
+        ? candidates.first
+        : await _selectRestockBranch(context, ingredient, candidates);
+
+    if (targetBranchId == null || !context.mounted) return;
+
+    final restockQty = _suggestRestockQty(ingredient, targetBranchId);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CreatePurchaseOrderScreen(
+          prefilledIngredient: ingredient.id,
+          prefilledIngredientName: ingredient.name,
+          prefilledUnit: ingredient.unit,
+          prefilledCost: ingredient.costPerUnit,
+          prefilledQty: restockQty,
+          prefilledSupplierId: ingredient.supplierIds.isNotEmpty
+              ? ingredient.supplierIds.first
+              : null,
+          branchIdsOverride: [targetBranchId],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _selectRestockBranch(BuildContext context,
+      IngredientModel ingredient, List<String> branchIds) {
+    final branchFilter =
+        Provider.of<BranchFilterService>(context, listen: false);
+
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Choose branch'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'All Branches is selected. Choose the branch for this purchase order.',
+                style: TextStyle(color: Colors.grey.shade700),
+              ),
+              const SizedBox(height: 16),
+              ...branchIds.map((branchId) {
+                final stock = ingredient.getStock(branchId);
+                final threshold = ingredient.getMinThreshold(branchId);
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.storefront_outlined,
+                      color: Colors.deepPurple),
+                  title: Text(branchFilter.getBranchName(branchId)),
+                  subtitle: Text(
+                    'Stock ${stock.toStringAsFixed(1)} ${ingredient.unit} | Min ${threshold.toStringAsFixed(1)}',
+                  ),
+                  onTap: () => Navigator.pop(dialogContext, branchId),
+                );
+              }),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  double _suggestRestockQty(IngredientModel ingredient, String branchId) {
+    final stock = ingredient.getStock(branchId);
+    final threshold = ingredient.getMinThreshold(branchId);
+    final target =
+        threshold > 0 ? threshold * 2 : (stock <= 0 ? 1.0 : stock * 2);
+    final needed = target - stock;
+    return needed <= 0 ? 1.0 : needed;
+  }
+
+  /// Builds small per-branch stock chips for multi-branch display.
+  List<Widget> _buildPerBranchStockChips(
+      IngredientModel ingredient, List<String> branchIds) {
+    final branchFilter =
+        Provider.of<BranchFilterService>(context, listen: false);
+    final relevantBranches =
+        branchIds.where((id) => ingredient.branchIds.contains(id)).toList();
+    if (relevantBranches.isEmpty) return [];
+
+    return [
+      const SizedBox(height: 6),
+      Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: relevantBranches.map((bId) {
+          final stock = ingredient.getStock(bId);
+          final threshold = ingredient.getMinThreshold(bId);
+          Color chipColor;
+          if (stock <= 0) {
+            chipColor = Colors.red;
+          } else if (threshold > 0 && stock <= threshold) {
+            chipColor = Colors.orange;
+          } else {
+            chipColor = Colors.green;
+          }
+          final branchName = branchFilter.getBranchName(bId);
+          final shortName = branchName.length > 10
+              ? '${branchName.substring(0, 9)}…'
+              : branchName;
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: chipColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: chipColor.withOpacity(0.4)),
+            ),
+            child: Text(
+              '$shortName: ${stock.toStringAsFixed(1)}',
+              style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: chipColor.withOpacity(0.9)),
+            ),
+          );
+        }).toList(),
+      ),
+    ];
   }
 
   Widget _buildIngredientCard(
@@ -1823,6 +2023,273 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// (Legacy classes removed – restock now navigates directly to PurchaseOrdersScreen)
+// ─────────────────────────────────────────────────────────────────────────────
+class _RestockOrderWrapper extends StatelessWidget {
+  final IngredientModel ingredient;
+  final double restockQty;
+  final List<String> branchIds;
+
+  const _RestockOrderWrapper({
+    required this.ingredient,
+    required this.restockQty,
+    required this.branchIds,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Import at build time to avoid circular dependency at top-level
+    return _RestockPurchaseOrderBridge(
+      ingredient: ingredient,
+      restockQty: restockQty,
+      branchIds: branchIds,
+    );
+  }
+}
+
+class _RestockPurchaseOrderBridge extends StatelessWidget {
+  final IngredientModel ingredient;
+  final double restockQty;
+  final List<String> branchIds;
+
+  const _RestockPurchaseOrderBridge({
+    required this.ingredient,
+    required this.restockQty,
+    required this.branchIds,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Dynamically build the purchase order form pre-filled with ingredient data
+    return _RestockPurchaseOrderScreen(
+      ingredient: ingredient,
+      restockQty: restockQty,
+      branchIds: branchIds,
+    );
+  }
+}
+
+class _RestockPurchaseOrderScreen extends StatelessWidget {
+  final IngredientModel ingredient;
+  final double restockQty;
+  final List<String> branchIds;
+
+  const _RestockPurchaseOrderScreen({
+    required this.ingredient,
+    required this.restockQty,
+    required this.branchIds,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Restock: ${ingredient.name}'),
+        backgroundColor: Colors.deepPurple,
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: Container(
+        color: Colors.grey[50],
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: Card(
+              margin: const EdgeInsets.all(24),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Alert banner
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: ingredient.isOutOfStockForBranches(branchIds)
+                            ? Colors.red.shade50
+                            : Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: ingredient.isOutOfStockForBranches(branchIds)
+                              ? Colors.red.shade200
+                              : Colors.orange.shade200,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            ingredient.isOutOfStockForBranches(branchIds)
+                                ? Icons.block
+                                : Icons.warning_amber_rounded,
+                            color: ingredient.isOutOfStockForBranches(branchIds)
+                                ? Colors.red.shade600
+                                : Colors.orange.shade700,
+                            size: 28,
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  ingredient.isOutOfStockForBranches(branchIds)
+                                      ? '🚨 Out of Stock'
+                                      : '⚠️ Low Stock',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: ingredient
+                                            .isOutOfStockForBranches(branchIds)
+                                        ? Colors.red.shade800
+                                        : Colors.orange.shade800,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${ingredient.name} — Current: '
+                                  '${ingredient.getStockForBranches(branchIds).toStringAsFixed(1)} ${ingredient.unit} | '
+                                  'Min threshold: ${ingredient.getMinThresholdForBranches(branchIds).toStringAsFixed(1)} ${ingredient.unit} | '
+                                  'Suggested restock: ${restockQty.toStringAsFixed(1)} ${ingredient.unit}',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: ingredient
+                                            .isOutOfStockForBranches(branchIds)
+                                        ? Colors.red.shade700
+                                        : Colors.orange.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'To create a purchase order for this ingredient, go to the Purchases section.',
+                      style:
+                          TextStyle(fontSize: 15, color: Colors.grey.shade700),
+                    ),
+                    const SizedBox(height: 24),
+                    // Info table
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade200),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        children: [
+                          _infoRow('Ingredient', ingredient.name,
+                              isFirst: true),
+                          _infoRow('SKU', ingredient.sku ?? '—'),
+                          _infoRow('Unit', ingredient.unit),
+                          _infoRow('Cost per Unit',
+                              'QAR ${ingredient.costPerUnit.toStringAsFixed(2)}'),
+                          _infoRow(
+                            'Suggested Qty',
+                            '${restockQty.toStringAsFixed(1)} ${ingredient.unit}',
+                            highlight: true,
+                          ),
+                          _infoRow(
+                            'Estimated Cost',
+                            'QAR ${(restockQty * ingredient.costPerUnit).toStringAsFixed(2)}',
+                            highlight: true,
+                            isLast: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        OutlinedButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Cancel'),
+                        ),
+                        const SizedBox(width: 16),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            // Navigate to purchase order creation screen
+                            // The user will create PO from the Purchases module
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                    'Go to Purchases → New PO to order ${ingredient.name}'),
+                                backgroundColor: Colors.deepPurple,
+                                duration: const Duration(seconds: 4),
+                                action: SnackBarAction(
+                                  label: 'OK',
+                                  textColor: Colors.white,
+                                  onPressed: () {},
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.shopping_cart_checkout),
+                          label: const Text('Go to Purchase Orders'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.deepPurple,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 24, vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value,
+      {bool highlight = false, bool isFirst = false, bool isLast = false}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        color: highlight ? Colors.deepPurple.shade50 : Colors.white,
+        borderRadius: BorderRadius.vertical(
+          top: isFirst ? const Radius.circular(12) : Radius.zero,
+          bottom: isLast ? const Radius.circular(12) : Radius.zero,
+        ),
+        border: isLast
+            ? null
+            : Border(bottom: BorderSide(color: Colors.grey.shade100)),
+      ),
+      child: Row(
+        children: [
+          Text(label,
+              style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500)),
+          const Spacer(),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: highlight ? FontWeight.bold : FontWeight.w600,
+              color: highlight ? Colors.deepPurple.shade700 : Colors.black87,
+            ),
+          ),
+        ],
       ),
     );
   }

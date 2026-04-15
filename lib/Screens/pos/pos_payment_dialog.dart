@@ -4,10 +4,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../main.dart';
-import '../../constants.dart';
-import '../../services/pos/pos_models.dart';
-import '../../services/pos/pos_service.dart';
+import '../../../../main.dart';
+import '../../../../constants.dart';
+import '../../../../services/pos/pos_models.dart';
+import '../../../../services/pos/pos_service.dart';
+import 'itemized_split_bill_dialog.dart';
 
 enum _BillPaymentMode { fullBill, splitBill }
 
@@ -174,6 +175,8 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
     return 'Validate Payment';
   }
 
+  bool _isSuccess = false;
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -193,16 +196,54 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
             ),
           ],
         ),
-        child: Row(
+        child: Stack(
+          clipBehavior: Clip.none,
           children: [
-            Expanded(
-              flex: 6,
-              child: _buildPaymentInfoPanel(),
+            Row(
+              children: [
+                Expanded(
+                  flex: 6,
+                  child: _buildPaymentInfoPanel(),
+                ),
+                if (_showNumpad)
+                  Expanded(
+                    flex: 4,
+                    child: _buildNumpadPanel(),
+                  ),
+              ],
             ),
-            if (_showNumpad)
-              Expanded(
-                flex: 4,
-                child: _buildNumpadPanel(),
+            if (_isSuccess)
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.95),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Center(
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0.0, end: 1.0),
+                      duration: const Duration(milliseconds: 500),
+                      curve: Curves.elasticOut,
+                      builder: (context, value, child) {
+                        return Transform.scale(
+                          scale: value,
+                          child: Container(
+                            padding: const EdgeInsets.all(32),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.check_circle,
+                              color: Colors.green,
+                              size: 100,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
               ),
           ],
         ),
@@ -246,7 +287,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
                     _buildSharesList(),
                     const SizedBox(height: 20),
                   ],
-                   if (!_isSplitBill || !_allSharesCollected) ...[
+                  if (!_isSplitBill || !_allSharesCollected) ...[
                     Text(
                       // H2 FIX: Guard against RangeError when all shares are paid
                       _isSplitBill && _selectedUnpaidShareIndex >= 0
@@ -503,12 +544,156 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
             _buildModeButton(
               mode: _BillPaymentMode.splitBill,
               icon: Icons.group,
-              label: 'Split Bill',
-              description: 'Collect separate shares for each guest',
+              label: 'Equal Split',
+              description: 'Divide equally among guests',
             ),
+            const SizedBox(width: 12),
+            _buildItemizedSplitButton(),
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildItemizedSplitButton() {
+    return Expanded(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _isProcessing ? null : _openItemizedSplitDialog,
+          borderRadius: BorderRadius.circular(16),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFF6C63FF).withValues(alpha: 0.3),
+                width: 1,
+              ),
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFF6C63FF).withValues(alpha: 0.03),
+                  const Color(0xFF845EF7).withValues(alpha: 0.06),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.call_split,
+                      color: Color(0xFF6C63FF),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF6C63FF).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'NEW',
+                        style: TextStyle(
+                          fontSize: 8,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF6C63FF),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'By Item',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF6C63FF),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Assign specific items to each person',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openItemizedSplitDialog() {
+    // Gather all order items: cart items + existing order items
+    final pos = context.read<PosService>();
+    final List<Map<String, dynamic>> allItems = [];
+
+    // Items from existing ongoing orders
+    for (final doc in widget.existingOrders) {
+      final data = doc.data() as Map<String, dynamic>;
+      final isPaid = data['isPaid'] == true ||
+          data['paymentStatus'] == 'paid';
+      if (isPaid) continue;
+      final rawItems = data['items'] ?? data['orderItems'] ?? [];
+      if (rawItems is Iterable) {
+        for (final item in rawItems) {
+          allItems.add(Map<String, dynamic>.from(item as Map));
+        }
+      }
+    }
+
+    // Items from current cart
+    for (final cartItem in pos.cartItems) {
+      allItems.add(cartItem.toOrderItemMap());
+    }
+
+    if (allItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No items to split. Add items to your order first.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // 🛠️ FIX: Capture root navigator context BEFORE popping the current dialog
+    final navContext = Navigator.of(context, rootNavigator: true).context;
+
+    // Close current dialog and open itemized split
+    Navigator.pop(context);
+
+    showDialog(
+      context: navContext,
+      barrierDismissible: false,
+      builder: (ctx) => ChangeNotifierProvider.value(
+        value: pos,
+        child: ItemizedSplitBillDialog(
+          orderItems: allItems,
+          totalAmount: _grandTotal,
+          subtotal: pos.subtotal + widget.existingTableTotal,
+          discountAmount: pos.discountAmount,
+          taxAmount: pos.taxAmount,
+          branchIds: widget.branchIds,
+          existingOrders: widget.existingOrders,
+          returnPaymentOnly: widget.returnPaymentOnly,
+          onPaymentComplete: widget.onPaymentComplete,
+        ),
+      ),
     );
   }
 
@@ -1388,13 +1573,35 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
       final payment =
           _isSplitBill ? _buildSplitSummaryPayment() : _buildSinglePayment();
       await _submitPayment(payment);
+
+      if (mounted) {
+        setState(() => _isSuccess = true);
+        await Future.delayed(const Duration(milliseconds: 1500));
+        if (mounted) Navigator.pop(context, payment);
+      }
     } catch (e) {
       final errorMessage = PosService.displayError(e);
       if (mounted) {
+        // Industry-grade failure UX: Show actionable banner inside dialog
+        // instead of closing dialog or plain snackbar.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Payment failed: $errorMessage'),
-            backgroundColor: Colors.red,
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('Payment failed: $errorMessage. You may safely retry (idempotent).'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red[800],
+            duration: const Duration(seconds: 6),
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: () => _processPayment(), // recursive call allowed because flag resets
+            ),
           ),
         );
         setState(() => _isProcessing = false);
@@ -1490,22 +1697,6 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
 
     if (!mounted) return;
 
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white, size: 20),
-            const SizedBox(width: 8),
-            Text(
-              'Payment of ${AppConstants.currencySymbol}${_grandTotal.toStringAsFixed(2)} completed',
-            ),
-          ],
-        ),
-        backgroundColor: Colors.green[600],
-        duration: const Duration(seconds: 3),
-      ),
-    );
     widget.onPaymentComplete(orderId);
   }
 

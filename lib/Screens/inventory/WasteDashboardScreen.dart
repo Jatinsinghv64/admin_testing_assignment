@@ -7,6 +7,7 @@ import '../../main.dart';
 import '../../services/inventory/WasteService.dart';
 import 'WasteEntryScreenLarge.dart';
 import 'WasteHistoryScreen.dart';
+import 'WasteLoggingScannerScreen.dart';
 
 // ─── Theme Colors (deepPurple-based to match app theme) ─────────────────────
 class _WColors {
@@ -528,6 +529,34 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                             Icon(Icons.add_rounded, size: 18, color: _WColors.bgDark),
                             SizedBox(width: 8),
                             Text('Log Waste', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _WColors.bgDark)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => Navigator.of(context, rootNavigator: true).push(
+                        MaterialPageRoute(builder: (_) => const WasteLoggingScannerScreen()),
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.red.shade200),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.qr_code_scanner, size: 18, color: Colors.red),
+                            SizedBox(width: 8),
+                            Text('Scan Waste 🔫', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.red)),
                           ],
                         ),
                       ),

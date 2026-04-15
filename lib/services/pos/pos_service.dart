@@ -59,6 +59,7 @@ class PosService extends ChangeNotifier {
   PosOrderType _orderType = PosOrderType.dineIn;
   String? _selectedTableId;
   String? _selectedTableName;
+  int? _guestCount;
   String _customerName = 'Walk-in Customer';
   String? _customerPhone;
   double _orderDiscount = 0; // Overall order discount %
@@ -67,7 +68,8 @@ class PosService extends ChangeNotifier {
   String? _existingOrderId; // Legacy: used to track the first active order
   List<DocumentSnapshot> _ongoingOrders = []; // Generalize to DocumentSnapshot
   String? _activeBranchId; // Explicit branch for this POS session
-  String? _registerSessionId; // Active register session ID for order attribution
+  String?
+      _registerSessionId; // Active register session ID for order attribution
   StreamSubscription? _ordersSubscription;
 
   @override
@@ -86,6 +88,11 @@ class PosService extends ChangeNotifier {
     _existingOrderId = null;
     _selectedTableId = null;
     _selectedTableName = null;
+    _guestCount = null;
+    _customerName = 'Walk-in Customer';
+    _customerPhone = null;
+    _orderDiscount = 0;
+    _orderNotes = '';
     _isSubmitting = false;
     notifyListeners();
   }
@@ -95,6 +102,7 @@ class PosService extends ChangeNotifier {
   PosOrderType get orderType => _orderType;
   String? get selectedTableId => _selectedTableId;
   String? get selectedTableName => _selectedTableName;
+  int? get guestCount => _guestCount;
   String get customerName => _customerName;
   String? get customerPhone => _customerPhone;
   double get orderDiscount => _orderDiscount;
@@ -384,13 +392,13 @@ class PosService extends ChangeNotifier {
     _cartItems.clear();
     _selectedTableId = null;
     _selectedTableName = null;
+    _guestCount = null;
     _existingOrderId = null;
     _customerName = 'Walk-in Customer';
     _customerPhone = null;
     _orderDiscount = 0;
     _orderNotes = '';
     _ongoingOrders = [];
-    _activeBranchId = null;
     _disposeSubscription();
     notifyListeners();
   }
@@ -402,6 +410,7 @@ class PosService extends ChangeNotifier {
     if (type == PosOrderType.takeaway) {
       _selectedTableId = null;
       _selectedTableName = null;
+      _guestCount = null;
     }
     notifyListeners();
   }
@@ -469,6 +478,9 @@ class PosService extends ChangeNotifier {
       // For dine-in, we use the full table loading logic which handles ongoing orders
       await loadTableContext(data['tableId'].toString(),
           data['tableNumber']?.toString() ?? 'Table',
+          guestCount: data['guestCount'] is num
+              ? (data['guestCount'] as num).toInt()
+              : null,
           branchIds: [branchId]);
     } else {
       // For takeaway, we set append mode manually
@@ -569,6 +581,12 @@ class PosService extends ChangeNotifier {
             branchSnap = await transaction.get(branchRef);
           }
 
+          // ── Per-branch order number counter read ──
+          final counterRef = FirebaseFirestore.instance
+              .collection(AppConstants.collectionOrderCounters)
+              .doc(primaryBranchId);
+          final counterSnap = await transaction.get(counterRef);
+
           // 2. LOGIC / CALCULATIONS
           if (branchSnap != null) {
             // 🛠️ FIX: Safer casting for Web
@@ -596,10 +614,20 @@ class PosService extends ChangeNotifier {
             }
           }
 
+          // Compute next order number for this branch (atomic increment)
+          final newOrderNumber =
+              ((counterSnap.data()?['counter'] as int?) ?? 0) + 1;
+
           final orderData =
               _buildOrderData(singleBranchList, userScope, initialStatus);
+          // Attach the atomically-assigned order number
+          orderData['orderNumber'] = newOrderNumber;
 
           // 3. ALL WRITES (Strictly after all reads)
+
+          // Persist the incremented counter
+          transaction.set(counterRef, {'counter': newOrderNumber},
+              SetOptions(merge: true));
 
           if (_orderType == PosOrderType.dineIn && _selectedTableId != null) {
             transaction.update(branchRef, {
@@ -933,6 +961,16 @@ class PosService extends ChangeNotifier {
             newOrderId = mergeTargetSnap.id;
           }
 
+          // ── Per-branch order number counter read (only needed for new orders) ──
+          DocumentSnapshot<Map<String, dynamic>>? counterSnap;
+          DocumentReference<Map<String, dynamic>>? counterRef;
+          if (newOrderDocRef != null) {
+            counterRef = FirebaseFirestore.instance
+                .collection(AppConstants.collectionOrderCounters)
+                .doc(primaryBranchId);
+            counterSnap = await transaction.get(counterRef);
+          }
+
           final perOrderPayments = <String, PosPayment>{};
           PosPayment? newOrderPayment;
           final paymentDues = <double>[];
@@ -980,23 +1018,22 @@ class PosService extends ChangeNotifier {
             newOrderPayment = allocatedPayments[allocationIndex];
           }
 
-          if (itemsToDeduct.isNotEmpty) {
-            await InventoryService().deductItemsInTransaction(
-              transaction: transaction,
-              items: itemsToDeduct,
-              branchIds: singleBranchList,
-              orderId: newOrderId ??
-                  (existingOrders.isNotEmpty
-                      ? existingOrders.first.id
-                      : 'unknown'),
-              recordedBy: _getRecorder(userScope),
-            );
-          }
-
           // 2. ALL WRITES
           if (newOrderDocRef != null && newOrderId != null) {
+            // Compute and persist the per-branch order number atomically
+            final newOrderNumber =
+                ((counterSnap?.data()?['counter'] as int?) ?? 0) + 1;
+            if (counterRef != null) {
+              transaction.set(
+                counterRef,
+                {'counter': newOrderNumber},
+                SetOptions(merge: true),
+              );
+            }
+
             final newOrderData = _buildOrderData(
                 singleBranchList, userScope, AppConstants.statusPending);
+            newOrderData['orderNumber'] = newOrderNumber;
             if (newOrderPayment == null) {
               throw Exception('Missing payment allocation for new order');
             }
@@ -1005,7 +1042,6 @@ class PosService extends ChangeNotifier {
             newOrderData['paidAt'] = FieldValue.serverTimestamp();
             newOrderData['timestamps.${AppConstants.statusPaid}'] =
                 FieldValue.serverTimestamp();
-            newOrderData['inventoryDeducted'] = true;
             newOrderData['orderStatus'] = AppConstants.statusPending;
             newOrderData['paymentStatus'] = PosOrderLifecycle.paymentPaid;
 
@@ -1033,7 +1069,6 @@ class PosService extends ChangeNotifier {
                 'paidAt': FieldValue.serverTimestamp(),
                 'timestamps.${AppConstants.statusPaid}':
                     FieldValue.serverTimestamp(),
-                'inventoryDeducted': true,
                 'paymentStatus': PosOrderLifecycle.paymentPaid,
               };
 
@@ -1154,8 +1189,27 @@ class PosService extends ChangeNotifier {
         }
       }).timeout(_firestoreWriteTimeout);
 
+      // 3. POST-COMMIT: Deduct inventory OUTSIDE the transaction
+      // This prevents the dreaded 10-second transaction timeout for large bills/menus.
+      if (orderIdToReturn != null &&
+          !existingOrders.any((doc) => doc.id == orderIdToReturn)) {
+        _deductWithRetry(
+          orderId: orderIdToReturn,
+          branchIds: singleBranchList,
+          recordedBy: _getRecorder(userScope),
+        );
+      }
+      for (final order in existingOrders) {
+        _deductWithRetry(
+          orderId: order.id,
+          branchIds: singleBranchList,
+          recordedBy: _getRecorder(userScope),
+        );
+      }
+
       for (final tableId in tablesToCleanup) {
-        await cleanupTableIfEmpty(branchIds: singleBranchList, tableId: tableId);
+        await cleanupTableIfEmpty(
+            branchIds: singleBranchList, tableId: tableId);
       }
 
       clearCart();
@@ -1183,7 +1237,6 @@ class PosService extends ChangeNotifier {
     final bool isPendingKitchenDecision = status == AppConstants.statusPending;
     return {
       'branchIds': branchIds,
-      'branchId': branchIds.isNotEmpty ? branchIds.first : null,
       'source': 'pos',
       // ── SYNC FIX: Write BOTH field names so all screens can find this order ──
       'Order_type': _orderType.firestoreValue, // Queried by OrderService
@@ -1196,6 +1249,9 @@ class PosService extends ChangeNotifier {
       if (_selectedTableName != null) 'tableName': _selectedTableName,
       // ── SYNC FIX: Add tableNumber (read by OrdersScreenLarge) ──
       if (_selectedTableName != null) 'tableNumber': _selectedTableName,
+      if (_guestCount != null && _guestCount! > 0) 'guestCount': _guestCount,
+      if (_guestCount != null && _guestCount! > 0)
+        'numberOfGuests': _guestCount,
       'subtotal': subtotal,
       'discount': discountAmount,
       'discountPercent': _orderDiscount,
@@ -1242,10 +1298,10 @@ class PosService extends ChangeNotifier {
   }) {
     InventoryService()
         .deductForOrder(
-          orderId: orderId,
-          branchIds: branchIds,
-          recordedBy: recordedBy,
-        )
+      orderId: orderId,
+      branchIds: branchIds,
+      recordedBy: recordedBy,
+    )
         .catchError((e) {
       _logError('POS: Ingredient deduction failed (attempt $attempt)', e);
       if (attempt < 3) {
@@ -1466,12 +1522,14 @@ class PosService extends ChangeNotifier {
               FieldValue.serverTimestamp(),
         });
       }).timeout(const Duration(seconds: 15), onTimeout: () {
-        throw TimeoutException('KDS auto-accept took too long (Firestore contention?)');
+        throw TimeoutException(
+            'KDS auto-accept took too long (Firestore contention?)');
       });
 
       notifyListeners();
     } catch (e, stackTrace) {
-      _logError('POS: Failed to accept pending kitchen order', e, stackTrace: stackTrace);
+      _logError('POS: Failed to accept pending kitchen order', e,
+          stackTrace: stackTrace);
       rethrow;
     }
   }
@@ -1554,7 +1612,8 @@ class PosService extends ChangeNotifier {
       // H1 FIX: Await cleanup to prevent ghost tables
       if (tableId != null && effectiveBranchIds.isNotEmpty) {
         try {
-          await cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
+          await cleanupTableIfEmpty(
+              branchIds: effectiveBranchIds, tableId: tableId);
         } catch (e) {
           _logError('POS: Table cleanup failed after kitchen rejection', e);
         }
@@ -1634,7 +1693,8 @@ class PosService extends ChangeNotifier {
       // H1 FIX: Await cleanup to prevent ghost tables
       if (tableId != null && effectiveBranchIds.isNotEmpty) {
         try {
-          await cleanupTableIfEmpty(branchIds: effectiveBranchIds, tableId: tableId);
+          await cleanupTableIfEmpty(
+              branchIds: effectiveBranchIds, tableId: tableId);
         } catch (e) {
           _logError('POS: Table cleanup failed after cancellation', e);
         }
@@ -1993,15 +2053,23 @@ class PosService extends ChangeNotifier {
   /// Sets order type to dine-in, selects the table, and finds the
   /// active order to append items to.
   Future<void> loadTableContext(String tableId, String tableName,
-      {List<String>? branchIds}) async {
+      {int? guestCount, List<String>? branchIds}) async {
+    final previousTableId = _selectedTableId;
+    final previousGuestCount = _guestCount;
+    final normalizedGuestCount =
+        guestCount != null && guestCount > 0 ? guestCount : null;
+
     _orderType = PosOrderType.dineIn;
     _selectedTableId = tableId;
     _selectedTableName = tableName;
+    _guestCount = normalizedGuestCount ??
+        (previousTableId == tableId ? previousGuestCount : null);
     _existingOrderId = null;
     _disposeSubscription();
 
     if (branchIds != null && branchIds.isNotEmpty) {
       await _syncSelectedTableOrders(branchIds, notify: false);
+      _guestCount ??= _guestCountFromOrders(_ongoingOrders);
       _startOrdersListener(tableId, branchIds);
     } else {
       _ongoingOrders = [];
@@ -2010,6 +2078,34 @@ class PosService extends ChangeNotifier {
     }
 
     notifyListeners();
+  }
+
+  int? _guestCountFromOrders(Iterable<DocumentSnapshot> orders) {
+    for (final doc in orders) {
+      final raw = doc.data();
+      if (raw is Map<String, dynamic>) {
+        final count = _guestCountFromData(raw);
+        if (count != null) return count;
+      } else if (raw is Map) {
+        final count = _guestCountFromData(raw.cast<String, dynamic>());
+        if (count != null) return count;
+      }
+    }
+    return null;
+  }
+
+  int? _guestCountFromData(Map<String, dynamic> data) {
+    final raw = data['guestCount'] ??
+        data['numberOfGuests'] ??
+        data['guests'] ??
+        data['guest_count'];
+    if (raw is int && raw > 0) return raw;
+    if (raw is num && raw > 0) return raw.round();
+    if (raw is String) {
+      final parsed = int.tryParse(raw);
+      if (parsed != null && parsed > 0) return parsed;
+    }
+    return null;
   }
 
   void _disposeSubscription() {
@@ -2031,6 +2127,9 @@ class PosService extends ChangeNotifier {
         .snapshots()
         .listen((snapshot) {
       _ongoingOrders = snapshot.docs;
+      if (_guestCount == null || _guestCount! <= 0) {
+        _guestCount = _guestCountFromOrders(snapshot.docs);
+      }
       QueryDocumentSnapshot<Map<String, dynamic>>? unpaidOrder;
       for (final doc in snapshot.docs) {
         if (!PosOrderLifecycle.isPaymentCaptured(doc.data())) {
@@ -2055,6 +2154,9 @@ class PosService extends ChangeNotifier {
       if (doc.exists) {
         _ongoingOrders = [doc];
         _existingOrderId = doc.id;
+        if (_guestCount == null || _guestCount! <= 0) {
+          _guestCount = _guestCountFromOrders([doc]);
+        }
       } else {
         _ongoingOrders = [];
         _existingOrderId = null;

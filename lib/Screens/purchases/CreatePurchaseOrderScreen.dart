@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../Widgets/BranchFilterService.dart';
 import '../../main.dart';
 import '../../services/inventory/InventoryService.dart';
@@ -16,6 +17,15 @@ class CreatePurchaseOrderScreen extends StatefulWidget {
   final String initialSupplierEmail;
   final Map<String, dynamic>? editingPo;
 
+  // AI Feature Pre-fills
+  final String? prefilledIngredient;
+  final String? prefilledIngredientName;
+  final String? prefilledUnit;
+  final double? prefilledCost;
+  final double? prefilledQty;
+  final String? prefilledSupplierId;
+  final List<String>? branchIdsOverride;
+
   const CreatePurchaseOrderScreen({
     super.key,
     this.isDrawer = false,
@@ -23,6 +33,13 @@ class CreatePurchaseOrderScreen extends StatefulWidget {
     this.initialSupplierName = '',
     this.initialSupplierEmail = '',
     this.editingPo,
+    this.prefilledIngredient,
+    this.prefilledIngredientName,
+    this.prefilledUnit,
+    this.prefilledCost,
+    this.prefilledQty,
+    this.prefilledSupplierId,
+    this.branchIdsOverride,
   });
 
   @override
@@ -44,9 +61,25 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
   final DateTime _orderDate = DateTime.now();
   DateTime? _expectedDate;
   bool _isSaving = false;
- 
-  UserScopeService get userScope => Provider.of<UserScopeService>(context, listen: false);
-  BranchFilterService get branchFilter => Provider.of<BranchFilterService>(context, listen: false);
+
+  UserScopeService get userScope =>
+      Provider.of<UserScopeService>(context, listen: false);
+  BranchFilterService get branchFilter =>
+      Provider.of<BranchFilterService>(context, listen: false);
+
+  List<String> _effectiveBranchIds(
+    UserScopeService userScope,
+    BranchFilterService branchFilter,
+  ) {
+    final override = widget.branchIdsOverride
+        ?.where((id) => id.trim().isNotEmpty)
+        .toSet()
+        .toList();
+    if (override != null && override.isNotEmpty) {
+      return override;
+    }
+    return branchFilter.getFilterBranchIds(userScope.branchIds);
+  }
 
   @override
   void initState() {
@@ -57,7 +90,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
       _supplierName = (po['supplierName'] ?? '').toString();
       _poNumber = (po['poNumber'] ?? '').toString();
       _notesCtrl.text = (po['notes'] ?? '').toString();
-      
+
       final expected = po['expectedDeliveryDate'] as Timestamp?;
       if (expected != null) _expectedDate = expected.toDate();
 
@@ -67,7 +100,8 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         for (final item in lineItems) {
           final line = _PoLine();
           line.ingredientIdCtrl.text = (item['ingredientId'] ?? '').toString();
-          line.ingredientNameCtrl.text = (item['ingredientName'] ?? '').toString();
+          line.ingredientNameCtrl.text =
+              (item['ingredientName'] ?? '').toString();
           line.qtyCtrl.text = (item['orderedQty'] ?? '').toString();
           line.unitCtrl.text = (item['unit'] ?? 'pieces').toString();
           line.costCtrl.text = (item['unitCost'] ?? '').toString();
@@ -75,9 +109,21 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         }
       }
     } else {
-      _supplierId = widget.initialSupplierId;
+      _supplierId = widget.prefilledSupplierId ?? widget.initialSupplierId;
       _supplierName = widget.initialSupplierName;
       _supplierEmail = widget.initialSupplierEmail;
+
+      if (widget.prefilledIngredient != null) {
+        _lines.first.ingredientIdCtrl.text = widget.prefilledIngredient!;
+        _lines.first.ingredientNameCtrl.text =
+            widget.prefilledIngredientName ?? '';
+        _lines.first.unitCtrl.text = widget.prefilledUnit ?? 'pieces';
+        _lines.first.costCtrl.text = widget.prefilledCost?.toString() ?? '';
+
+        if (widget.prefilledQty != null) {
+          _lines.first.qtyCtrl.text = widget.prefilledQty.toString();
+        }
+      }
     }
   }
 
@@ -121,7 +167,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
   Future<void> _preparePoNumber() async {
     final userScope = context.read<UserScopeService>();
     final branchFilter = context.read<BranchFilterService>();
-    final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    final branchIds = _effectiveBranchIds(userScope, branchFilter);
 
     // If branchIds is empty, we still try to generate,
     // but we'll try again if it's still generating.
@@ -135,7 +181,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
   Widget build(BuildContext context) {
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
-    final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    final branchIds = _effectiveBranchIds(userScope, branchFilter);
 
     // ✅ RE-TRIGGER GENERATION IF IT FAILED DURING DIDCHANGEDEPENDENCIES
     if (_poNumber.isEmpty && branchIds.isNotEmpty) {
@@ -164,7 +210,9 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    widget.editingPo != null ? 'Edit Purchase Order' : 'New Purchase Order',
+                    widget.editingPo != null
+                        ? 'Edit Purchase Order'
+                        : 'New Purchase Order',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -203,243 +251,600 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                 final supplierIngredientIds = List<String>.from(
                   selectedSupplier['ingredientIds'] as List? ?? [],
                 );
-                return ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    _card(
-                      child: Column(
-                        children: [
-                          _kv(
-                              'PO Number',
-                              _poNumber.isNotEmpty
-                                  ? _poNumber
-                                  : 'Generating...'),
-                          const SizedBox(height: 12),
-                          _buildSelector(
-                            label: 'Supplier *',
-                            value: _supplierName.isEmpty
-                                ? 'Select Supplier'
-                                : _supplierName,
-                            items: suppliers
-                                .map((s) => (s['companyName'] ?? '').toString())
-                                .toList(),
-                            onChanged: (selectedName) {
-                              final hit = suppliers.firstWhere(
-                                (s) =>
-                                    (s['companyName'] ?? '').toString() ==
-                                    selectedName,
-                                orElse: () => {},
-                              );
-                              setState(() {
-                                _supplierId = hit['id']?.toString();
-                                _supplierName = selectedName;
-                                _supplierEmail =
-                                    (hit['email'] ?? '').toString();
-                              });
-                            },
-                            icon: Icons.business_outlined,
-                          ),
-                          const SizedBox(height: 12),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: Colors.grey.shade300),
-                            ),
-                            child: ListTile(
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14)),
-                              leading: const Icon(Icons.event_outlined,
-                                  color: Colors.deepPurple),
-                              title: const Text('Expected delivery date',
-                                  style: TextStyle(fontSize: 14)),
-                              subtitle: Text(
-                                _expectedDate == null
-                                    ? 'Select date'
-                                    : _expectedDate!
-                                        .toLocal()
-                                        .toString()
-                                        .split(' ')
-                                        .first,
-                                style: TextStyle(
-                                  color: _expectedDate == null
-                                      ? Colors.grey[500]
-                                      : Colors.black87,
-                                ),
-                              ),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.calendar_today_outlined,
-                                    color: Colors.deepPurple),
-                                onPressed: () async {
-                                  final picked = await showDatePicker(
-                                    context: context,
-                                    initialDate: DateTime.now(),
-                                    firstDate: DateTime.now()
-                                        .subtract(const Duration(days: 1)),
-                                    lastDate: DateTime.now()
-                                        .add(const Duration(days: 365)),
-                                  );
-                                  if (picked != null) {
-                                    setState(() => _expectedDate = picked);
-                                  }
-                                },
-                              ),
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 850),
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 32),
+                      children: [
+                        // Header text for non-drawer view
+                        if (!widget.isDrawer) ...[
+                          Text(
+                            widget.editingPo != null
+                                ? 'Edit Purchase Order'
+                                : 'New Purchase Order',
+                            style: GoogleFonts.outfit(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.deepPurple.shade800,
                             ),
                           ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Fill in the details below to generate a new PO.',
+                            style: TextStyle(
+                                fontSize: 14, color: Colors.grey.shade600),
+                          ),
+                          const SizedBox(height: 24),
                         ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    StreamBuilder<List<dynamic>>(
-                      stream: _inventoryService.streamIngredients(branchIds),
-                      builder: (context, invSnapshot) {
-                        final ingredients = (invSnapshot.data ?? []).map((i) {
-                          return {
-                            'id': i.id,
-                            'name': i.name,
-                            'unit': i.unit,
-                            'costPerUnit': i.costPerUnit,
-                            'category': i.category,
-                          };
-                        }).toList();
-                        return _card(
+                        _card(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Line Items',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.deepPurple,
-                                    fontSize: 16),
+                              Text(
+                                'Order Details',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.deepPurple.shade800,
+                                ),
                               ),
-                              const SizedBox(height: 12),
-                              ..._lines.asMap().entries.map((entry) {
-                                final index = entry.key;
-                                final line = entry.value;
-                                return Container(
-                                  key: ObjectKey(line),
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border:
-                                        Border.all(color: Colors.grey.shade200),
+                              const SizedBox(height: 16),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: Colors.deepPurple.shade50
+                                      .withOpacity(0.5),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                      color: Colors.deepPurple.shade100),
+                                ),
+                                child: _kv(
+                                  'PO Number',
+                                  _poNumber.isNotEmpty
+                                      ? _poNumber
+                                      : 'Generating...',
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: _buildSelector(
+                                      label: 'Supplier *',
+                                      value: _supplierName.isEmpty
+                                          ? 'Select Supplier'
+                                          : _supplierName,
+                                      items: suppliers
+                                          .map((s) => (s['companyName'] ?? '')
+                                              .toString())
+                                          .toList(),
+                                      onChanged: (selectedName) {
+                                        final hit = suppliers.firstWhere(
+                                          (s) =>
+                                              (s['companyName'] ?? '')
+                                                  .toString() ==
+                                              selectedName,
+                                          orElse: () => {},
+                                        );
+                                        setState(() {
+                                          _supplierId = hit['id']?.toString();
+                                          _supplierName = selectedName;
+                                          _supplierEmail =
+                                              (hit['email'] ?? '').toString();
+                                        });
+                                      },
+                                      icon: Icons.business_outlined,
+                                    ),
                                   ),
-                                  child: Column(
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: _buildItemSelector(
-                                              line,
-                                              ingredients,
-                                              supplierIngredientIds,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            onPressed: _lines.length == 1
-                                                ? null
-                                                : () {
-                                                    setState(() {
-                                                      _garbageLines.add(line);
-                                                      _lines.removeAt(index);
-                                                    });
-                                                  },
-                                            icon: const Icon(
-                                                Icons.delete_outline,
-                                                color: Colors.red),
-                                          ),
-                                        ],
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                            color: Colors.grey.shade300),
                                       ),
-                                      const SizedBox(height: 10),
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: _buildTextInput(
-                                              controller: line.qtyCtrl,
-                                              label: 'Qty',
-                                              keyboardType: const TextInputType
-                                                  .numberWithOptions(
-                                                  decimal: true),
-                                            ),
+                                      child: ListTile(
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(14)),
+                                        leading: const Icon(
+                                            Icons.event_outlined,
+                                            color: Colors.deepPurple),
+                                        title: const Text('Expected delivery',
+                                            style: TextStyle(fontSize: 14)),
+                                        subtitle: Text(
+                                          _expectedDate == null
+                                              ? 'Select date'
+                                              : _expectedDate!
+                                                  .toLocal()
+                                                  .toString()
+                                                  .split(' ')
+                                                  .first,
+                                          style: TextStyle(
+                                            color: _expectedDate == null
+                                                ? Colors.grey[500]
+                                                : Colors.black87,
+                                            fontWeight: _expectedDate == null
+                                                ? FontWeight.normal
+                                                : FontWeight.w600,
                                           ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: _buildTextInput(
-                                              controller: line.unitCtrl,
-                                              label: 'Unit',
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: _buildTextInput(
-                                              controller: line.costCtrl,
-                                              label: 'Cost',
-                                              keyboardType: const TextInputType
-                                                  .numberWithOptions(
-                                                  decimal: true),
-                                            ),
-                                          ),
-                                        ],
+                                        ),
+                                        trailing: IconButton(
+                                          icon: const Icon(
+                                              Icons.calendar_today_outlined,
+                                              color: Colors.deepPurple),
+                                          onPressed: () async {
+                                            final picked = await showDatePicker(
+                                              context: context,
+                                              initialDate: DateTime.now(),
+                                              firstDate: DateTime.now()
+                                                  .subtract(
+                                                      const Duration(days: 1)),
+                                              lastDate: DateTime.now().add(
+                                                  const Duration(days: 365)),
+                                            );
+                                            if (picked != null) {
+                                              setState(
+                                                  () => _expectedDate = picked);
+                                            }
+                                          },
+                                        ),
                                       ),
-                                    ],
+                                    ),
                                   ),
-                                );
-                              }),
-                              TextButton.icon(
-                                onPressed: () =>
-                                    setState(() => _lines.add(_PoLine())),
-                                icon: const Icon(Icons.add,
-                                    color: Colors.deepPurple),
-                                label: const Text('Add line item',
-                                    style: TextStyle(color: Colors.deepPurple)),
+                                ],
                               ),
                             ],
                           ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    _card(
-                      child: _buildTextInput(
-                        controller: _notesCtrl,
-                        label: 'Notes / special instructions',
-                        icon: Icons.notes_outlined,
-                        maxLines: 3,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _isSaving
-                                ? null
-                                : () => _save(branchIds, status: 'draft'),
-                            child: const Text('Save as Draft'),
+                        ),
+                        const SizedBox(height: 20),
+                        StreamBuilder<List<dynamic>>(
+                          stream:
+                              _inventoryService.streamIngredients(branchIds),
+                          builder: (context, invSnapshot) {
+                            final ingredients =
+                                (invSnapshot.data ?? []).map((i) {
+                              return {
+                                'id': i.id,
+                                'name': i.name,
+                                'unit': i.unit,
+                                'costPerUnit': i.costPerUnit,
+                                'category': i.category,
+                              };
+                            }).toList();
+                            return _card(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'Line Items',
+                                        style: GoogleFonts.outfit(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.deepPurple.shade800,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      TextButton.icon(
+                                        onPressed: () => setState(
+                                            () => _lines.add(_PoLine())),
+                                        icon: const Icon(Icons.add, size: 18),
+                                        label: const Text('Add Row'),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: Colors.deepPurple,
+                                          backgroundColor:
+                                              Colors.deepPurple.shade50,
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 16, vertical: 8),
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(8)),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  ..._lines.asMap().entries.map((entry) {
+                                    final index = entry.key;
+                                    final line = entry.value;
+                                    return StatefulBuilder(
+                                      key: ObjectKey(line),
+                                      builder: (ctx, setLineState) {
+                                        // Listen to changes in qty/cost to recompute total
+                                        line.qtyCtrl.addListener(
+                                            () => setLineState(() {}));
+                                        line.costCtrl.addListener(
+                                            () => setLineState(() {}));
+                                        final qty = double.tryParse(
+                                                line.qtyCtrl.text.trim()) ??
+                                            0.0;
+                                        final cost = double.tryParse(
+                                                line.costCtrl.text.trim()) ??
+                                            0.0;
+                                        final lineTotal = qty * cost;
+                                        final hasTotal = qty > 0 && cost > 0;
+                                        return Container(
+                                          margin:
+                                              const EdgeInsets.only(bottom: 12),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            border: Border.all(
+                                                color: Colors.grey.shade200),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.deepPurple
+                                                    .withOpacity(0.03),
+                                                blurRadius: 8,
+                                                offset: const Offset(0, 2),
+                                              )
+                                            ],
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              Padding(
+                                                padding:
+                                                    const EdgeInsets.all(16),
+                                                child: Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Container(
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                              8),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors
+                                                            .deepPurple.shade50,
+                                                        shape: BoxShape.circle,
+                                                      ),
+                                                      child: Text(
+                                                          '${index + 1}',
+                                                          style: TextStyle(
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: Colors
+                                                                  .deepPurple
+                                                                  .shade600)),
+                                                    ),
+                                                    const SizedBox(width: 12),
+                                                    Expanded(
+                                                      child: Column(
+                                                        children: [
+                                                          _buildItemSelector(
+                                                              line,
+                                                              ingredients,
+                                                              supplierIngredientIds),
+                                                          const SizedBox(
+                                                              height: 12),
+                                                          Row(
+                                                            children: [
+                                                              Expanded(
+                                                                  child: _buildTextInput(
+                                                                      controller:
+                                                                          line
+                                                                              .qtyCtrl,
+                                                                      label:
+                                                                          'Qty',
+                                                                      keyboardType: const TextInputType
+                                                                          .numberWithOptions(
+                                                                          decimal:
+                                                                              true))),
+                                                              const SizedBox(
+                                                                  width: 12),
+                                                              Expanded(
+                                                                  child: _buildTextInput(
+                                                                      controller:
+                                                                          line
+                                                                              .unitCtrl,
+                                                                      label:
+                                                                          'Unit')),
+                                                              const SizedBox(
+                                                                  width: 12),
+                                                              Expanded(
+                                                                  child: _buildTextInput(
+                                                                      controller:
+                                                                          line
+                                                                              .costCtrl,
+                                                                      label:
+                                                                          'Cost / Unit',
+                                                                      keyboardType: const TextInputType
+                                                                          .numberWithOptions(
+                                                                          decimal:
+                                                                              true))),
+                                                            ],
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 12),
+                                                    IconButton(
+                                                      onPressed: _lines
+                                                                  .length ==
+                                                              1
+                                                          ? null
+                                                          : () {
+                                                              setState(() {
+                                                                _garbageLines
+                                                                    .add(line);
+                                                                _lines.removeAt(
+                                                                    index);
+                                                              });
+                                                            },
+                                                      icon: const Icon(
+                                                          Icons.delete_outline,
+                                                          color: Colors.red),
+                                                      tooltip: 'Remove Item',
+                                                      padding: EdgeInsets.zero,
+                                                      constraints:
+                                                          const BoxConstraints(),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              // ── Total Value row ──────────────────────────────
+                                              if (hasTotal)
+                                                Container(
+                                                  width: double.infinity,
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 16,
+                                                      vertical: 10),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors
+                                                        .deepPurple.shade50,
+                                                    borderRadius:
+                                                        const BorderRadius
+                                                            .vertical(
+                                                            bottom:
+                                                                Radius.circular(
+                                                                    12)),
+                                                    border: Border(
+                                                        top: BorderSide(
+                                                            color: Colors
+                                                                .deepPurple
+                                                                .shade100)),
+                                                  ),
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(
+                                                          Icons
+                                                              .calculate_outlined,
+                                                          size: 14,
+                                                          color: Colors
+                                                              .deepPurple
+                                                              .shade400),
+                                                      const SizedBox(width: 8),
+                                                      Text(
+                                                        '${qty.toStringAsFixed(qty.truncateToDouble() == qty ? 0 : 2)} ${line.unitCtrl.text.trim().isNotEmpty ? line.unitCtrl.text.trim() : 'units'}  ×  QAR ${cost.toStringAsFixed(2)}  =',
+                                                        style: TextStyle(
+                                                            fontSize: 12,
+                                                            color: Colors
+                                                                .deepPurple
+                                                                .shade500),
+                                                      ),
+                                                      const Spacer(),
+                                                      Container(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                                horizontal: 12,
+                                                                vertical: 4),
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color:
+                                                              Colors.deepPurple,
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(8),
+                                                        ),
+                                                        child: Text(
+                                                          'Total  QAR ${lineTotal.toStringAsFixed(2)}',
+                                                          style:
+                                                              const TextStyle(
+                                                                  fontSize: 13,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                  color: Colors
+                                                                      .white),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                )
+                                              else
+                                                Container(
+                                                  width: double.infinity,
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 16,
+                                                      vertical: 8),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.grey.shade50,
+                                                    borderRadius:
+                                                        const BorderRadius
+                                                            .vertical(
+                                                            bottom:
+                                                                Radius.circular(
+                                                                    12)),
+                                                    border: Border(
+                                                        top: BorderSide(
+                                                            color: Colors.grey
+                                                                .shade200)),
+                                                  ),
+                                                  child: Text(
+                                                    'Enter qty & cost to see Total Value',
+                                                    style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: Colors
+                                                            .grey.shade400),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  }),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                        // ── Grand Total Card ──────────────────────────────────
+                        StatefulBuilder(
+                          builder: (ctx, setGrandState) {
+                            for (final l in _lines) {
+                              l.qtyCtrl.addListener(() => setGrandState(() {}));
+                              l.costCtrl
+                                  .addListener(() => setGrandState(() {}));
+                            }
+                            final grandTotal =
+                                _lines.fold<double>(0.0, (sum, l) {
+                              final q =
+                                  double.tryParse(l.qtyCtrl.text.trim()) ?? 0.0;
+                              final c =
+                                  double.tryParse(l.costCtrl.text.trim()) ??
+                                      0.0;
+                              return sum + (q * c);
+                            });
+                            return Container(
+                              margin: const EdgeInsets.only(top: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 24, vertical: 18),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.deepPurple.shade700,
+                                    Colors.deepPurple.shade500,
+                                  ],
+                                  begin: Alignment.centerLeft,
+                                  end: Alignment.centerRight,
+                                ),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.receipt_long,
+                                      color: Colors.white70, size: 22),
+                                  const SizedBox(width: 12),
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'GRAND TOTAL',
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.white70,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 1.5),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${_lines.where((l) => l.ingredientNameCtrl.text.isNotEmpty).length} line item(s)',
+                                        style: const TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.white60),
+                                      ),
+                                    ],
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    'QAR ${grandTotal.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                        fontSize: 28,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                        _card(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Additional Information',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.deepPurple.shade800,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              _buildTextInput(
+                                controller: _notesCtrl,
+                                label:
+                                    'Notes or special instructions for supplier',
+                                icon: Icons.notes_outlined,
+                                maxLines: 3,
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _isSaving
-                                ? null
-                                : () => _save(branchIds, status: 'submitted'),
-                            child: _isSaving
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                        color: Colors.white, strokeWidth: 2),
-                                  )
-                                : const Text('Submit to Supplier'),
-                          ),
+                        const SizedBox(height: 32),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            OutlinedButton(
+                              onPressed: _isSaving
+                                  ? null
+                                  : () => _save(branchIds, status: 'draft'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 32, vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: const Text('Save as Draft',
+                                  style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600)),
+                            ),
+                            const SizedBox(width: 16),
+                            ElevatedButton(
+                              onPressed: _isSaving
+                                  ? null
+                                  : () => _save(branchIds, status: 'submitted'),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 32, vertical: 16),
+                                backgroundColor: Colors.deepPurple,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: _isSaving
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                          color: Colors.white, strokeWidth: 2))
+                                  : const Text('Submit Order',
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600)),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
+                  ),
                 );
               },
             ),
@@ -755,7 +1160,15 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
       return;
     }
 
-    final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+    if (branchIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select a branch before creating a purchase order.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
     setState(() => _isSaving = true);
     try {
       if (widget.editingPo != null) {
@@ -767,7 +1180,9 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
             'lineItems': rows,
             'totalAmount': total,
             'status': status,
-            'expectedDeliveryDate': _expectedDate != null ? Timestamp.fromDate(_expectedDate!) : null,
+            'expectedDeliveryDate': _expectedDate != null
+                ? Timestamp.fromDate(_expectedDate!)
+                : null,
             'notes': _notesCtrl.text.trim(),
           },
           userId: userScope.userIdentifier,
@@ -784,8 +1199,9 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
             'totalAmount': total,
             'status': status,
             'orderDate': Timestamp.fromDate(_orderDate),
-            'expectedDeliveryDate':
-                _expectedDate != null ? Timestamp.fromDate(_expectedDate!) : null,
+            'expectedDeliveryDate': _expectedDate != null
+                ? Timestamp.fromDate(_expectedDate!)
+                : null,
             'receivedDate': null,
             'notes': _notesCtrl.text.trim(),
           },
@@ -802,7 +1218,9 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
           SnackBar(
             content: Text(status == 'submitted'
                 ? 'Purchase order $_poNumber submitted'
-                : widget.editingPo != null ? 'Purchase order $_poNumber updated' : 'Purchase order $_poNumber saved as draft'),
+                : widget.editingPo != null
+                    ? 'Purchase order $_poNumber updated'
+                    : 'Purchase order $_poNumber saved as draft'),
             backgroundColor: Colors.green,
             action: SnackBarAction(
               label: 'COPY ID',

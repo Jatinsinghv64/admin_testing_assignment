@@ -100,8 +100,7 @@ class PrintingService {
   }
 
   static bool _hasPrintableOrderNumber(Map<String, dynamic>? data) {
-    final orderNumber = data?['dailyOrderNumber'];
-    return orderNumber is String && orderNumber.trim().isNotEmpty;
+    return !OrderNumberHelper.isLoading(data);
   }
 
   static Future<DocumentSnapshot> _resolvePrintableOrderDoc(
@@ -277,8 +276,9 @@ class PrintingService {
         }
 
         // Order Details
-        final String dailyOrderNumber = order['dailyOrderNumber']?.toString() ??
-            resolvedOrderDoc.id.substring(0, 6).toUpperCase();
+        final String dailyOrderNumber =
+            OrderNumberHelper.getDisplayNumber(order, orderId: resolvedOrderDoc.id)
+                .replaceAll('#', '');
         final String orderType = (order['Order_type'] ?? 'Unknown')
             .toString()
             .toUpperCase()
@@ -759,8 +759,9 @@ class PrintingService {
         final String formattedTime =
             orderDate != null ? DateFormat('hh:mm a').format(orderDate) : "N/A";
 
-        final String dailyOrderNumber = order['dailyOrderNumber']?.toString() ??
-            orderDoc.id.substring(0, 6).toUpperCase();
+        final String dailyOrderNumber =
+            OrderNumberHelper.getDisplayNumber(order, orderId: orderDoc.id)
+                .replaceAll('#', '');
         final String orderType = (order['Order_type'] ?? 'Unknown')
             .toString()
             .toUpperCase()

@@ -39,12 +39,14 @@ class IngredientService {
 
   Future<void> addIngredient(IngredientModel ingredient) async {
     final batch = _db.batch();
-    final docRef = _col.doc();
+    // Use name for document ID
+    final docId = ingredient.name.trim();
+    final docRef = _col.doc(docId);
 
     final now = DateTime.now();
     final data = ingredient
         .copyWith(
-          id: docRef.id,
+          id: docId,
           createdAt: now,
           updatedAt: now,
         )
@@ -191,6 +193,19 @@ class IngredientService {
     final doc = await _col.doc(id).get();
     if (!doc.exists) return null;
     return IngredientModel.fromFirestore(doc);
+  }
+
+  Future<IngredientModel?> findByBarcode(String barcode, List<String> branchIds) async {
+    final qs = await _col.where('barcode', isEqualTo: barcode).limit(1).get();
+    if (qs.docs.isEmpty) return null;
+    
+    final ingredient = IngredientModel.fromFirestore(qs.docs.first);
+    if (!ingredient.isActive) return null;
+    
+    if (branchIds.isEmpty) return ingredient;
+    final hasAccess = ingredient.branchIds.any((b) => branchIds.contains(b)) ||
+                      ingredient.branchStocks.keys.any((b) => branchIds.contains(b));
+    return hasAccess ? ingredient : null;
   }
 
   /// One-time fetch of multiple ingredients by IDs (for recipe cost calc).

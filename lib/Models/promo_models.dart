@@ -52,8 +52,7 @@ class ComboModel {
       bIds = List<String>.from(map['branchIds'] as List);
     } else if (map['branchids'] is List) {
       bIds = List<String>.from(map['branchids'] as List);
-    } else if (map['branchId'] is String &&
-        (map['branchId'] as String).isNotEmpty) {
+    } else if (map['branchId'] is String && (map['branchId'] as String).isNotEmpty) {
       bIds = [map['branchId'] as String];
     }
 
@@ -161,8 +160,7 @@ class PromoSaleModel {
       bIds = List<String>.from(map['branchIds'] as List);
     } else if (map['branchids'] is List) {
       bIds = List<String>.from(map['branchids'] as List);
-    } else if (map['branchId'] is String &&
-        (map['branchId'] as String).isNotEmpty) {
+    } else if (map['branchId'] is String && (map['branchId'] as String).isNotEmpty) {
       bIds = [map['branchId'] as String];
     }
 

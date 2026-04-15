@@ -81,6 +81,55 @@ class IngredientModel {
     return stock > 0 && stock <= minThreshold;
   }
 
+  /// Returns true if ANY of the given branches has this ingredient out of stock.
+  /// Used for alert counts so that a per-branch stockout isn't hidden by
+  /// aggregation with other branches.
+  bool isOutOfStockInAnyBranch(List<String> branchIds) {
+    final effective = _effectiveBranchIds(branchIds);
+    if (effective.isEmpty) return false;
+    
+    // Only check branches where this ingredient is actually assigned
+    final relevant = effective.where((id) => this.branchIds.contains(id)).toList();
+    if (relevant.isEmpty) return false;
+    
+    return relevant.any((bId) => getStock(bId) <= 0);
+  }
+
+  /// Returns true if ANY of the given branches has this ingredient at low stock.
+  bool isLowStockInAnyBranch(List<String> branchIds) {
+    final effective = _effectiveBranchIds(branchIds);
+    if (effective.isEmpty) return false;
+    
+    // Only check branches where this ingredient is actually assigned
+    final relevant = effective.where((id) => this.branchIds.contains(id)).toList();
+    if (relevant.isEmpty) return false;
+
+    return relevant.any((bId) {
+      final s = getStock(bId);
+      final t = getMinThreshold(bId);
+      return s > 0 && t > 0 && s <= t;
+    });
+  }
+
+  /// Returns per-branch stock status map for UI display.
+  /// Each entry is branchId → 'out' | 'low' | 'ok'.
+  Map<String, String> getPerBranchStockStatus(List<String> branchIds) {
+    final effective = _effectiveBranchIds(branchIds);
+    final result = <String, String>{};
+    for (final bId in effective) {
+      final s = getStock(bId);
+      final t = getMinThreshold(bId);
+      if (s <= 0) {
+        result[bId] = 'out';
+      } else if (t > 0 && s <= t) {
+        result[bId] = 'low';
+      } else {
+        result[bId] = 'ok';
+      }
+    }
+    return result;
+  }
+
   bool get isExpiringSoon {
     if (expiryDate == null) return false;
     final diff = expiryDate!.difference(DateTime.now()).inDays;
@@ -102,8 +151,7 @@ class IngredientModel {
       bIds = List<String>.from(data['branchIds'] as List);
     } else if (data['branchids'] is List) {
       bIds = List<String>.from(data['branchids'] as List);
-    } else if (data['branchId'] is String &&
-        (data['branchId'] as String).isNotEmpty) {
+    } else if (data['branchId'] is String && (data['branchId'] as String).isNotEmpty) {
       bIds = [data['branchId'] as String];
     }
 
@@ -231,8 +279,14 @@ class IngredientModel {
   }
 
   List<String> _effectiveBranchIds(List<String> branchIds) {
+    // When the caller provides explicit filter branch IDs, use ONLY those.
+    // This prevents unioning with the ingredient's own branchIds which
+    // would inflate aggregated stock and mask per-branch stockouts.
+    final filterIds = branchIds.where((id) => id.trim().isNotEmpty).toSet();
+    if (filterIds.isNotEmpty) return filterIds.toList();
+
+    // Fallback: no filter specified — use the ingredient's own branch list.
     final resolved = <String>{}
-      ..addAll(branchIds.where((id) => id.trim().isNotEmpty))
       ..addAll(this.branchIds.where((id) => id.trim().isNotEmpty));
 
     if (resolved.isEmpty) {

@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../models/timing_template.dart';
+import '../Models/timing_template.dart';
 import '../constants.dart';
 
 class TimingTemplateService {

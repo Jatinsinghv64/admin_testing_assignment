@@ -8,12 +8,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:audioplayers/audioplayers.dart';
-import '../../main.dart';
-import '../../constants.dart';
-import '../../Widgets/BranchFilterService.dart';
-import '../../Widgets/CancellationDialog.dart';
+import '../../../../main.dart';
+import '../../../../constants.dart';
+import '../../../../Widgets/BranchFilterService.dart';
+import '../../../../Widgets/CancellationDialog.dart';
 import 'components/kds_constants.dart';
-import '../../services/pos/pos_service.dart';
+import '../../../../services/pos/pos_service.dart';
 
 // KDS Tab definition
 enum _KdsTab { all, toCook, ready, recall }
@@ -63,12 +63,17 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _updateStream();
+    final branchFilter =
+        Provider.of<BranchFilterService>(context, listen: false);
+    final userScope = Provider.of<UserScopeService>(context, listen: false);
+    _ensureStreamTarget(userScope, branchFilter);
   }
 
-  void _updateStream() {
-    final userScope = context.read<UserScopeService>();
-    final branchFilter = context.read<BranchFilterService>();
+  /// Checks whether the Firestore stream needs to be recreated.
+  /// Safe to call from didChangeDependencies and explicit refresh triggers.
+  /// Must NOT be called from build() to avoid stream mutation during render.
+  void _ensureStreamTarget(
+      UserScopeService userScope, BranchFilterService branchFilter) {
     final selectedBranchId = branchFilter.selectedBranchId;
     if (selectedBranchId == null ||
         selectedBranchId == BranchFilterService.allBranchesValue) {
@@ -115,17 +120,23 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _buildOrdersStream(
       List<String> branchIds) {
+    // INDUSTRY GRADE: orderBy('timestamp') is intentionally OMITTED from the
+    // Firestore query. Combining whereIn + timestamp range + arrayContains +
+    // orderBy requires a composite index that may not exist and cannot be
+    // deployed per-environment. We sort client-side instead (see visibleDocs.sort
+    // in the StreamBuilder). This makes the query portable and index-free.
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance
         .collection(AppConstants.collectionOrders)
         .where('status', whereIn: [
-      AppConstants.statusPending,
-      AppConstants.statusPreparing,
-      AppConstants.statusPrepared,
-      AppConstants.statusServed,
-      AppConstants.statusCancelled,
-      AppConstants.statusNeedsAssignment,
-      'placed',
-    ]).where('timestamp',
+          AppConstants.statusPending,
+          AppConstants.statusPreparing,
+          AppConstants.statusPrepared,
+          AppConstants.statusServed,
+          AppConstants.statusCancelled,
+          AppConstants.statusNeedsAssignment,
+          'placed',
+        ])
+        .where('timestamp',
             isGreaterThanOrEqualTo: Timestamp.fromDate(_dateStart));
 
     if (branchIds.length == 1) {
@@ -133,9 +144,9 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     } else if (branchIds.length <= 10) {
       query = query.where('branchIds', arrayContainsAny: branchIds);
     }
-    return query
-        .orderBy('timestamp', descending: false)
-        .snapshots();
+    // Client-side sort: oldest first (most urgent at top-left)
+    // Applied in the StreamBuilder after snapshot arrives.
+    return query.snapshots();
   }
 
   @override
@@ -197,7 +208,10 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
 
   @override
   Widget build(BuildContext context) {
-    final branchFilter = context.watch<BranchFilterService>();
+    // Watch for branch/user changes so didChangeDependencies fires
+    context.watch<BranchFilterService>();
+    context.watch<UserScopeService>();
+    final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
     final globalBranchId = branchFilter.selectedBranchId;
 
     if (globalBranchId == null ||
@@ -250,8 +264,8 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                   decoration: BoxDecoration(
                     color: Colors.deepPurple.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(16),
-                    border:
-                        Border.all(color: Colors.deepPurple.withValues(alpha: 0.15)),
+                    border: Border.all(
+                        color: Colors.deepPurple.withValues(alpha: 0.15)),
                   ),
                   child: Row(
                     children: [
@@ -417,7 +431,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
             ),
             const SizedBox(height: 16),
             OutlinedButton.icon(
-              onPressed: () => setState(_updateStream),
+              onPressed: () => setState(() => _lastCacheKey = ''),
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Retry Stream'),
             ),
@@ -642,7 +656,15 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
           onChanged: (v) {
             if (v == null) return;
             setState(() => _dateRange = v);
-            _updateStream();
+            // Explicitly invalidate stream cache and recreate for new date range.
+            // didChangeDependencies won't fire for local state changes, so we
+            // force-refresh the stream here.
+            _lastCacheKey = '';
+            final branchFilter =
+                Provider.of<BranchFilterService>(context, listen: false);
+            final userScope =
+                Provider.of<UserScopeService>(context, listen: false);
+            _ensureStreamTarget(userScope, branchFilter);
           },
         ),
       ),
@@ -1356,7 +1378,8 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF2196F3).withValues(alpha: 0.15),
+                            color:
+                                const Color(0xFF2196F3).withValues(alpha: 0.15),
                             border: Border.all(
                                 color: const Color(0xFF2196F3), width: 1.5),
                             borderRadius: BorderRadius.circular(4),
@@ -1523,8 +1546,6 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
         final isBumped = _bumpedItems.contains(idx);
         final isCurrentAddOn =
             !isItemCancelled && hasActiveAddOns && idx >= previousItemCount;
-        final isOldItem =
-            !isItemCancelled && hasActiveAddOns && idx < previousItemCount;
         final isCut = isBumped || isOrderServed || isItemCancelled;
         final canBumpItem = !isItemCancelled && !isCancelled && !isOrderServed;
 

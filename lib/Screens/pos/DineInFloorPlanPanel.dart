@@ -1,13 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../main.dart';
-import '../../constants.dart';
-import '../../Widgets/BranchFilterService.dart';
-import '../../services/pos/pos_service.dart';
+import '../../../../main.dart';
+import '../../../../constants.dart';
+import '../../../../Widgets/BranchFilterService.dart';
+import '../../../../services/pos/pos_service.dart';
 import 'TableOrdersDialog.dart';
-import '../../Widgets/PrintingService.dart';
-import '../TableManagement.dart'; // To show TableManagementScreen logic if needed, or we implement our own
+import '../../../../Widgets/PrintingService.dart';
+import '../management/TableManagement.dart';
 
 class DineInFloorPlanPanel extends StatefulWidget {
   final VoidCallback onSwitchToPos;
@@ -22,7 +22,32 @@ class DineInFloorPlanPanel extends StatefulWidget {
 }
 
 class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
-  String _selectedFloor = 'All';
+  static final Map<String, String> _floorPreferences = {};
+  String get _selectedFloor {
+    final branchId = _currentBranchId;
+    return _floorPreferences[branchId] ?? 'All';
+  }
+  set _selectedFloor(String value) {
+    final branchId = _currentBranchId;
+    if (branchId.isNotEmpty) {
+      _floorPreferences[branchId] = value;
+    }
+  }
+
+  String get _currentBranchId {
+    try {
+      final pos = Provider.of<PosService>(context, listen: false);
+      final branchFilter = Provider.of<BranchFilterService>(context, listen: false);
+      final userScope = Provider.of<UserScopeService>(context, listen: false);
+      return pos.activeBranchId ??
+          (branchFilter.getFilterBranchIds(userScope.branchIds).isNotEmpty
+              ? branchFilter.getFilterBranchIds(userScope.branchIds).first
+              : '');
+    } catch (_) {
+      return '';
+    }
+  }
+
   bool _isEditMode = false;
 
   @override
@@ -30,17 +55,17 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
     final userScope = context.watch<UserScopeService>();
     final pos = context.watch<PosService>();
     final branchFilter = context.watch<BranchFilterService>();
-    
+
     final isSuperAdmin = userScope.isSuperAdmin;
-    
+
     // Prioritize the explicitly selected POS branch for the floor plan
-    final currentBranchId = pos.activeBranchId ?? 
-        (branchFilter.getFilterBranchIds(userScope.branchIds).isNotEmpty 
-            ? branchFilter.getFilterBranchIds(userScope.branchIds).first 
+    final currentBranchId = pos.activeBranchId ??
+        (branchFilter.getFilterBranchIds(userScope.branchIds).isNotEmpty
+            ? branchFilter.getFilterBranchIds(userScope.branchIds).first
             : '');
 
-    final effectiveBranchIds = currentBranchId.isNotEmpty 
-        ? [currentBranchId] 
+    final effectiveBranchIds = currentBranchId.isNotEmpty
+        ? [currentBranchId]
         : branchFilter.getFilterBranchIds(userScope.branchIds);
 
     return Container(
@@ -66,8 +91,8 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text('Floor Plan',
-                      style: TextStyle(
-                          fontSize: 24, fontWeight: FontWeight.bold)),
+                      style:
+                          TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   Text(
                     _isEditMode
                         ? 'Edit mode: Tap tables to modify or add new ones'
@@ -83,7 +108,8 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
               if (isSuperAdmin) ...[
                 if (_isEditMode)
                   ElevatedButton.icon(
-                    onPressed: () => _showAddTableDialog(context, currentBranchId),
+                    onPressed: () =>
+                        _showAddTableDialog(context, currentBranchId),
                     icon: const Icon(Icons.add),
                     label: const Text('Add Table'),
                     style: ElevatedButton.styleFrom(
@@ -102,7 +128,8 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                   label: Text(_isEditMode ? 'Done Editing' : 'Edit Floor Plan'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _isEditMode ? Colors.green : Colors.white,
-                    foregroundColor: _isEditMode ? Colors.white : Colors.deepPurple,
+                    foregroundColor:
+                        _isEditMode ? Colors.white : Colors.deepPurple,
                   ),
                 ),
                 const SizedBox(width: 24),
@@ -144,17 +171,19 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                     }
 
                     if (!snapshot.hasData || snapshot.data == null) {
-                      return _buildEmptyState('No tables configured', 'Set up tables to start managing dine-in orders');
+                      return _buildEmptyState('No tables configured',
+                          'Set up tables to start managing dine-in orders');
                     }
 
                     final branchData =
                         snapshot.data!.data() as Map<String, dynamic>?;
-                    final tables = (branchData?['Tables'] ?? branchData?['tables'])
-                            as Map<String, dynamic>? ??
+                    final tables = (branchData?['Tables'] ??
+                            branchData?['tables']) as Map<String, dynamic>? ??
                         {};
 
                     if (tables.isEmpty) {
-                      return _buildEmptyState('No tables found', 'Use the Edit Floor Plan button to add tables');
+                      return _buildEmptyState('No tables found',
+                          'Use the Edit Floor Plan button to add tables');
                     }
 
                     final tableEntries = tables.entries.toList()
@@ -212,22 +241,24 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                                           : FontWeight.w500,
                                       fontSize: 14,
                                     ),
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 10),
                                     onSelected: (_) =>
                                         setState(() => _selectedFloor = zone),
                                     shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      side: BorderSide(
-                                        color: isSelected ? Colors.deepPurple : Colors.grey[300]!,
-                                      )
-                                    ),
+                                        borderRadius: BorderRadius.circular(24),
+                                        side: BorderSide(
+                                          color: isSelected
+                                              ? Colors.deepPurple
+                                              : Colors.grey[300]!,
+                                        )),
                                   ),
                                 );
                               }).toList(),
                             ),
                           ),
                         if (zones.length > 1) const SizedBox(height: 20),
-                        
+
                         // Tables grid
                         Expanded(
                           child: GridView.builder(
@@ -251,19 +282,28 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                                 onSelect: (tableId, tableName) {
                                   if (_isEditMode) {
                                     _showEditTableDialog(
-                                        context, currentBranchId, tableId, tableData, tables);
+                                        context,
+                                        currentBranchId,
+                                        tableId,
+                                        tableData,
+                                        tables);
                                   } else {
-                                    _handleTableSelect(
-                                        context, tableId, tableName, currentBranchId);
+                                    _handleTableSelect(context, tableId,
+                                        tableName, currentBranchId,
+                                        maxSeats: tableData['seats'] != null ? int.tryParse(tableData['seats'].toString()) : null);
                                   }
                                 },
                                 onOccupiedTap: (tableId, tableName) {
                                   if (_isEditMode) {
                                     _showEditTableDialog(
-                                        context, currentBranchId, tableId, tableData, tables);
+                                        context,
+                                        currentBranchId,
+                                        tableId,
+                                        tableData,
+                                        tables);
                                   } else {
-                                    _handleOccupiedTableTap(
-                                        context, tableId, tableName, currentBranchId);
+                                    _handleOccupiedTableTap(context, tableId,
+                                        tableName, currentBranchId);
                                   }
                                 },
                               );
@@ -290,7 +330,10 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
           Icon(Icons.table_bar, size: 80, color: Colors.grey[300]),
           const SizedBox(height: 24),
           Text(title,
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey[600])),
+              style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[600])),
           const SizedBox(height: 8),
           Text(subtitle,
               style: TextStyle(fontSize: 15, color: Colors.grey[500])),
@@ -313,7 +356,10 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
         ),
         const SizedBox(width: 6),
         Text(label,
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.grey[700])),
+            style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey[700])),
       ],
     );
   }
@@ -350,12 +396,63 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
     }
   }
 
-  void _handleTableSelect(
-      BuildContext context, String tableId, String tableName, String branchId) {
-    final pos = context.read<PosService>();
-    pos.clearCart();
-    pos.loadTableContext(tableId, tableName, branchIds: [branchId]);
-    widget.onSwitchToPos();
+  Future<void> _handleTableSelect(
+      BuildContext context, String tableId, String tableName, String branchId, {int? maxSeats}) async {
+    int guestCount = 1;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text('Table $tableName'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Enter number of guests:'),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove_circle_outline),
+                      onPressed: guestCount > 1
+                          ? () => setDialogState(() => guestCount--)
+                          : null,
+                    ),
+                    Text('$guestCount', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline),
+                      onPressed: () => setDialogState(() => guestCount++),
+                    ),
+                  ],
+                ),
+                if (maxSeats != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text('Capacity: $maxSeats', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Proceed'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      final pos = context.read<PosService>();
+      pos.clearCart();
+      pos.loadTableContext(tableId, tableName, guestCount: guestCount, branchIds: [branchId]);
+      widget.onSwitchToPos();
+    }
   }
 
   void _handleOccupiedTableTap(
@@ -372,15 +469,30 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
     _showTableEditorDialog(context, branchId, null, null, {});
   }
 
-  void _showEditTableDialog(BuildContext context, String branchId, String tableId, Map<String, dynamic> tableData, Map<String, dynamic> allTables) {
+  void _showEditTableDialog(
+      BuildContext context,
+      String branchId,
+      String tableId,
+      Map<String, dynamic> tableData,
+      Map<String, dynamic> allTables) {
     _showTableEditorDialog(context, branchId, tableId, tableData, allTables);
   }
 
-  void _showTableEditorDialog(BuildContext context, String branchId, String? tableId, Map<String, dynamic>? initialData, Map<String, dynamic> allTables) {
+  void _showTableEditorDialog(
+      BuildContext context,
+      String branchId,
+      String? tableId,
+      Map<String, dynamic>? initialData,
+      Map<String, dynamic> allTables) {
     final isEdit = tableId != null;
-    final nameController = TextEditingController(text: initialData?['name']?.toString() ?? '');
-    final seatsController = TextEditingController(text: initialData?['seats']?.toString() ?? '4');
-    final zoneController = TextEditingController(text: initialData?['zone']?.toString() ?? initialData?['floor']?.toString() ?? 'Main');
+    final nameController =
+        TextEditingController(text: initialData?['name']?.toString() ?? '');
+    final seatsController =
+        TextEditingController(text: initialData?['seats']?.toString() ?? '4');
+    final zoneController = TextEditingController(
+        text: initialData?['zone']?.toString() ??
+            initialData?['floor']?.toString() ??
+            'Main');
     String shape = initialData?['shape']?.toString() ?? 'rectangle';
     String status = initialData?['status']?.toString() ?? 'available';
 
@@ -423,7 +535,8 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                     value: shape,
                     decoration: const InputDecoration(labelText: 'Shape'),
                     items: const [
-                      DropdownMenuItem(value: 'rectangle', child: Text('Rectangle')),
+                      DropdownMenuItem(
+                          value: 'rectangle', child: Text('Rectangle')),
                       DropdownMenuItem(value: 'circle', child: Text('Circle')),
                     ],
                     onChanged: (val) {
@@ -436,9 +549,12 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                       value: status,
                       decoration: const InputDecoration(labelText: 'Status'),
                       items: const [
-                        DropdownMenuItem(value: 'available', child: Text('Available')),
-                        DropdownMenuItem(value: 'reserved', child: Text('Reserved')),
-                        DropdownMenuItem(value: 'occupied', child: Text('Occupied')),
+                        DropdownMenuItem(
+                            value: 'available', child: Text('Available')),
+                        DropdownMenuItem(
+                            value: 'reserved', child: Text('Reserved')),
+                        DropdownMenuItem(
+                            value: 'occupied', child: Text('Occupied')),
                       ],
                       onChanged: (val) {
                         if (val != null) setDialogState(() => status = val);
@@ -457,31 +573,44 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                       context: context,
                       builder: (c) => AlertDialog(
                         title: const Text('Delete Table?'),
-                        content: const Text('Are you sure you want to delete this table?'),
+                        content: const Text(
+                            'Are you sure you want to delete this table?'),
                         actions: [
-                          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-                          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
+                          TextButton(
+                              onPressed: () => Navigator.pop(c, false),
+                              child: const Text('Cancel')),
+                          TextButton(
+                              onPressed: () => Navigator.pop(c, true),
+                              child: const Text('Delete',
+                                  style: TextStyle(color: Colors.red))),
                         ],
                       ),
                     );
-                    
+
                     if (confirm == true) {
                       try {
-                        await FirebaseFirestore.instance.collection('Branch').doc(branchId).set({
+                        await FirebaseFirestore.instance
+                            .collection('Branch')
+                            .doc(branchId)
+                            .set({
                           'Tables': {
                             tableId: FieldValue.delete(),
                           }
                         }, SetOptions(merge: true));
                         if (context.mounted) {
                           Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Table deleted')));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Table deleted')));
                         }
                       } catch (e) {
-                         if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                        if (context.mounted)
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error: $e')));
                       }
                     }
                   },
-                  child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                  child:
+                      const Text('Delete', style: TextStyle(color: Colors.red)),
                 ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -490,12 +619,17 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
               ElevatedButton(
                 onPressed: () async {
                   if (nameController.text.trim().isEmpty) return;
-                  
-                  final newTableId = isEdit ? tableId : 'T${DateTime.now().millisecondsSinceEpoch}';
+
+                  final newTableId = isEdit
+                      ? tableId
+                      : 'T${DateTime.now().millisecondsSinceEpoch}';
                   final seats = int.tryParse(seatsController.text) ?? 4;
-                  
+
                   try {
-                    await FirebaseFirestore.instance.collection('Branch').doc(branchId).set({
+                    await FirebaseFirestore.instance
+                        .collection('Branch')
+                        .doc(branchId)
+                        .set({
                       'Tables': {
                         newTableId: {
                           'name': nameController.text.trim(),
@@ -504,17 +638,21 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                           'shape': shape,
                           'status': status,
                           'updatedAt': FieldValue.serverTimestamp(),
-                          if (!isEdit) 'createdAt': FieldValue.serverTimestamp(),
+                          if (!isEdit)
+                            'createdAt': FieldValue.serverTimestamp(),
                         }
                       }
                     }, SetOptions(merge: true));
-                    
+
                     if (context.mounted) {
                       Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Table saved')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Table saved')));
                     }
                   } catch (e) {
-                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    if (context.mounted)
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text('Error: $e')));
                   }
                 },
                 child: const Text('Save'),
@@ -547,7 +685,8 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tableName = tableData['name']?.toString() ?? tableId;
-    final seats = tableData['seats'];
+    final seatsRaw = tableData['seats'];
+    final int? seats = seatsRaw != null ? int.tryParse(seatsRaw.toString()) : null;
     final shape = (tableData['shape'] ?? 'rectangle').toString().toLowerCase();
 
     // Determine real-time status by checking active orders
@@ -555,13 +694,14 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
     final staticStatus =
         (tableData['status'] ?? 'available').toString().toLowerCase();
     final isReserved = staticStatus == 'reserved';
-    final isAvailable = !isOccupiedByOrder && !isReserved && staticStatus != 'occupied';
+    final isAvailable =
+        !isOccupiedByOrder && !isReserved && staticStatus != 'occupied';
 
     // Color coding
     Color borderColor;
     Color bgColor;
     Color textColor;
-    
+
     if (isEditMode) {
       borderColor = Colors.blue;
       bgColor = Colors.blue.withValues(alpha: 0.08);
@@ -583,7 +723,7 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
     final isRound = shape == 'circle' || shape == 'round';
 
     return Tooltip(
-      message: isEditMode 
+      message: isEditMode
           ? 'Tap to edit'
           : isAvailable
               ? 'Tap to select'
@@ -593,12 +733,44 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: () {
+          onTap: () async {
             if (isEditMode) {
               onSelect(tableId, tableName);
             } else if (isAvailable) {
               onSelect(tableId, tableName);
-            } else if (isOccupiedByOrder && !isReserved) {
+            } else if (isReserved) {
+              final proceed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: Colors.orange[800]),
+                      const SizedBox(width: 8),
+                      const Text('Table Reserved'),
+                    ],
+                  ),
+                  content: Text('Table $tableName is currently marked as reserved.\n\nDo you want to use it anyway?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Use Table'),
+                    ),
+                  ],
+                ),
+              );
+              if (proceed == true) {
+                if (isOccupiedByOrder) {
+                  onOccupiedTap(tableId, tableName);
+                } else {
+                  onSelect(tableId, tableName);
+                }
+              }
+            } else if (isOccupiedByOrder) {
               onOccupiedTap(tableId, tableName);
             }
           },
@@ -631,7 +803,8 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
                         color: Colors.blue.withValues(alpha: 0.2),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.edit, size: 14, color: Colors.blue),
+                      child:
+                          const Icon(Icons.edit, size: 14, color: Colors.blue),
                     ),
                   )
                 else if (isOccupiedByOrder && !isReserved)
@@ -646,13 +819,11 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
                         tooltip: 'Print Invoice',
                         onPressed: () async {
                           // Find active order for this table
-                          final userScope =
-                              context.read<UserScopeService>();
+                          final userScope = context.read<UserScopeService>();
                           final branchFilter =
                               context.read<BranchFilterService>();
-                          final effectiveBranchIds =
-                              branchFilter.getFilterBranchIds(
-                                  userScope.branchIds);
+                          final effectiveBranchIds = branchFilter
+                              .getFilterBranchIds(userScope.branchIds);
                           try {
                             final snapshot = await FirebaseFirestore.instance
                                 .collection(AppConstants.collectionOrders)
@@ -668,12 +839,15 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
                                 ])
                                 .limit(1)
                                 .get();
-                            
+
                             if (snapshot.docs.isNotEmpty && context.mounted) {
-                              PrintingService.printReceipt(context, snapshot.docs.first);
+                              PrintingService.printReceipt(
+                                  context, snapshot.docs.first);
                             } else if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('No active orders found to print.')),
+                                const SnackBar(
+                                    content: Text(
+                                        'No active orders found to print.')),
                               );
                             }
                           } catch (e) {
@@ -710,15 +884,28 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
                       ),
                       if (seats != null) ...[
                         const SizedBox(height: 6),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 2,
+                          runSpacing: 2,
                           children: [
-                            Icon(Icons.person, size: 14, color: textColor),
-                            const SizedBox(width: 4),
-                            Text(
-                              '$seats',
-                              style: TextStyle(fontSize: 14, color: textColor, fontWeight: FontWeight.w600),
-                            ),
+                            for (int i = 0; i < (seats > 6 ? 6 : seats); i++)
+                              Icon(Icons.chair, size: 14, color: textColor),
+                            if (seats > 6)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: textColor.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '+${seats - 6}',
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: textColor,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ),
                           ],
                         ),
                       ],
@@ -731,7 +918,7 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
-                          isEditMode 
+                          isEditMode
                               ? 'Edit'
                               : isAvailable
                                   ? 'Available'

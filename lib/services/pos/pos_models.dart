@@ -103,6 +103,9 @@ class PosPayment {
   final double change;
   final double appliedAmount; // Amount actually applied to the order total
   final List<PosPayment> splits;
+  /// ISSUE #5: Per-person item breakdown for split bills.
+  /// Keys are person names, values are lists of {name, qty, amount} maps.
+  final Map<String, List<Map<String, dynamic>>>? itemAssignments;
   final DateTime timestamp;
 
   PosPayment({
@@ -112,6 +115,7 @@ class PosPayment {
     this.change = 0,
     double? appliedAmount,
     List<PosPayment> splits = const [],
+    this.itemAssignments,
     DateTime? timestamp,
   })  : appliedAmount = _roundMoney(
           appliedAmount ?? ((amount - change) < 0 ? 0 : (amount - change)),
@@ -132,6 +136,8 @@ class PosPayment {
         'timestamp': Timestamp.fromDate(timestamp),
         if (splits.isNotEmpty)
           'payments': splits.map((payment) => payment.toMap()).toList(),
+        if (itemAssignments != null && itemAssignments!.isNotEmpty)
+          'itemAssignments': itemAssignments,
       };
 
   static double _roundMoney(double value) =>

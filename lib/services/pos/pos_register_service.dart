@@ -3,12 +3,11 @@
 // Industry-grade: session metrics, force-close, payment breakdowns
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
 import '../../constants.dart';
 
 class PosRegisterSession {
   final String id;
-  final String branchId;
+  final List<String> branchIds;
   final String openedBy;
   final double openingBalance;
   final DateTime openedAt;
@@ -31,7 +30,7 @@ class PosRegisterSession {
 
   const PosRegisterSession({
     required this.id,
-    required this.branchId,
+    required this.branchIds,
     required this.openedBy,
     required this.openingBalance,
     required this.openedAt,
@@ -70,7 +69,11 @@ class PosRegisterSession {
     final data = doc.data() as Map<String, dynamic>;
     return PosRegisterSession(
       id: doc.id,
-      branchId: data['branchId'] ?? '',
+      branchIds: data['branchIds'] is List 
+          ? List<String>.from(data['branchIds']) 
+          : (data['branchId'] is String && (data['branchId'] as String).isNotEmpty 
+              ? [data['branchId'] as String] 
+              : []),
       openedBy: data['openedBy'] ?? '',
       openingBalance: (data['openingBalance'] as num?)?.toDouble() ?? 0.0,
       openedAt: (data['openedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
@@ -85,7 +88,8 @@ class PosRegisterSession {
       totalCardSales: (data['totalCardSales'] as num?)?.toDouble() ?? 0.0,
       totalOnlineSales: (data['totalOnlineSales'] as num?)?.toDouble() ?? 0.0,
       totalRefunds: (data['totalRefunds'] as num?)?.toDouble() ?? 0.0,
-      sessionDurationMinutes: (data['sessionDurationMinutes'] as num?)?.toInt() ?? 0,
+      sessionDurationMinutes:
+          (data['sessionDurationMinutes'] as num?)?.toInt() ?? 0,
       isForceClosed: data['isForceClosed'] == true,
       overriddenBy: data['overriddenBy'],
       activeOrdersAtClose: (data['activeOrdersAtClose'] as num?)?.toInt() ?? 0,
@@ -133,7 +137,7 @@ class PosRegisterService {
     final today = _todayString();
     final query = await _db
         .collection('pos_registers')
-        .where('branchId', isEqualTo: branchId)
+        .where('branchIds', arrayContains: branchId)
         .where('date', isEqualTo: today)
         .where('closedAt', isNull: true)
         .limit(1)
@@ -143,13 +147,48 @@ class PosRegisterService {
     return PosRegisterSession.fromFirestore(query.docs.first);
   }
 
+  /// INDUSTRY GRADE: Detect stale register sessions from previous days that
+  /// were never closed. Returns the most recent orphaned session.
+  Future<PosRegisterSession?> getStaleOpenSession(String branchId) async {
+    if (branchId.isEmpty) return null;
+    final today = _todayString();
+    final query = await _db
+        .collection('pos_registers')
+        .where('branchIds', arrayContains: branchId)
+        .where('closedAt', isNull: true)
+        .orderBy('openedAt', descending: true)
+        .limit(1)
+        .get();
+
+    if (query.docs.isEmpty) return null;
+    final session = PosRegisterSession.fromFirestore(query.docs.first);
+    // Only return if it's from a previous day (not today)
+    final data = query.docs.first.data();
+    final sessionDate = data['date']?.toString() ?? '';
+    if (sessionDate == today) return null; // Today's session — not stale
+    return session;
+  }
+
+  /// Force-close a stale session from a previous day.
+  Future<void> forceCloseStaleSession(PosRegisterSession staleSession) async {
+    if (staleSession.id.isEmpty) return;
+    await _db.collection('pos_registers').doc(staleSession.id).update({
+      'closedAt': FieldValue.serverTimestamp(),
+      'closedBy': 'system_auto_close',
+      'isForceClosed': true,
+      'notes': 'Auto-closed: register was left open from a previous day.',
+      'closingBalance': staleSession.openingBalance,
+      'expectedBalance': staleSession.openingBalance,
+    });
+  }
+
   /// Stream open register session for this branch today
   Stream<PosRegisterSession?> streamOpenSession(String branchId) {
     if (branchId.isEmpty) return Stream.value(null);
     final today = _todayString();
     return _db
         .collection('pos_registers')
-        .where('branchId', isEqualTo: branchId)
+        .where('branchIds', arrayContains: branchId)
         .where('date', isEqualTo: today)
         .where('closedAt', isNull: true)
         .limit(1)
@@ -167,14 +206,15 @@ class PosRegisterService {
     final ids = branchIds.take(10).toList();
     return _db
         .collection('pos_registers')
-        .where('branchId', whereIn: ids)
+        .where('branchIds', arrayContainsAny: ids)
         .where('date', isEqualTo: today)
         .where('closedAt', isNull: true)
         .snapshots()
         .map((snap) => snap.docs.length);
   }
 
-  /// Open a new register session
+  /// INDUSTRY GRADE: Atomic register open with Firestore transaction.
+  /// Prevents two devices from opening a register simultaneously.
   Future<PosRegisterSession> openRegister({
     required String branchId,
     required String openedBy,
@@ -193,44 +233,60 @@ class PosRegisterService {
     }
 
     final today = _todayString();
-
-    // Prevent duplicate opens
-    final existing = await getOpenSession(branchId);
-    if (existing != null) {
-      throw Exception(
-          'A register session is already open for today (opened by ${existing.openedBy}).');
-    }
-
     final docRef = _db.collection('pos_registers').doc();
     final now = DateTime.now();
 
-    await docRef.set({
-      'branchId': branchId,
-      'openedBy': openedBy,
-      'openingBalance': openingBalance,
-      'openedAt': FieldValue.serverTimestamp(),
-      'closedAt': null,
-      'closingBalance': null,
-      'expectedBalance': null,
-      'closedBy': null,
-      'notes': notes ?? '',
-      'date': today,
-      // Session metrics (populated at close time)
-      'totalOrders': 0,
-      'totalCancelled': 0,
-      'totalCashSales': 0.0,
-      'totalCardSales': 0.0,
-      'totalOnlineSales': 0.0,
-      'totalRefunds': 0.0,
-      'sessionDurationMinutes': 0,
-      'isForceClosed': false,
-      'overriddenBy': null,
-      'activeOrdersAtClose': 0,
+    // INDUSTRY GRADE: Use a transaction to atomically check + create.
+    // This prevents the race condition where two devices both pass the
+    // "getOpenSession" check and both create a session.
+    await _db.runTransaction<void>((transaction) async {
+      // Read: Check for any existing open session for this branch today
+      final existingQuery = await _db
+          .collection('pos_registers')
+          .where('branchIds', arrayContains: branchId)
+          .where('date', isEqualTo: today)
+          .where('closedAt', isNull: true)
+          .limit(1)
+          .get();
+
+      if (existingQuery.docs.isNotEmpty) {
+        final existingData = existingQuery.docs.first.data();
+        final existingOpenedBy = existingData['openedBy'] ?? 'another cashier';
+        throw Exception(
+            'A register is already open for today (opened by $existingOpenedBy). '
+            'Only one register session per branch per day is allowed.');
+      }
+
+      // Write: Create the register session atomically
+      transaction.set(docRef, {
+        'branchIds': [branchId],
+        'openedBy': openedBy,
+        'openingBalance': openingBalance,
+        'openedAt': FieldValue.serverTimestamp(),
+        'closedAt': null,
+        'closingBalance': null,
+        'expectedBalance': null,
+        'expectedCashBalance': null,
+        'closedBy': null,
+        'notes': notes ?? '',
+        'date': today,
+        // Session metrics (populated at close time)
+        'totalOrders': 0,
+        'totalCancelled': 0,
+        'totalCashSales': 0.0,
+        'totalCardSales': 0.0,
+        'totalOnlineSales': 0.0,
+        'totalRefunds': 0.0,
+        'sessionDurationMinutes': 0,
+        'isForceClosed': false,
+        'overriddenBy': null,
+        'activeOrdersAtClose': 0,
+      });
     });
 
     return PosRegisterSession(
       id: docRef.id,
-      branchId: branchId,
+      branchIds: [branchId],
       openedBy: openedBy,
       openingBalance: openingBalance,
       openedAt: now,
@@ -243,8 +299,7 @@ class PosRegisterService {
         .collection(AppConstants.collectionOrders)
         .where('branchIds', arrayContains: branchId)
         .where('timestamp',
-            isGreaterThan:
-                DateTime.now().subtract(const Duration(hours: 24)))
+            isGreaterThan: DateTime.now().subtract(const Duration(hours: 24)))
         .where('status', whereIn: [
           AppConstants.statusPending,
           AppConstants.statusPreparing,
@@ -325,8 +380,7 @@ class PosRegisterService {
         }
       } else {
         // Fallback: use paymentMethod field + totalAmount
-        final method =
-            (data['paymentMethod'] ?? '').toString().toLowerCase();
+        final method = (data['paymentMethod'] ?? '').toString().toLowerCase();
         final amount = (data['totalAmount'] as num?)?.toDouble() ?? 0.0;
         final isPaid = ['paid', 'delivered', 'collected'].contains(status);
         if (isPaid) {
@@ -368,7 +422,8 @@ class PosRegisterService {
     }
   }
 
-  /// Close the register session with enriched metrics
+  /// INDUSTRY GRADE: Close the register session with transaction guard.
+  /// Verifies the session is still open before closing to prevent double-close.
   Future<void> closeRegister({
     required String sessionId,
     required double closingBalance,
@@ -381,31 +436,57 @@ class PosRegisterService {
     int activeOrdersAtClose = 0,
     int sessionDurationMinutes = 0,
   }) async {
-    final updateData = <String, dynamic>{
-      'closedAt': FieldValue.serverTimestamp(),
-      'closingBalance': closingBalance,
-      'expectedBalance': expectedBalance,
-      'closedBy': closedBy,
-      'notes': notes ?? '',
-      'isForceClosed': isForceClosed,
-      'activeOrdersAtClose': activeOrdersAtClose,
-      'sessionDurationMinutes': sessionDurationMinutes,
-    };
+    final docRef = _db.collection('pos_registers').doc(sessionId);
 
-    if (overriddenBy != null) {
-      updateData['overriddenBy'] = overriddenBy;
-    }
+    await _db.runTransaction<void>((transaction) async {
+      // GUARD: Read the doc first to verify it's still open
+      final snap = await transaction.get(docRef);
+      if (!snap.exists) {
+        throw Exception('Register session not found. It may have been deleted.');
+      }
+      final data = snap.data()!;
+      if (data['closedAt'] != null) {
+        final closedBy = data['closedBy']?.toString() ?? 'another user';
+        throw Exception(
+            'This register was already closed by $closedBy. '
+            'Refresh the POS to see the latest state.');
+      }
 
-    if (metrics != null) {
-      updateData['totalOrders'] = metrics.totalOrders;
-      updateData['totalCancelled'] = metrics.totalCancelled;
-      updateData['totalCashSales'] = metrics.totalCashSales;
-      updateData['totalCardSales'] = metrics.totalCardSales;
-      updateData['totalOnlineSales'] = metrics.totalOnlineSales;
-      updateData['totalRefunds'] = metrics.totalRefunds;
-    }
+      // INDUSTRY GRADE: Compute expected cash separately
+      // Cash in drawer = opening + cash sales (card/online never enters the till)
+      final openingBalance =
+          (data['openingBalance'] as num?)?.toDouble() ?? 0.0;
+      final expectedCashBalance = metrics != null
+          ? _round(openingBalance + metrics.totalCashSales)
+          : expectedBalance;
 
-    await _db.collection('pos_registers').doc(sessionId).update(updateData);
+      final updateData = <String, dynamic>{
+        'closedAt': FieldValue.serverTimestamp(),
+        'closingBalance': closingBalance,
+        'expectedBalance': expectedBalance,
+        'expectedCashBalance': expectedCashBalance,
+        'closedBy': closedBy,
+        'notes': notes ?? '',
+        'isForceClosed': isForceClosed,
+        'activeOrdersAtClose': activeOrdersAtClose,
+        'sessionDurationMinutes': sessionDurationMinutes,
+      };
+
+      if (overriddenBy != null) {
+        updateData['overriddenBy'] = overriddenBy;
+      }
+
+      if (metrics != null) {
+        updateData['totalOrders'] = metrics.totalOrders;
+        updateData['totalCancelled'] = metrics.totalCancelled;
+        updateData['totalCashSales'] = metrics.totalCashSales;
+        updateData['totalCardSales'] = metrics.totalCardSales;
+        updateData['totalOnlineSales'] = metrics.totalOnlineSales;
+        updateData['totalRefunds'] = metrics.totalRefunds;
+      }
+
+      transaction.update(docRef, updateData);
+    });
   }
 
   /// Calculate total sales for a session (Paid orders only) — legacy method
@@ -415,8 +496,7 @@ class PosRegisterService {
         .where('branchIds', arrayContains: branchId)
         .where('timestamp',
             isGreaterThanOrEqualTo: Timestamp.fromDate(openedAt))
-        .where('status', whereIn: ['paid', 'delivered', 'collected'])
-        .get();
+        .where('status', whereIn: ['paid', 'delivered', 'collected']).get();
 
     double total = 0;
     for (final doc in snap.docs) {
@@ -437,7 +517,7 @@ class PosRegisterService {
 
     final query = await _db
         .collection('pos_registers')
-        .where('branchId', whereIn: branchIds.take(10).toList())
+        .where('branchIds', arrayContainsAny: branchIds.take(10).toList())
         .where('openedAt',
             isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
         .where('openedAt',
@@ -458,4 +538,32 @@ class PosRegisterService {
   }
 
   static double _round(double v) => double.parse(v.toStringAsFixed(2));
+
+  /// User-friendly error messages for register operations.
+  static String displayError(dynamic error) {
+    if (error == null) return 'Unknown error';
+    final raw = error.toString().trim();
+    const prefix = 'Exception: ';
+    final message = raw.startsWith(prefix)
+        ? raw.substring(prefix.length).trim()
+        : raw;
+    final normalized = message.toLowerCase();
+
+    if (normalized.contains('already open') ||
+        normalized.contains('already closed')) {
+      return message;
+    }
+    if (normalized.contains('permission-denied') ||
+        normalized.contains('missing or insufficient permissions')) {
+      return 'Permission denied. Please contact your administrator.';
+    }
+    if (normalized.contains('not found') ||
+        normalized.contains('no document to update')) {
+      return 'Register session not found. Please refresh and try again.';
+    }
+    if (normalized.contains('network') || normalized.contains('timeout')) {
+      return 'Network error. Please check your connection and try again.';
+    }
+    return message;
+  }
 }

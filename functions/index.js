@@ -31,7 +31,7 @@ const KITCHEN_TASK_HANDLER_URL = process.env.KITCHEN_TASK_HANDLER_URL || `https:
 const SERVICE_ACCOUNT_EMAIL = process.env.SERVICE_ACCOUNT_EMAIL || `${GCP_PROJECT_ID}@appspot.gserviceaccount.com`;
 
 // --- RIDER ASSIGNMENT LIMITS (Production Safeguards) ---
-const MAX_TRIED_RIDERS = parseInt(process.env.MAX_TRIED_RIDERS, 10) || 10;  // Max riders to try before manual assignment
+const MAX_TRIED_RIDERS = parseInt(process.env.MAX_TRIED_RIDERS, 10) || 5;  // Max riders to try before manual assignment
 const MAX_WORKFLOW_MINUTES = parseInt(process.env.MAX_WORKFLOW_MINUTES, 10) || 30;  // Max time for entire assignment workflow
 const MAX_SEARCH_RETRIES = parseInt(process.env.MAX_SEARCH_RETRIES, 10) || 5;  // Max retries when no riders available
 
@@ -98,7 +98,8 @@ function normalizeStatus(status) {
     return status;
 }
 
-// Helper to check if status is terminal
+// Helper to check if status is terminal (order lifecycle is complete)
+// NOTE: pickedUp is NOT terminal - rider is still en route with the food
 function isTerminalStatus(status) {
     const normalized = normalizeStatus(status);
     return [
@@ -106,8 +107,16 @@ function isTerminalStatus(status) {
         STATUS.CANCELLED,
         STATUS.PAID,      // Terminal for takeaway/dine-in
         STATUS.COLLECTED, // Terminal for pickup
+    ].includes(normalized);
+}
+
+// Helper to check if an assignment workflow should stop for this status.
+// This includes terminal statuses PLUS statuses where a rider is actively working.
+function isAssignmentTerminalStatus(status) {
+    const normalized = normalizeStatus(status);
+    return isTerminalStatus(normalized) || [
+        STATUS.PICKED_UP,
         'pickedup',
-        STATUS.PICKED_UP
     ].includes(normalized);
 }
 
@@ -208,14 +217,14 @@ async function scheduleKitchenResponseTimeoutTask(orderId, data) {
  * =============================================================================
  * Triggered when an order moves to 'preparing' status OR when admin manually
  * triggers auto-assignment by setting 'autoAssignStarted' timestamp.
- * 
+ *
  * FLOW:
  * 1. Validate order is delivery type and needs a rider
  * 2. Find nearest available rider (isAvailable=true, status='online')
  * 3. Lock rider atomically (set isAvailable=false)
  * 4. Send FCM notification
  * 5. Schedule 120s timeout task
- * 
+ *
  * ERROR HANDLING:
  * - All error paths unlock any locked rider
  * - Falls back to manual assignment if workflow fails
@@ -230,9 +239,9 @@ exports.startAssignmentWorkflowV2 = onDocumentUpdated(
 
         // --- GUARD 1: Only Delivery Orders ---
         const rawOrderType = afterData.Order_type || afterData.orderType || '';
-        const orderType = rawOrderType.toLowerCase().trim();
+        const orderType = normalizeOrderType(rawOrderType);
 
-        if (orderType !== 'delivery') {
+        if (orderType !== ORDER_TYPE.DELIVERY) {
             return null;
         }
 
@@ -244,6 +253,11 @@ exports.startAssignmentWorkflowV2 = onDocumentUpdated(
 
         // --- GUARD 3: Already has rider ---
         if (afterData.riderId && afterData.riderId !== '') {
+            return null;
+        }
+
+        // --- GUARD 4: Skip Cloud Function self-writes (prevents re-trigger loop) ---
+        if (afterData._cloudFunctionUpdate === true) {
             return null;
         }
 
@@ -308,8 +322,28 @@ exports.startAssignmentWorkflowV2 = onDocumentUpdated(
             const nextRider = await findNextRider(null, orderId, targetBranchId);
 
             if (!nextRider) {
-                logger.warn(`[${orderId}] ❌ No available riders found in branch ${targetBranchId}`);
-                return markOrderForManualAssignment(orderId, 'No available riders found');
+                logger.warn(`[${orderId}] ❌ No riders available right now in branch ${targetBranchId}. Starting search retry workflow.`);
+
+                await db.collection('rider_assignments').doc(orderId).set({
+                    orderId: orderId,
+                    branchId: targetBranchId,
+                    riderId: 'RETRY_SEARCH',
+                    status: 'searching',
+                    triedRiders: [],
+                    createdAt: FieldValue.serverTimestamp(),
+                    workflowStartedAt: FieldValue.serverTimestamp(),
+                    retryCount: 0,
+                    notificationSent: false,
+                });
+
+                logAssignmentEvent(orderId, 'retry_search', {
+                    branchId: targetBranchId,
+                    reason: 'No riders immediately available',
+                    retryCount: 0,
+                });
+
+                await createAssignmentTask(orderId, 'RETRY_SEARCH', 5); // Min 5s delay to prevent burst
+                return null;
             }
 
             logger.log(`[${orderId}] 👤 Found nearest rider: ${nextRider.riderId} (distance: ${nextRider.distance?.toFixed(2) || 'N/A'}km)`);
@@ -318,7 +352,7 @@ exports.startAssignmentWorkflowV2 = onDocumentUpdated(
             // STEP 4: ATOMIC TRANSACTION - Create assignment + Lock rider
             // ============================================================
             const transactionResult = await db.runTransaction(async (transaction) => {
-                const riderRef = db.collection('Drivers').doc(nextRider.riderId);
+                const riderRef = db.collection('staff').doc(nextRider.riderId);
                 const assignRef = db.collection('rider_assignments').doc(orderId);
 
                 const riderDoc = await transaction.get(riderRef);
@@ -335,6 +369,10 @@ exports.startAssignmentWorkflowV2 = onDocumentUpdated(
                 }
                 if (riderData.status !== 'online') {
                     return { success: false, reason: `status=${riderData.status}` };
+                }
+                // CONCURRENT ASSIGNMENT GUARD: Prevent locking if rider is already evaluating an offer
+                if (riderData.currentOfferOrderId && riderData.currentOfferOrderId !== orderId) {
+                    return { success: false, reason: `already evaluating offer: ${riderData.currentOfferOrderId}` };
                 }
 
                 // Create assignment record
@@ -371,8 +409,10 @@ exports.startAssignmentWorkflowV2 = onDocumentUpdated(
                     riderId: 'RETRY_SEARCH',
                     status: 'searching',
                     triedRiders: [nextRider.riderId],
+                    createdAt: FieldValue.serverTimestamp(), // BUG FIX #6: Was missing, needed for cleanup queries
                     workflowStartedAt: FieldValue.serverTimestamp(),
                     retryCount: 0,
+                    notificationSent: false,
                 });
                 await createAssignmentTask(orderId, 'RETRY_SEARCH', 2); // Retry in 2 seconds
                 return null;
@@ -405,13 +445,31 @@ exports.startAssignmentWorkflowV2 = onDocumentUpdated(
             logger.log(`[${orderId}] ✅ Assignment workflow started. Rider ${lockedRiderId} has ${ASSIGNMENT_TIMEOUT_SECONDS}s to respond.`);
 
             // ============================================================
-            // STEP 7: UI SYNC - Ensure 'autoAssignStarted' is set
+            // STEP 7: LOG ASSIGNMENT EVENTS (fire-and-forget)
             // ============================================================
-            // If triggered by status change (not manual button), the UI needs this flag
+            const riderName = await resolveRiderName(lockedRiderId);
+            logAssignmentEvent(orderId, 'workflow_started', {
+                branchId: targetBranchId,
+                trigger: statusBecamePreparing ? 'status_change' : 'manual',
+            });
+            logAssignmentEvent(orderId, 'rider_offered', {
+                riderId: lockedRiderId,
+                riderName,
+                attemptNumber: 1,
+                distance: nextRider.distance?.toFixed(2) || 'N/A',
+                timeoutSeconds: ASSIGNMENT_TIMEOUT_SECONDS,
+            });
+
+            // ============================================================
+            // STEP 8: UI SYNC - Ensure 'autoAssignStarted' is set
+            // ============================================================
+            // BUG FIX #1: Add _cloudFunctionUpdate flag to prevent this write from
+            // re-triggering startAssignmentWorkflowV2 as a false `manualTrigger`.
             if (!manualTrigger && !afterData.autoAssignStarted) {
                 await db.collection('Orders').doc(orderId).update({
                     'autoAssignStarted': FieldValue.serverTimestamp(),
-                    'lastAssignmentUpdate': FieldValue.serverTimestamp()
+                    'lastAssignmentUpdate': FieldValue.serverTimestamp(),
+                    '_cloudFunctionUpdate': true,
                 });
                 logger.log(`[${orderId}] 🔄 Synced autoAssignStarted flag for UI`);
             }
@@ -450,12 +508,13 @@ exports.handleOrderCancellation = onDocumentUpdated(
         const beforeStatus = normalizeStatus(beforeData.status);
         const afterStatus = normalizeStatus(afterData.status);
 
-        // Only trigger if status just became terminal (cancelled, delivered, etc.)
-        const wasTerminal = isTerminalStatus(beforeStatus);
-        const nowTerminal = isTerminalStatus(afterStatus);
+        // Only trigger if status just became assignment-terminal
+        // (cancelled, delivered, pickedUp, paid, collected)
+        const wasTerminal = isAssignmentTerminalStatus(beforeStatus);
+        const nowTerminal = isAssignmentTerminalStatus(afterStatus);
 
         if (wasTerminal || !nowTerminal) {
-            return null; // Already terminal or not becoming terminal
+            return null; // Already terminal or not becoming assignment-terminal
         }
 
         logger.log(`[${orderId}] 🛑 Order became terminal (${beforeStatus} → ${afterStatus}). Cleaning up assignment...`);
@@ -482,7 +541,7 @@ exports.handleOrderCancellation = onDocumentUpdated(
 
             // Unlock the rider if they were waiting for this order
             if (riderId && riderId !== 'RETRY_SEARCH') {
-                await db.collection('Drivers').doc(riderId).update({
+                await db.collection('staff').doc(riderId).update({
                     'isAvailable': true,
                     'status': 'online',
                     'currentOfferOrderId': FieldValue.delete(),
@@ -870,43 +929,10 @@ exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, 
     };
 
     // ===============================================================
-    // SECURITY: OIDC Token Verification for Cloud Tasks
+    // SECURITY: OIDC Token Verification (BUG FIX #9: Use shared helper)
     // ===============================================================
-    const authHeader = req.headers.authorization || '';
-
-    if (!authHeader.startsWith('Bearer ')) {
-        // Only allow unauthenticated requests in emulator mode
-        if (process.env.FUNCTIONS_EMULATOR === 'true') {
-            logger.warn('⚠️ [DEV] processAssignmentTask called without auth in emulator');
-        } else {
-            // PRODUCTION: Reject unauthenticated requests
-            logger.error('🔒 SECURITY: Unauthorized access attempt to processAssignmentTask', {
-                ip: req.ip || req.headers['x-forwarded-for'],
-                userAgent: req.headers['user-agent'],
-            });
-            return res.status(401).json({
-                error: 'Unauthorized',
-                message: 'Authentication required'
-            });
-        }
-    } else {
-        // Verify the OIDC token is from our service account
-        // The token is automatically verified by Cloud Functions when using OIDC
-        // But we can add additional checks here for extra security
-        const token = authHeader.substring(7); // Remove 'Bearer '
-
-        // Basic token format validation (JWT has 3 parts separated by dots)
-        if (token.split('.').length !== 3) {
-            logger.error('🔒 SECURITY: Invalid token format');
-            return res.status(401).json({
-                error: 'Unauthorized',
-                message: 'Invalid authentication token format'
-            });
-        }
-
-        // Note: Full OIDC verification is handled by Cloud Functions infrastructure
-        // when using oidcToken in Cloud Tasks. The token audience is verified automatically.
-        logger.log('✅ Request authenticated via OIDC token');
+    if (!validateTaskAuth(req, res, 'processAssignmentTask')) {
+        return; // Response already sent by validateTaskAuth
     }
 
     // ===============================================================
@@ -938,8 +964,8 @@ exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, 
 
         // EDGE CASE: If order was cancelled, picked up, or manually overridden, stop searching
         const orderStatus = orderDoc.exists ? normalizeStatus(orderDoc.data().status) : null;
-        if (!orderDoc.exists || isTerminalStatus(orderStatus)) {
-            logger.log(`[${sanitizedOrderId}] Order is terminal or missing. Cleaning up assignment.`);
+        if (!orderDoc.exists || isAssignmentTerminalStatus(orderStatus)) {
+            logger.log(`[${sanitizedOrderId}] Order is terminal/assigned or missing. Cleaning up assignment.`);
             if (assignDoc.exists) await assignRef.delete();
             return res.status(200).json({ message: 'Order Terminal or Finished' });
         }
@@ -989,7 +1015,7 @@ exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, 
             if (nextRider) {
                 // FOUND RIDER! Use atomic transaction to lock
                 const riderLocked = await db.runTransaction(async (transaction) => {
-                    const riderRef = db.collection('Drivers').doc(nextRider.riderId);
+                    const riderRef = db.collection('staff').doc(nextRider.riderId);
                     const riderDoc = await transaction.get(riderRef);
 
                     if (!riderDoc.exists) return false;
@@ -1021,7 +1047,7 @@ exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, 
 
                 if (!riderLocked) {
                     // Rider was grabbed, try again immediately
-                    await createAssignmentTask(sanitizedOrderId, 'RETRY_SEARCH', 0);
+                    await createAssignmentTask(sanitizedOrderId, 'RETRY_SEARCH', 2); // Min 2s delay
                     return res.status(200).json({ message: 'Rider unavailable, retrying...' });
                 }
 
@@ -1063,6 +1089,13 @@ exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, 
 
         logger.log(`[${sanitizedOrderId}] Rider ${sanitizedRiderId} timed out. Finding next available...`);
 
+        // 📝 Log timeout event
+        logAssignmentEvent(sanitizedOrderId, 'rider_timeout', {
+            riderId: sanitizedRiderId,
+            riderName: await resolveRiderName(sanitizedRiderId),
+            attemptNumber: triedCount,
+        });
+
         // 🔓 UNLOCK THE TIMED-OUT RIDER using the helper function
         await unlockRider(sanitizedRiderId, sanitizedOrderId);
 
@@ -1076,14 +1109,19 @@ exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, 
         if (!nextRider) {
             // No more riders - move to manual assignment
             logger.warn(`[${sanitizedOrderId}] No more riders available. Moving to manual assignment.`);
-            await markOrderForManualAssignment(sanitizedOrderId, 'All available riders exhausted');
+            logAssignmentEvent(sanitizedOrderId, 'moved_to_manual', {
+                reason: 'All available riders exhausted',
+                totalAttempts: triedCount,
+            });
+            // BUG FIX #8: skipAssignmentCleanup=true because we'll delete the doc ourselves
+            await markOrderForManualAssignment(sanitizedOrderId, 'All available riders exhausted', null, true);
             await assignRef.delete();
             return res.status(200).json({ message: 'Riders Exhausted - Manual Assignment' });
         }
 
         // Use atomic transaction to lock the new rider
         const riderLocked = await db.runTransaction(async (transaction) => {
-            const riderRef = db.collection('Drivers').doc(nextRider.riderId);
+            const riderRef = db.collection('staff').doc(nextRider.riderId);
             const riderDoc = await transaction.get(riderRef);
 
             if (!riderDoc.exists) return false;
@@ -1115,7 +1153,7 @@ exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, 
 
         if (!riderLocked) {
             // Rider was grabbed by another order, retry immediately
-            await createAssignmentTask(sanitizedOrderId, 'RETRY_SEARCH', 0);
+            await createAssignmentTask(sanitizedOrderId, 'RETRY_SEARCH', 2); // Min 2s delay
             return res.status(200).json({ message: 'Rider unavailable, retrying...' });
         }
 
@@ -1130,6 +1168,16 @@ exports.processAssignmentTask = onRequest({ region: GCP_LOCATION }, async (req, 
         await createAssignmentTask(sanitizedOrderId, nextRider.riderId, ASSIGNMENT_TIMEOUT_SECONDS);
 
         logger.log(`[${sanitizedOrderId}] ✅ Retrying with rider ${nextRider.riderId} (try ${triedCount + 1}/${MAX_TRIED_RIDERS}) - locked and notified`);
+
+        // 📝 Log new rider offer event
+        logAssignmentEvent(sanitizedOrderId, 'rider_offered', {
+            riderId: nextRider.riderId,
+            riderName: await resolveRiderName(nextRider.riderId),
+            attemptNumber: triedCount + 1,
+            distance: nextRider.distance?.toFixed(2) || 'N/A',
+            timeoutSeconds: ASSIGNMENT_TIMEOUT_SECONDS,
+        });
+
         return res.status(200).json({ message: 'Retrying with next rider' });
 
     } catch (err) {
@@ -1172,9 +1220,15 @@ exports.handleRiderAcceptance = onDocumentUpdated(
         if (afterData.status === 'rejected') {
             logger.log(`[${orderId}] 🚫 Rider ${riderId} REJECTED assignment`);
 
+            // 📝 Log rejection event
+            logAssignmentEvent(orderId, 'rider_rejected', {
+                riderId,
+                riderName: await resolveRiderName(riderId),
+            });
+
             try {
                 // Step 1: Unlock the rider immediately (NOT in transaction - we want this fast)
-                await db.collection('Drivers').doc(riderId).update({
+                await db.collection('staff').doc(riderId).update({
                     'isAvailable': true,
                     'status': 'online',
                     'currentOfferOrderId': FieldValue.delete()
@@ -1194,14 +1248,14 @@ exports.handleRiderAcceptance = onDocumentUpdated(
                 });
 
                 // Step 3: IMMEDIATELY trigger search for next rider
-                await createAssignmentTask(orderId, 'RETRY_SEARCH', 0);
+                await createAssignmentTask(orderId, 'RETRY_SEARCH', 2); // Min 2s delay
                 logger.log(`[${orderId}] ⚡ Triggered immediate retry for next rider`);
 
             } catch (err) {
                 logger.error(`[${orderId}] Error handling rejection:`, err);
                 // Even if there's an error, try to trigger the retry
                 try {
-                    await createAssignmentTask(orderId, 'RETRY_SEARCH', 0);
+                    await createAssignmentTask(orderId, 'RETRY_SEARCH', 2); // Min 2s delay
                 } catch (retryErr) {
                     logger.error(`[${orderId}] Failed to create retry task:`, retryErr);
                 }
@@ -1219,7 +1273,7 @@ exports.handleRiderAcceptance = onDocumentUpdated(
             try {
                 await db.runTransaction(async (transaction) => {
                     const orderRef = db.collection('Orders').doc(orderId);
-                    const riderRef = db.collection('Drivers').doc(riderId);
+                    const riderRef = db.collection('staff').doc(riderId);
 
                     const orderDoc = await transaction.get(orderRef);
 
@@ -1271,11 +1325,31 @@ exports.handleRiderAcceptance = onDocumentUpdated(
                 });
 
                 // Clean up assignment record after successful acceptance
+                // NOTE: We keep the events subcollection for audit even after deleting parent
                 await event.data.after.ref.delete();
                 logger.log(`[${orderId}] ✅ Rider acceptance completed - assignment record deleted`);
 
+                // 📝 Log acceptance event (fire-and-forget, won't block)
+                logAssignmentEvent(orderId, 'rider_accepted', {
+                    riderId,
+                    riderName: await resolveRiderName(riderId),
+                });
+
             } catch (err) {
                 logger.error(`[${orderId}] Error in handleRiderAcceptance:`, err);
+
+                // BUG FIX #4: Unlock rider on acceptance failure to prevent permanent lock
+                // This handles cases like "Already Assigned" or "Order was cancelled"
+                try {
+                    await db.collection('staff').doc(riderId).update({
+                        'isAvailable': true,
+                        'status': 'online',
+                        'currentOfferOrderId': FieldValue.delete()
+                    });
+                    logger.log(`[${orderId}] 🔓 Unlocked rider ${riderId} after acceptance error`);
+                } catch (unlockErr) {
+                    logger.warn(`[${orderId}] Failed to unlock rider ${riderId} after error: ${unlockErr.message}`);
+                }
             }
 
             return null;
@@ -1311,58 +1385,19 @@ exports.sendManualAssignmentNotification = onDocumentUpdated(
             return null;
         }
 
-        // Condition 2: Ignore if this update was driven by our Auto-Assignment Cloud Function
-        // (The auto-assignment system updates riderId when a rider accepts)
-        // We can check if `autoAssignStarted` was deleted in the same update (sign of auto-accept)
-        // OR check if a recent `rider_assignments` doc existed.
-        // But simpler: The auto-assign system logs 'Rider accepted'.
-        // Let's look for the standard manual assignment pattern: Admin changes field.
+        // BUG FIX #3: Detect auto-assignment acceptance and skip notification.
+        // When handleRiderAcceptance sets riderId, it also deletes autoAssignStarted
+        // in the same transaction. So: beforeData HAD autoAssignStarted, afterData does NOT.
+        // This is the definitive signature of an auto-accepted order.
+        const wasAutoAssigning = !!beforeData.autoAssignStarted;
+        const autoAssignRemoved = wasAutoAssigning && !afterData.autoAssignStarted;
 
-        // If the 'timestamps.riderAssigned' is exactly same as 'lastAssignmentUpdate' (set by auto system)?
-        // No, unreliable.
-
-        // BEST CHECK: If there is an ACTIVE rider_assignment doc for this order, 
-        // it means the system is managing it. If the admin overrides it, they might not delete that doc?
-        // Actually, if the Admin manually assigns, they usually pick from a list.
-
-        // Let's follow the user's specific request logic:
-        // "Detects when an order becomes assigned (riderId changed) and sends a notification"
-        // We just need to filter out the double-notify if we already sent an "Offer".
-        // But "Offer" != "Assignment".
-        // "Offer" = "Please accept". "Assignment" = "You HAVE this order".
-        // If rider accepts an offer, they know they have it.
-        // If Admin assigns, the rider didn't accept yet, so they NEED to know.
+        if (autoAssignRemoved) {
+            logger.log(`[${orderId}] ⏩ Skipping manual FCM: rider ${newRider} accepted via auto-assignment`);
+            return null;
+        }
 
         try {
-            // Check if we just processed a rider acceptance in the last few seconds
-            // This is a heuristic: if we have a recent 'timestamps.riderAssigned' and no 'assignmentNotes' indicating manual...
-            // Actually, let's use a simpler heuristic:
-            // If the `rider_assignments` doc was just deleted in `handleRiderAcceptance`, we can't see it now.
-
-            // Let's rely on the notification content difference.
-            // Manual = "You've been assigned!"
-            // Auto = "New Order Offer!" (sent earlier)
-
-            // If the rider accepted the offer, they don't need a "You've been assigned" alert.
-            // How to detect "Rider Accepted"?
-            // We can look at `afterData.status`. If it went to `rider_assigned` from `preparing`?
-            // Manual assignment also does that.
-
-            // Let's check `_cloudFunctionUpdate` flag? No, `handleRiderAcceptance` doesn't set it.
-            // WE SHOULD ADD A CHECK: If the riderId matches the one in `rider_assignments` (accepted status)?
-            // But that doc is deleted.
-
-            // OK, User's code didn't have special filters. I will implement a check:
-            // If the `assignmentNotes` says "Manually assigned" or similar?
-            // Or just check if `autoAssignStarted` existed before?
-
-            // Safe bet: Notify ONLY if it looks like a manual intervention.
-            // If `beforeData.riderId` was empty and `afterData.riderId` is set...
-            // AND `timestamps.riderAssigned` is new.
-
-            // Let's just implement the requested logic and try to avoid loop.
-            // Use a helper that ensures we don't spam.
-
             logger.log(`[${orderId}] 👮 Manual Assignment Detect: ${prevRider} -> ${newRider}`);
 
             await sendManualAssignmentFCM(newRider, orderId);
@@ -1380,7 +1415,7 @@ exports.sendManualAssignmentNotification = onDocumentUpdated(
  */
 async function sendManualAssignmentFCM(riderId, orderId) {
     try {
-        const driverDoc = await db.collection('Drivers').doc(riderId).get();
+        const driverDoc = await db.collection('staff').doc(riderId).get();
         if (!driverDoc.exists) return;
 
         const fcmToken = driverDoc.data().fcmToken;
@@ -1440,7 +1475,7 @@ async function sendManualAssignmentFCM(riderId, orderId) {
 async function unlockRider(riderId, orderId) {
     if (!riderId || riderId === 'RETRY_SEARCH') return;
     try {
-        await db.collection('Drivers').doc(riderId).update({
+        await db.collection('staff').doc(riderId).update({
             'isAvailable': true,
             'status': 'online',
             'currentOfferOrderId': FieldValue.delete()
@@ -1453,20 +1488,58 @@ async function unlockRider(riderId, orderId) {
 }
 
 /**
+ * Log an assignment event to the audit trail subcollection.
+ * Events are fire-and-forget — failures are logged but never block the main workflow.
+ *
+ * @param {string} orderId - The order document ID
+ * @param {string} eventType - One of: 'workflow_started', 'rider_offered', 'rider_timeout',
+ *                             'rider_rejected', 'rider_accepted', 'retry_search', 'moved_to_manual'
+ * @param {object} details - Event-specific metadata
+ */
+async function logAssignmentEvent(orderId, eventType, details = {}) {
+    try {
+        await db.collection('rider_assignments').doc(orderId)
+            .collection('events').add({
+                type: eventType,
+                timestamp: FieldValue.serverTimestamp(),
+                ...details,
+            });
+    } catch (err) {
+        // Fire-and-forget: never block the main workflow for logging failures
+        logger.warn(`[${orderId}] Failed to log assignment event '${eventType}': ${err.message}`);
+    }
+}
+
+/**
+ * Resolve rider name from staff doc for event logging.
+ * Returns the riderId on any failure to avoid blocking.
+ */
+async function resolveRiderName(riderId) {
+    try {
+        const doc = await db.collection('staff').doc(riderId).get();
+        return doc.exists ? (doc.data().name || riderId) : riderId;
+    } catch {
+        return riderId;
+    }
+}
+
+/**
  * Move order to manual assignment and clean up any pending assignment state.
  * ALWAYS unlocks the pending rider before transitioning.
  * @param {string} orderId - The order ID
  * @param {string} reason - Reason for moving to manual
  * @param {string|null} riderToUnlock - Specific rider to unlock (optional)
+ * @param {boolean} skipAssignmentCleanup - If true, skip deleting the assignment doc
+ *   (caller will handle it). Prevents double-delete when caller also deletes.
  */
-async function markOrderForManualAssignment(orderId, reason, riderToUnlock = null) {
+async function markOrderForManualAssignment(orderId, reason, riderToUnlock = null, skipAssignmentCleanup = false) {
     logger.warn(`[${orderId}] Moving to manual assignment. Reason: ${reason}`);
     try {
         // Step 1: Unlock any pending rider first
         if (riderToUnlock) {
             await unlockRider(riderToUnlock, orderId);
-        } else {
-            // Try to get rider from assignment record
+        } else if (!skipAssignmentCleanup) {
+            // Only fetch and clean assignment record if caller hasn't opted out
             try {
                 const assignDoc = await db.collection('rider_assignments').doc(orderId).get();
                 if (assignDoc.exists) {
@@ -1501,15 +1574,15 @@ async function findNextRider(assignmentData, orderId, branchId) {
     logger.log(`[${orderId}] findNextRider called. BranchId: ${branchId}, Already tried: ${JSON.stringify(triedRiders)}`);
 
     try {
-        // Fetch branch location - FAIL SAFE if missing
+        // Fetch branch location. If branch metadata is missing, continue
+        // because riders can still be matched by branchIds/currentLocation.
         const branchDoc = await db.collection('Branch').doc(branchId).get();
-        if (!branchDoc.exists) {
-            logger.error(`[${orderId}] ❌ Branch ${branchId} not found in database`);
-            return null;
-        }
+        const branchData = branchDoc.exists ? branchDoc.data() : {};
+        const branchLoc = branchData.location || null;
 
-        const branchData = branchDoc.data();
-        const branchLoc = branchData.location;
+        if (!branchDoc.exists) {
+            logger.warn(`[${orderId}] ⚠️ Branch ${branchId} not found in database. Continuing rider search without branch distance origin.`);
+        }
 
         // Log branch data for debugging
         if (!branchLoc) {
@@ -1518,12 +1591,16 @@ async function findNextRider(assignmentData, orderId, branchId) {
             logger.log(`[${orderId}] Branch location: lat=${branchLoc.latitude}, lng=${branchLoc.longitude}`);
         }
 
-        // PRIMARY QUERY: Available + Online + Branch
+        // PRIMARY QUERY: Available + Online + Branch + staffType=driver
         // STRICT: Only riders who are BOTH isAvailable=true AND status='online'
-        logger.log(`[${orderId}] 🔍 Searching for riders: isAvailable=true, status=online, branchIds contains ${branchId}`);
-        let driversSnapshot;
+        // CRITICAL FIX: Queries 'staff' collection (where all rider data lives) with staffType filter
+        logger.log(`[${orderId}] 🔍 Searching for riders in staff: staffType=driver, isAvailable=true, status=online, branchIds contains ${branchId}`);
+        let candidateDocs = [];
+        let usedFallbackQuery = false;
+        let relaxedBranchScope = false;
         try {
-            driversSnapshot = await db.collection('Drivers')
+            const driversSnapshot = await db.collection('staff')
+                .where('staffType', '==', 'driver')
                 .where('isAvailable', '==', true)
                 .where('status', '==', 'online')
                 .where('branchIds', 'array-contains', branchId)
@@ -1531,28 +1608,74 @@ async function findNextRider(assignmentData, orderId, branchId) {
                 .get();
 
             logger.log(`[${orderId}] Primary query returned ${driversSnapshot.size} riders`);
+            candidateDocs = driversSnapshot.docs;
         } catch (queryError) {
-            // If query fails (usually missing composite index), log error and return null
-            // DO NOT fall back to ignoring status - only online riders should get offers
-            logger.error(`[${orderId}] ❌ Query failed (check Firestore indexes): ${queryError.message}`);
-            logger.error(`[${orderId}] Required index: Drivers(isAvailable ASC, status ASC, branchIds ARRAY)`);
-            return null;
+            // Graceful fallback: query branch-scoped staff with lighter indexes,
+            // then enforce rider availability rules in memory.
+            logger.warn(`[${orderId}] Primary rider query failed, falling back to in-memory filtering: ${queryError.message}`);
+            logger.warn(`[${orderId}] Expected index: staff(staffType ASC, isAvailable ASC, status ASC, branchIds ARRAY)`);
         }
 
-        // NOTE: We intentionally do NOT have a fallback that ignores status='online'
-        // Only riders who are explicitly ONLINE should receive order offers
+        if (candidateDocs.length === 0) {
+            usedFallbackQuery = true;
+            const fallbackDocsById = new Map();
 
-        // FALLBACK 2: If still no results, check if ANY riders exist for this branch
-        if (driversSnapshot.empty) {
+            try {
+                const branchScopedSnapshot = await db.collection('staff')
+                    .where('branchIds', 'array-contains', branchId)
+                    .limit(30)
+                    .get();
+                branchScopedSnapshot.docs.forEach((doc) => fallbackDocsById.set(doc.id, doc));
+                logger.log(`[${orderId}] Branch-scoped fallback returned ${branchScopedSnapshot.size} staff docs`);
+            } catch (branchQueryError) {
+                logger.warn(`[${orderId}] BranchIds fallback query failed: ${branchQueryError.message}`);
+            }
+
+            try {
+                const legacyBranchSnapshot = await db.collection('staff')
+                    .where('branchId', '==', branchId)
+                    .limit(30)
+                    .get();
+                legacyBranchSnapshot.docs.forEach((doc) => fallbackDocsById.set(doc.id, doc));
+                logger.log(`[${orderId}] Legacy branchId fallback returned ${legacyBranchSnapshot.size} staff docs`);
+            } catch (legacyQueryError) {
+                logger.warn(`[${orderId}] Legacy branchId fallback query failed: ${legacyQueryError.message}`);
+            }
+
+            candidateDocs = Array.from(fallbackDocsById.values());
+        }
+
+        if (candidateDocs.length === 0) {
+            relaxedBranchScope = true;
+            logger.warn(`[${orderId}] No riders matched branch "${branchId}" exactly. Falling back to all online available drivers and sorting by distance.`);
+
+            try {
+                const allAvailableDrivers = await db.collection('staff')
+                    .where('staffType', '==', 'driver')
+                    .where('isAvailable', '==', true)
+                    .where('status', '==', 'online')
+                    .limit(50)
+                    .get();
+
+                logger.log(`[${orderId}] All-driver fallback returned ${allAvailableDrivers.size} available drivers`);
+                candidateDocs = allAvailableDrivers.docs;
+            } catch (allDriverQueryError) {
+                logger.warn(`[${orderId}] All-driver fallback query failed: ${allDriverQueryError.message}`);
+            }
+        }
+
+        // DIAGNOSTIC: If no results, check if ANY riders exist for this branch
+        if (candidateDocs.length === 0) {
             logger.warn(`[${orderId}] ⚠️ No available riders. Checking if ANY riders exist for branch...`);
             try {
-                const allBranchRiders = await db.collection('Drivers')
+                const allBranchRiders = await db.collection('staff')
+                    .where('staffType', '==', 'driver')
                     .where('branchIds', 'array-contains', branchId)
                     .limit(5)
                     .get();
 
                 if (allBranchRiders.empty) {
-                    logger.error(`[${orderId}] ❌ No riders assigned to branch ${branchId} at all!`);
+                    logger.error(`[${orderId}] ❌ No riders (staffType=driver) assigned to branch ${branchId} at all!`);
                 } else {
                     logger.warn(`[${orderId}] Found ${allBranchRiders.size} riders for branch, but none are available/online:`);
                     allBranchRiders.forEach(doc => {
@@ -1570,14 +1693,64 @@ async function findNextRider(assignmentData, orderId, branchId) {
         const riders = [];
         const skippedRiders = [];
 
-        driversSnapshot.forEach(doc => {
+        candidateDocs.forEach(doc => {
+            const driverData = doc.data();
+
+            const branchIds = Array.isArray(driverData.branchIds) ? driverData.branchIds : [];
+            const normalizedBranchId = String(branchId).toLowerCase().replace(/[\s-]+/g, '_');
+            const normalizedDriverBranches = branchIds.map((id) =>
+                String(id).toLowerCase().replace(/[\s-]+/g, '_'));
+            const belongsToBranch = relaxedBranchScope ||
+                branchIds.includes(branchId) ||
+                normalizedDriverBranches.includes(normalizedBranchId) ||
+                driverData.branchId === branchId ||
+                String(driverData.branchId || '').toLowerCase().replace(/[\s-]+/g, '_') === normalizedBranchId;
+            const isDriver = driverData.staffType === 'driver' || driverData.role === 'driver';
+            const isOnline = driverData.status === 'online';
+            const isAvailable = driverData.isAvailable === true;
+            const hasConflictingOffer = driverData.currentOfferOrderId && driverData.currentOfferOrderId !== orderId;
+            const hasAssignedOrder = driverData.assignedOrderId && driverData.assignedOrderId !== '';
+
+            if (!belongsToBranch) {
+                skippedRiders.push({ id: doc.id, reason: 'outside branch scope' });
+                return;
+            }
+            if (!isDriver) {
+                skippedRiders.push({ id: doc.id, reason: 'not a driver' });
+                return;
+            }
+
             // Skip already tried riders
             if (triedRiders.includes(doc.id)) {
                 skippedRiders.push({ id: doc.id, reason: 'already tried' });
                 return;
             }
 
-            const driverData = doc.data();
+            // BUG FIX #5: ALWAYS apply availability + conflict checks regardless of query path.
+            // The primary Firestore query filters by isAvailable+status+staffType, but cannot
+            // filter by currentOfferOrderId or assignedOrderId. Those must be checked in code.
+            if (usedFallbackQuery) {
+                // Fallback results need ALL checks since the query was less restrictive
+                if (!isOnline) {
+                    skippedRiders.push({ id: doc.id, reason: `status=${driverData.status || 'unknown'}` });
+                    return;
+                }
+                if (!isAvailable) {
+                    skippedRiders.push({ id: doc.id, reason: `isAvailable=${driverData.isAvailable}` });
+                    return;
+                }
+            }
+
+            // These checks apply to ALL query paths (primary + fallback)
+            if (hasAssignedOrder) {
+                skippedRiders.push({ id: doc.id, reason: `assignedOrderId=${driverData.assignedOrderId}` });
+                return;
+            }
+            if (hasConflictingOffer) {
+                skippedRiders.push({ id: doc.id, reason: `currentOfferOrderId=${driverData.currentOfferOrderId}` });
+                return;
+            }
+
             const loc = driverData.currentLocation;
 
             // If branch has no location, we can't calculate distance - just add all riders
@@ -1598,7 +1771,7 @@ async function findNextRider(assignmentData, orderId, branchId) {
         });
 
         if (skippedRiders.length > 0) {
-            logger.log(`[${orderId}] Skipped ${skippedRiders.length} riders (already tried)`);
+            logger.log(`[${orderId}] Skipped ${skippedRiders.length} riders after eligibility checks`);
         }
 
         if (riders.length === 0) {
@@ -1679,15 +1852,6 @@ function _calculateDistance(lat1, lon1, lat2, lon2) {
 
 /**
  * PRODUCTION-GRADE FCM: Send Assignment Notification to Rider
- * Uses data-only payload to prevent duplicate notifications on Android/iOS.
- * Updates the `notificationSent` flag to track delivery status.
- * 
- * @param {string} riderId - The rider's document ID
- * @param {string} orderId - The order ID
- * @param {object} orderData - Order data for notification content
- */
-/**
- * PRODUCTION-GRADE FCM: Send Assignment Notification to Rider
  * Uses V1 API for reliable delivery.
  * Updates the `notificationSent` flag to track delivery status.
  * 
@@ -1709,7 +1873,7 @@ async function sendAssignmentFCM(riderId, orderId, orderData) {
             }
         }
 
-        const driverDoc = await db.collection('Drivers').doc(riderId).get();
+        const driverDoc = await db.collection('staff').doc(riderId).get();
 
         if (!driverDoc.exists) {
             logger.warn(`[${orderId}] ❌ Rider ${riderId} not found for FCM`);
@@ -1726,6 +1890,11 @@ async function sendAssignmentFCM(riderId, orderId, orderData) {
 
         logger.log(`[${orderId}] 🔹 Found FCM token for ${riderId}: ${fcmToken.substring(0, 10)}...`);
 
+        const assignData = assignDoc.exists ? assignDoc.data() : null;
+        const attemptNumber = assignData?.triedRiders?.length || 1;
+        const customerName = orderData?.customerName || 'Customer';
+        const orderTotal = `${orderData?.totalAmount || 0} ${orderData?.currency || 'QAR'}`;
+
         // V1 API PAYLOAD - PLATFORM SPECIFIC
         // Avoiding top-level 'notification' to ensure precise control and prevent duplicates
         const message = {
@@ -1733,10 +1902,12 @@ async function sendAssignmentFCM(riderId, orderId, orderData) {
             // Custom Data (Payload)
             data: {
                 type: 'auto_assignment',
-                title: '🚨 New Order Offer!',
-                body: `Tap quickly! You have 2 minutes to accept.`,
+                title: `🚨 Offer ${attemptNumber}: New Order!`,
+                body: `Tap quickly! You have 2 minutes to accept. ${orderTotal}`,
                 orderId: orderId,
                 timeoutSeconds: String(ASSIGNMENT_TIMEOUT_SECONDS),
+                attemptNumber: String(attemptNumber),
+                customerName: customerName,
                 click_action: 'FLUTTER_NOTIFICATION_CLICK', // For legacy listeners
                 priority: 'high',
                 content_available: 'true',
@@ -1746,8 +1917,8 @@ async function sendAssignmentFCM(riderId, orderId, orderData) {
             android: {
                 priority: 'high',
                 notification: {
-                    title: '🚨 New Order Offer!',
-                    body: `Tap quickly! You have 2 minutes to accept.`,
+                    title: `🚨 Offer ${attemptNumber}: New Order!`,
+                    body: `Tap quickly! You have 2 minutes to accept. ${orderTotal}`,
                     clickAction: 'FLUTTER_NOTIFICATION_CLICK', // RESTORED: Critical for routing
                     sound: 'default',
                     priority: 'high',
@@ -1795,7 +1966,7 @@ async function sendAssignmentFCM(riderId, orderId, orderData) {
             err.code === 'messaging/invalid-argument') {
             logger.warn(`[${orderId}] 🗑️ Removing invalid FCM token for rider ${riderId}`);
             try {
-                await db.collection('Drivers').doc(riderId).update({
+                await db.collection('staff').doc(riderId).update({
                     fcmToken: FieldValue.delete()
                 });
             } catch (e) {
@@ -1807,10 +1978,7 @@ async function sendAssignmentFCM(riderId, orderId, orderData) {
     }
 }
 
-// Keep the old function as an alias for backward compatibility
-async function sendRiderNotificationInternal(riderId, orderId, title, body) {
-    return sendAssignmentFCM(riderId, orderId, { Order_type: 'Delivery' });
-}
+// BUG FIX #11: Removed dead code sendRiderNotificationInternal (was never called)
 
 // --- STATUS TRANSITION VALIDATION ---
 
@@ -2100,7 +2268,7 @@ exports.sendRiderNotification = require("firebase-functions/v2/https").onCall(
         const sanitizedOrderId = orderId.replace(/[^A-Za-z0-9_-]/g, '');
 
         try {
-            const riderDoc = await db.collection('Drivers').doc(sanitizedRiderId).get();
+            const riderDoc = await db.collection('staff').doc(sanitizedRiderId).get();
             if (!riderDoc.exists) {
                 logger.warn(`Rider ${sanitizedRiderId} not found (called by ${callerEmail})`);
                 return { success: false, reason: 'Rider not found' };
@@ -2518,9 +2686,12 @@ exports.cleanupStaleAssignments = onSchedule("every 5 minutes", async (event) =>
 
         const cutoffTime = new Date(Date.now() - (MAX_WORKFLOW_MINUTES * 60 * 1000));
 
-        // Find stale assignments
+        // BUG FIX #7: Query workflowStartedAt instead of createdAt.
+        // createdAt resets every time a new rider is assigned, so a workflow
+        // cycling through 5 riders could have a recent createdAt and never be caught.
+        // workflowStartedAt is set once at workflow start and never updated.
         const staleAssignments = await db.collection('rider_assignments')
-            .where('createdAt', '<', cutoffTime)
+            .where('workflowStartedAt', '<', cutoffTime)
             .limit(50) // Process 50 at a time to avoid timeout
             .get();
 
@@ -2589,8 +2760,9 @@ exports.cleanupStuckRiders = onSchedule("every 10 minutes", async (event) => {
     try {
         logger.log('🔍 Checking for stuck riders...');
 
-        // Find riders who are unavailable but have a currentOfferOrderId
-        const stuckRiders = await db.collection('Drivers')
+        // Find riders (staffType=driver) who are unavailable but have a currentOfferOrderId
+        const stuckRiders = await db.collection('staff')
+            .where('staffType', '==', 'driver')
             .where('isAvailable', '==', false)
             .where('status', '==', 'online')
             .limit(50)
@@ -2609,9 +2781,45 @@ exports.cleanupStuckRiders = onSchedule("every 10 minutes", async (event) => {
             const offerOrderId = riderData.currentOfferOrderId;
             const assignedOrderId = riderData.assignedOrderId;
 
-            // If rider has an assigned order, they're legitimately busy
             if (assignedOrderId && assignedOrderId !== '') {
-                continue;
+                try {
+                    const assignedOrderDoc = await db.collection('Orders').doc(assignedOrderId).get();
+
+                    if (!assignedOrderDoc.exists) {
+                        await riderDoc.ref.update({
+                            'isAvailable': true,
+                            'assignedOrderId': FieldValue.delete(),
+                            'currentOfferOrderId': FieldValue.delete()
+                        });
+                        logger.log(`🔓 Unlocked rider ${riderId} - assigned order ${assignedOrderId} no longer exists`);
+                        unlockedCount++;
+                        continue;
+                    }
+
+                    const assignedOrderData = assignedOrderDoc.data();
+                    const assignedOrderStatus = normalizeStatus(assignedOrderData.status);
+                    const orderRiderId = assignedOrderData.riderId || '';
+
+                    if (isTerminalStatus(assignedOrderStatus) ||
+                        !orderRiderId ||
+                        orderRiderId !== riderId) {
+                        await riderDoc.ref.update({
+                            'isAvailable': true,
+                            'assignedOrderId': FieldValue.delete(),
+                            'currentOfferOrderId': FieldValue.delete(),
+                            'status': 'online'
+                        });
+                        logger.log(`🔓 Unlocked rider ${riderId} - stale assigned order ${assignedOrderId} (${assignedOrderStatus || 'missing_rider'})`);
+                        unlockedCount++;
+                        continue;
+                    }
+
+                    // Rider is still legitimately attached to a live order.
+                    continue;
+                } catch (assignedOrderErr) {
+                    logger.warn(`Failed to verify assigned order ${assignedOrderId} for rider ${riderId}: ${assignedOrderErr.message}`);
+                    continue;
+                }
             }
 
             // If rider has a current offer, check if the assignment is still active

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../main.dart';
 import '../../services/inventory/PurchaseOrderService.dart';
+import '../../services/ingredients/IngredientService.dart';
+import '../../Widgets/BarcodeScannerListener.dart';
 
 class ReceivePurchaseOrderScreen extends StatefulWidget {
   final Map<String, dynamic> purchaseOrder;
@@ -18,6 +20,7 @@ class _ReceivePurchaseOrderScreenState
   bool _serviceInitialized = false;
   final TextEditingController _notesCtrl = TextEditingController();
   final Map<int, TextEditingController> _receivedQtyCtrls = {};
+  final Map<int, FocusNode> _receivedQtyFocusNodes = {};
   final Map<int, TextEditingController> _discrepancyNoteCtrls = {};
   final Map<int, Set<String>> _discrepancyFlags = {};
   bool _isSaving = false;
@@ -42,6 +45,7 @@ class _ReceivePurchaseOrderScreenState
     for (int i = 0; i < _lineItems.length; i++) {
       final ordered = (_lineItems[i]['orderedQty'] as num?)?.toDouble() ?? 0.0;
       _receivedQtyCtrls[i] = TextEditingController(text: ordered.toString());
+      _receivedQtyFocusNodes[i] = FocusNode();
       _discrepancyNoteCtrls[i] = TextEditingController(
         text: (_lineItems[i]['discrepancyNote'] ?? '').toString(),
       );
@@ -57,6 +61,9 @@ class _ReceivePurchaseOrderScreenState
     for (final c in _receivedQtyCtrls.values) {
       c.dispose();
     }
+    for (final f in _receivedQtyFocusNodes.values) {
+      f.dispose();
+    }
     for (final c in _discrepancyNoteCtrls.values) {
       c.dispose();
     }
@@ -65,6 +72,7 @@ class _ReceivePurchaseOrderScreenState
 
   Widget _buildTextInput({
     required TextEditingController controller,
+    FocusNode? focusNode,
     required String label,
     IconData? icon,
     TextInputType? keyboardType,
@@ -74,6 +82,7 @@ class _ReceivePurchaseOrderScreenState
   }) {
     return TextFormField(
       controller: controller,
+      focusNode: focusNode,
       onChanged: onChanged,
       keyboardType: keyboardType,
       maxLines: maxLines,
@@ -106,10 +115,39 @@ class _ReceivePurchaseOrderScreenState
     );
   }
 
+  void _handleBarcodeScanned(String barcode) async {
+    final ingService = Provider.of<IngredientService>(context, listen: false);
+    final userScope = Provider.of<UserScopeService>(context, listen: false);
+    
+    final ingredient = await ingService.findByBarcode(barcode, userScope.branchIds);
+    if (!mounted) return;
+    
+    if (ingredient == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Scanned barcode not found in inventory'), backgroundColor: Colors.red));
+      return;
+    }
+    
+    // Find in line items
+    final index = _lineItems.indexWhere((item) => item['ingredientId'] == ingredient.id);
+    if (index != -1) {
+      final focusNode = _receivedQtyFocusNodes[index]!;
+      final ctrl = _receivedQtyCtrls[index]!;
+      
+      focusNode.requestFocus();
+      ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
+      
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Matched: ${ingredient.name}'), backgroundColor: Colors.green));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${ingredient.name} is not in this Purchase Order!'), backgroundColor: Colors.orange));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[50],
+    return BarcodeScannerListener(
+      onBarcodeScanned: _handleBarcodeScanned,
+      child: Scaffold(
+        backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text('Receive Purchase Order'),
         backgroundColor: Colors.white,
@@ -186,6 +224,7 @@ class _ReceivePurchaseOrderScreenState
                               width: 100,
                               child: _buildTextInput(
                                 controller: _receivedQtyCtrls[index]!,
+                                focusNode: _receivedQtyFocusNodes[index],
                                 label: 'Received',
                                 keyboardType: const TextInputType.numberWithOptions(
                                     decimal: true),
@@ -305,6 +344,7 @@ class _ReceivePurchaseOrderScreenState
           ),
         ],
       ),
+    ),
     );
   }
 

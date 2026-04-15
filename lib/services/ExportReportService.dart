@@ -33,6 +33,7 @@ class ExportReportService {
     List<Map<String, dynamic>> inventoryData = [];
     List<Map<String, dynamic>> staffData = [];
     Map<String, dynamic> promoData = {};
+    List<Map<String, dynamic>> expenseData = [];
 
     if (selectedSections.contains('profit_margin')) {
       marginData = await _fetchMenuItemsWithMargin(branchIds);
@@ -46,11 +47,14 @@ class ExportReportService {
     if (selectedSections.contains('promotions_performance')) {
       promoData = await _fetchPromotionsData(branchIds);
     }
+    if (selectedSections.contains('expense_summary')) {
+      expenseData = await _fetchExpenseData(dateRange, branchIds);
+    }
 
     if (format == 'pdf') {
-      await _generatePdf(context, orders, dateRange, selectedSections, branchFilter, branchIds, stats, marginData, inventoryData, staffData, promoData);
+      await _generatePdf(context, orders, dateRange, selectedSections, branchFilter, branchIds, stats, marginData, inventoryData, staffData, promoData, expenseData);
     } else {
-      await _generateExcel(orders, dateRange, selectedSections, branchFilter, branchIds, stats, marginData, inventoryData, staffData, promoData);
+      await _generateExcel(orders, dateRange, selectedSections, branchFilter, branchIds, stats, marginData, inventoryData, staffData, promoData, expenseData);
     }
   }
 
@@ -77,6 +81,46 @@ class ExportReportService {
       data['docId'] = d.id;
       return data;
     }).toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> _fetchExpenseData(DateTimeRange dateRange, List<String> branchIds) async {
+    try {
+      Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection(AppConstants.collectionExpenses);
+      
+      if (branchIds.isNotEmpty) {
+        query = query.where('branchIds', arrayContainsAny: branchIds);
+      }
+
+      final snap = await query.get();
+      final List<Map<String, dynamic>> result = [];
+
+      for (var doc in snap.docs) {
+        final data = doc.data();
+        final payments = data['paymentHistory'] as List? ?? [];
+        
+        for (var p in payments) {
+          if (p is Map<String, dynamic>) {
+            final ts = p['paidAt'] as Timestamp?;
+            if (ts != null) {
+              final paidAt = ts.toDate();
+              if (paidAt.isAfter(dateRange.start) && paidAt.isBefore(dateRange.end.add(const Duration(days: 1)))) {
+                result.add({
+                  'title': data['title'] ?? 'Unknown',
+                  'category': data['category'] ?? '-',
+                  'amount': (p['amount'] as num?)?.toDouble() ?? 0,
+                  'date': paidAt,
+                  'vendor': data['vendorName'] ?? '-',
+                });
+              }
+            }
+          }
+        }
+      }
+      return result;
+    } catch (e) {
+      debugPrint('Error fetching expenses: $e');
+      return [];
+    }
   }
 
   static Future<List<Map<String, dynamic>>> _fetchMenuItemsWithMargin(List<String> branchIds) async {
@@ -364,6 +408,7 @@ class ExportReportService {
     List<Map<String, dynamic>> inventoryData,
     List<Map<String, dynamic>> staffData,
     Map<String, dynamic> promoData,
+    List<Map<String, dynamic>> expenseData,
   ) async {
     final pdf = pw.Document();
     final dateFmt = DateFormat('MMM dd, yyyy');
@@ -416,7 +461,7 @@ class ExportReportService {
             style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey),
           ),
         ),
-        build: (ctx) => _buildPdfContent(selectedSections, stats, orders, branchFilter, marginData, inventoryData, staffData, promoData),
+        build: (ctx) => _buildPdfContent(selectedSections, stats, orders, branchFilter, marginData, inventoryData, staffData, promoData, expenseData),
       ),
     );
 
@@ -435,6 +480,7 @@ class ExportReportService {
     List<Map<String, dynamic>> inventoryData,
     List<Map<String, dynamic>> staffData,
     Map<String, dynamic> promoData,
+    List<Map<String, dynamic>> expenseData,
   ) {
     final widgets = <pw.Widget>[];
 
@@ -497,6 +543,11 @@ class ExportReportService {
 
     if (selectedSections.contains('promotions_performance')) {
       widgets.addAll(_buildPromotionsSection(promoData));
+      widgets.add(pw.SizedBox(height: 16));
+    }
+
+    if (selectedSections.contains('expense_summary')) {
+      widgets.addAll(_buildExpenseSection(expenseData));
       widgets.add(pw.SizedBox(height: 16));
     }
 
@@ -851,6 +902,54 @@ class ExportReportService {
     return type.replaceAll('_', ' ').split(' ').map((w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '').join(' ');
   }
 
+  static List<pw.Widget> _buildExpenseSection(List<Map<String, dynamic>> expenseData) {
+    if (expenseData.isEmpty) {
+      return [
+        _pdfSection('Expense Summary'),
+        pw.SizedBox(height: 8),
+        pw.Text('No expenses recorded for this period.', style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey600)),
+      ];
+    }
+
+    double totalExpenses = 0.0;
+    for (final e in expenseData) {
+      totalExpenses += (e['amount'] as double);
+    }
+
+    return [
+      _pdfSection('Expense Summary'),
+      pw.SizedBox(height: 8),
+      pw.Container(
+        padding: const pw.EdgeInsets.all(12),
+        decoration: pw.BoxDecoration(color: PdfColors.grey100, borderRadius: pw.BorderRadius.circular(6)),
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+          children: [
+            _pdfKpi('Total Paid', 'QAR ${totalExpenses.toStringAsFixed(2)}', PdfColors.red),
+            _pdfKpi('Total Entries', '${expenseData.length}', PdfColors.purple),
+          ],
+        ),
+      ),
+      pw.SizedBox(height: 8),
+      pw.Table.fromTextArray(
+        headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 9),
+        headerDecoration: const pw.BoxDecoration(color: PdfColors.deepPurple),
+        cellPadding: const pw.EdgeInsets.all(5),
+        cellStyle: const pw.TextStyle(fontSize: 9),
+        headers: ['Date', 'Title', 'Category', 'Vendor', 'Amount'],
+        data: expenseData.map((e) {
+          return [
+            DateFormat('MMM dd').format(e['date'] as DateTime),
+            e['title'].toString(),
+            e['category'].toString(),
+            e['vendor'].toString(),
+            'QAR ${(e['amount'] as double).toStringAsFixed(2)}',
+          ];
+        }).toList(),
+      ),
+    ];
+  }
+
   // ─── Excel Generation ───────────────────────────────────────
   static Future<void> _generateExcel(
     List<Map<String, dynamic>> orders,
@@ -863,6 +962,7 @@ class ExportReportService {
     List<Map<String, dynamic>> inventoryData,
     List<Map<String, dynamic>> staffData,
     Map<String, dynamic> promoData,
+    List<Map<String, dynamic>> expenseData,
   ) async {
     final excel = xl.Excel.createExcel();
     final dateFmt = DateFormat('MMM dd, yyyy');
@@ -994,6 +1094,21 @@ class ExportReportService {
       }
       for (final c in (promoData['coupons'] as List? ?? [])) {
         promoSheet.appendRow([xl.TextCellValue('Coupon'), xl.TextCellValue(c['code']), xl.TextCellValue('${c['value']} OFF, ${c['uses']} uses')]);
+      }
+    }
+
+    // Expenses
+    if (selectedSections.contains('expense_summary') && expenseData.isNotEmpty) {
+      final expSheet = excel['Expenses'];
+      expSheet.appendRow([xl.TextCellValue('Date'), xl.TextCellValue('Title'), xl.TextCellValue('Category'), xl.TextCellValue('Vendor'), xl.TextCellValue('Amount (QAR)')]);
+      for (final e in expenseData) {
+        expSheet.appendRow([
+          xl.TextCellValue(DateFormat('yyyy-MM-dd').format(e['date'] as DateTime)),
+          xl.TextCellValue(e['title'].toString()),
+          xl.TextCellValue(e['category'].toString()),
+          xl.TextCellValue(e['vendor'].toString()),
+          xl.DoubleCellValue(e['amount'] as double),
+        ]);
       }
     }
 

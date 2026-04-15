@@ -28,6 +28,29 @@ class OrderService {
     return const Stream.empty();
   }
 
+  /// Atomically increments and returns the next daily order number for a given branch.
+  /// Designed to be called when orders are created outside of the POS transaction
+  /// (e.g., manually via the Admin Dashboard).
+  static Future<int> getNextOrderNumber(String branchId) async {
+    final counterRef = FirebaseFirestore.instance
+        .collection(AppConstants.collectionOrderCounters)
+        .doc(branchId);
+
+    return FirebaseFirestore.instance.runTransaction((transaction) async {
+      final snap = await transaction.get(counterRef);
+      final currentOpt = snap.data()?['counter'] as int?;
+      final nextOrderNumber = (currentOpt ?? 0) + 1;
+      
+      transaction.set(
+        counterRef,
+        {'counter': nextOrderNumber},
+        SetOptions(merge: true),
+      );
+
+      return nextOrderNumber;
+    });
+  }
+
   /// Returns merged stream of order documents (handles both branchId and branchIds)
   /// Industry Grade: Added [activeOnly] flag to heavily reduce memory usage on POS/KDS devices
   Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> getOrdersStreamMerged({
@@ -332,11 +355,11 @@ class OrderService {
             }
 
             if (newStatus == AppConstants.statusPreparing && !isRecallToKitchen) {
-              final String orderType = (data['Order_type'] ?? data['orderType'] ?? '').toString().toLowerCase();
+              final String orderType = (data['Order_type'] ?? data['orderType'] ?? '').toString();
               final String? existingRiderId = data['riderId'];
               final bool hasAutoAssignStarted = data['autoAssignStarted'] != null;
 
-              if (orderType == 'delivery' && (existingRiderId == null || existingRiderId.isEmpty) && !hasAutoAssignStarted) {
+              if (AppConstants.isDeliveryOrder(orderType) && (existingRiderId == null || existingRiderId.isEmpty) && !hasAutoAssignStarted) {
                 updateData['autoAssignStarted'] = FieldValue.serverTimestamp();
                 updateData['lastAssignmentUpdate'] = FieldValue.serverTimestamp();
               }
@@ -391,7 +414,7 @@ class OrderService {
                 orderId: sanitizedOrderId,
                 branchIds: data['branchIds'] is List 
                     ? List<String>.from(data['branchIds']) 
-                    : [data['branchId']?.toString() ?? ''],
+                    : [],
                 recordedBy: sanitizedEmail,
               );
             }
@@ -489,7 +512,7 @@ class OrderService {
             orderId: sanitizedOrderId,
             branchIds: data['branchIds'] is List 
                 ? List<String>.from(data['branchIds']) 
-                : [data['branchId']?.toString() ?? ''],
+                : [],
             recordedBy: sanitizedEmail,
           );
         }
@@ -510,7 +533,7 @@ class OrderService {
         if (isDineIn && tableId.isNotEmpty) {
           final branchIds = finalData['branchIds'] is List 
               ? List<String>.from(finalData['branchIds']) 
-              : [finalData['branchId']?.toString() ?? ''];
+              : <String>[];
               
           // Trigger table cleanup (this checks if any other active orders exist on this table)
           await PosService.cleanupTableIfEmpty(

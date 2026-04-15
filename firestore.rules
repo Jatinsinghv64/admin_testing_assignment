@@ -11,10 +11,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Check if user is a rider/driver
     function isRider() {
       return isAuthenticated() && 
-        exists(/databases/$(database)/documents/Drivers/$(request.auth.uid));
+        exists(/databases/$(database)/documents/staff/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.staffType == 'driver';
     }
 
     // Check if user is staff member (supports Email or Phone document keys)
@@ -149,8 +149,8 @@ service cloud.firestore {
       allow update: if isAuthenticated() &&
         // Only the assigned rider can accept
         resource.data.riderId == request.auth.uid &&
-        // Can only change status to 'accepted'
-        request.resource.data.status == 'accepted' &&
+        // Can change status to 'accepted' or 'rejected'
+        request.resource.data.status in ['accepted', 'rejected'] &&
         // Cannot change other fields
         request.resource.data.orderId == resource.data.orderId &&
         request.resource.data.riderId == resource.data.riderId &&

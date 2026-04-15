@@ -58,7 +58,11 @@ class _PosScreenState extends State<PosScreen> {
   // ── Register Session ──
   final PosRegisterService _registerService = PosRegisterService();
   PosRegisterSession? _currentRegisterSession;
-  String? _lastRegisterBranchId;
+  /// True until the first register stream event fires — prevents the POS
+  /// from briefly flashing before we know whether the register is open.
+  bool _isRegisterLoading = true;
+  StreamSubscription<PosRegisterSession?>? _registerSubscription;
+  String? _activePosRegisterBranchId; // branch the subscription is tied to
 
   // ── Stream Caching ──
   Stream<QuerySnapshot>? _categoryStream;
@@ -74,10 +78,99 @@ class _PosScreenState extends State<PosScreen> {
 
   @override
   void dispose() {
+    _registerSubscription?.cancel();
     _kitchenCancellationSubscription?.cancel();
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Register Subscription Lifecycle
+  // Manages the Firestore stream for the active register session.
+  // Called from didChangeDependencies — safe lifecycle hook, never from build.
+  // ─────────────────────────────────────────────────────────────────────────
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final branchFilter =
+        Provider.of<BranchFilterService>(context, listen: false);
+    final globalBranchId = branchFilter.selectedBranchId;
+    final isSingleBranch = globalBranchId != null &&
+        globalBranchId != BranchFilterService.allBranchesValue;
+
+    if (isSingleBranch) {
+      // Sync PosService active branch without a postFrameCallback
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final pos = context.read<PosService>();
+        if (pos.activeBranchId != globalBranchId) {
+          pos.setActiveBranch(globalBranchId);
+        }
+      });
+      // Start (or reuse) the register subscription for this branch
+      if (_activePosRegisterBranchId != globalBranchId) {
+        _startRegisterSubscription(globalBranchId);
+      }
+    } else {
+      // No specific branch — tear down subscription
+      _cancelRegisterSubscription();
+    }
+  }
+
+  void _startRegisterSubscription(String branchId) {
+    _registerSubscription?.cancel();
+    _activePosRegisterBranchId = branchId;
+    // Reset state directly (build follows didChangeDependencies so no setState needed)
+    _isRegisterLoading = true;
+    _optedOutRegisterOpen = false;
+    _currentRegisterSession = null;
+
+    _registerSubscription =
+        _registerService.streamOpenSession(branchId).listen(
+      (session) {
+        if (!mounted) return;
+        final wasOpen = _currentRegisterSession != null;
+        final sessionIdChanged = _currentRegisterSession?.id != session?.id;
+        setState(() {
+          _isRegisterLoading = false;
+          _currentRegisterSession = session;
+        });
+        // Sync session ID to PosService
+        if (sessionIdChanged) {
+          context.read<PosService>().setRegisterSessionId(session?.id);
+        }
+        // If register closed unexpectedly, reset opt-out so overlay shows
+        if (wasOpen && session == null) {
+          setState(() => _optedOutRegisterOpen = false);
+          return;
+        }
+        // Auto-show open register dialog when no session and user hasn't dismissed
+        if (session == null && !_isRegisterDialogOpen && !_optedOutRegisterOpen) {
+          final userScope = context.read<UserScopeService>();
+          if (userScope.branchIds.length == 1) {
+            _showOpenRegisterDialog(context);
+          } else {
+            // Multi-branch users see the overlay and click the button themselves
+            setState(() => _optedOutRegisterOpen = true);
+          }
+        }
+      },
+      onError: (error) {
+        debugPrint('⚠️ POS: Register stream error: $error');
+        if (mounted) setState(() => _isRegisterLoading = false);
+      },
+    );
+  }
+
+  void _cancelRegisterSubscription() {
+    _registerSubscription?.cancel();
+    _registerSubscription = null;
+    _activePosRegisterBranchId = null;
+    // Direct field mutation is safe here because build() always follows
+    _isRegisterLoading = true;
+    _currentRegisterSession = null;
+    _optedOutRegisterOpen = false;
   }
 
   @override
@@ -279,7 +372,6 @@ class _PosScreenState extends State<PosScreen> {
         _categoryStream = FirebaseFirestore.instance
             .collection(AppConstants.collectionMenuCategories)
             .where('branchIds', arrayContainsAny: effectiveBranchIds)
-            .orderBy('name')
             .snapshots();
       } else {
         _categoryStream = null;
@@ -289,7 +381,15 @@ class _PosScreenState extends State<PosScreen> {
     return StreamBuilder<QuerySnapshot>(
         stream: _categoryStream ?? const Stream.empty(),
         builder: (context, catSnapshot) {
-          final categories = catSnapshot.data?.docs ?? [];
+          final rawCategories = catSnapshot.data?.docs ?? [];
+          // Sort client-side to avoid complex composite index requirements
+          final categories = List<QueryDocumentSnapshot>.from(rawCategories);
+          categories.sort((a, b) {
+            final nameA = (a.data() as Map<String, dynamic>)['name']?.toString() ?? '';
+            final nameB = (b.data() as Map<String, dynamic>)['name']?.toString() ?? '';
+            return nameA.toLowerCase().compareTo(nameB.toLowerCase());
+          });
+
           final Map<String, String> categoryMap = {
             for (var doc in categories)
               doc.id:
@@ -330,79 +430,38 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   // ── Branch Enforcement Wrapper ──────────────────────────────
+  // Pure display function — no state mutations, no callbacks.
+  // All register state is managed by the StreamSubscription in
+  // _startRegisterSubscription / _cancelRegisterSubscription.
   Widget _buildBranchCheckWrapper(
     BuildContext context,
     UserScopeService userScope,
     BranchFilterService branchFilter,
     Widget Function(String activeBranchId) builder,
   ) {
-    final pos = context.watch<PosService>();
-
     final globalBranchId = branchFilter.selectedBranchId;
 
-    // M6 FIX: Reset register opt-out when branch changes
-    if (_lastRegisterBranchId != globalBranchId) {
-      _lastRegisterBranchId = globalBranchId;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          setState(() {
-            _optedOutRegisterOpen = false;
-          });
-        }
-      });
+    // ① No specific branch selected — must pick one first
+    if (globalBranchId == null ||
+        globalBranchId == BranchFilterService.allBranchesValue) {
+      return _buildBranchSelectionRequired();
     }
 
-    // 1. If global filter is a SINGLE branch, sync and allow POS
-    if (globalBranchId != null &&
-        globalBranchId != BranchFilterService.allBranchesValue) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (pos.activeBranchId != globalBranchId) {
-          pos.setActiveBranch(globalBranchId);
-        }
-      });
-      // Wrap POS content with reactive register stream
-      return StreamBuilder<PosRegisterSession?>(
-        stream: _registerService.streamOpenSession(globalBranchId),
-        builder: (context, regSnapshot) {
-          // Update local session state reactively
-          final session = regSnapshot.data;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            if (_currentRegisterSession?.id != session?.id) {
-              setState(() => _currentRegisterSession = session);
-              // Sync register session ID to PosService for order attribution
-              final pos = context.read<PosService>();
-              pos.setRegisterSessionId(session?.id);
-            }
-            // Guard: only show if no register dialog (open or close) is already visible
-            if (regSnapshot.connectionState != ConnectionState.waiting &&
-                session == null &&
-                !_isRegisterDialogOpen &&
-                !_optedOutRegisterOpen) {
-              
-              // 🛠️ UX FIX: Only auto-pop register dialog if user has a single branch.
-              // If they have multiple, show the "Register Closed" overlay first
-              // so they can change branch in the top bar before opening.
-              final branches = userScope.branchIds;
-              if (branches.length == 1) {
-                _showOpenRegisterDialog(context);
-              } else {
-                // For super-admins/multi-branch users, don't auto-pop.
-                // They will see the overlay which has an "Open Register" button.
-                _optedOutRegisterOpen = true;
-              }
-            }
-          });
-          
-          if (session == null && _optedOutRegisterOpen) {
-            return _buildRegisterClosedOverlay();
-          }
-          return builder(globalBranchId);
-        },
-      );
+    // ② Register check in progress — show spinner (prevents POS flash)
+    if (_isRegisterLoading) {
+      return _buildRegisterCheckingLoader();
     }
 
-    // 2. Otherwise (All Branches or no selection), block POS with an overlay
+    // ③ Register is closed — show locked overlay
+    if (_currentRegisterSession == null) {
+      return _buildRegisterClosedOverlay();
+    }
+
+    // ④ Register is open — show POS
+    return builder(globalBranchId);
+  }
+
+  Widget _buildBranchSelectionRequired() {
     return Container(
       color: Colors.grey[100],
       child: Center(
@@ -451,8 +510,8 @@ class _PosScreenState extends State<PosScreen> {
                 decoration: BoxDecoration(
                   color: Colors.deepPurple.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(16),
-                  border:
-                      Border.all(color: Colors.deepPurple.withValues(alpha: 0.15)),
+                  border: Border.all(
+                      color: Colors.deepPurple.withValues(alpha: 0.15)),
                 ),
                 child: Row(
                   children: [
@@ -473,6 +532,36 @@ class _PosScreenState extends State<PosScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRegisterCheckingLoader() {
+    return Container(
+      color: Colors.grey[100],
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 40,
+              height: 40,
+              child: CircularProgressIndicator(
+                color: Colors.deepPurple,
+                strokeWidth: 3,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Checking register status…',
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -524,9 +613,7 @@ class _PosScreenState extends State<PosScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: () {
-                    setState(() => _optedOutRegisterOpen = false); // Will re-trigger StreamBuilder check
-                  },
+                  onPressed: () => _showOpenRegisterDialog(context),
                   icon: const Icon(Icons.lock_open),
                   label: const Text('Open Register Now', style: TextStyle(fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
@@ -747,7 +834,7 @@ class _PosScreenState extends State<PosScreen> {
     // ── Check if there are active ongoing orders that need completing ──
     List<String> activeOrderNumbers = [];
     try {
-      activeOrderNumbers = await _registerService.getActiveOrderIds(session.branchId);
+      activeOrderNumbers = await _registerService.getActiveOrderIds(session.branchIds.first);
     } catch (e) {
       debugPrint('Error checking ongoing orders: $e');
     }
@@ -779,8 +866,8 @@ class _PosScreenState extends State<PosScreen> {
     RegisterSessionMetrics? metrics;
     try {
       final results = await Future.wait([
-        _registerService.getSessionSales(session.branchId, session.openedAt),
-        _registerService.computeSessionMetrics(session.branchId, session.openedAt),
+        _registerService.getSessionSales(session.branchIds.first, session.openedAt),
+        _registerService.computeSessionMetrics(session.branchIds.first, session.openedAt),
       ]);
       totalSales = results[0] as double;
       metrics = results[1] as RegisterSessionMetrics;
@@ -1059,13 +1146,14 @@ class _PosScreenState extends State<PosScreen> {
 
       Query query = FirebaseFirestore.instance
           .collection(AppConstants.collectionMenuItems);
-      query = query.where('branchIds', arrayContainsAny: [activeBranchId]);
+      query = query.where('branchIds', arrayContains: activeBranchId);
 
       if (_selectedCategoryId != null) {
         query = query.where('categoryId', isEqualTo: _selectedCategoryId);
       }
 
-      query = query.orderBy('name');
+      // ORDER BY 'name' removed to avoid composite index requirements with branchIds + categoryId filters.
+      // We sort client-side in the StreamBuilder.
       _productStream = query.snapshots();
     }
 
@@ -1138,7 +1226,16 @@ class _PosScreenState extends State<PosScreen> {
           );
         }
 
-        var docs = snapshot.data!.docs;
+        var docs = List<QueryDocumentSnapshot>.from(snapshot.data!.docs);
+
+        // Sort client-side consistently to avoid index-related query failures
+        docs.sort((a, b) {
+          final dataA = a.data() as Map<String, dynamic>;
+          final dataB = b.data() as Map<String, dynamic>;
+          final nameA = (dataA['name'] ?? '').toString().toLowerCase();
+          final nameB = (dataB['name'] ?? '').toString().toLowerCase();
+          return nameA.compareTo(nameB);
+        });
 
         // Apply search filter client-side
         if (_searchQuery.isNotEmpty) {
@@ -1716,6 +1813,7 @@ class _PosScreenState extends State<PosScreen> {
           existingOrders: existingOrders,
           onPaymentComplete: (orderId) {
             if (orderId != null) {
+              if (!context.mounted) return;
               // Clear search and category filters upon success
               _searchController.clear();
               setState(() {

@@ -134,26 +134,28 @@ class OrderNotificationService with ChangeNotifier {
     return true;
   }
 
+  /// Clean up listeners when service is disposed
+  @override
+  void dispose() {
+    reset();
+    super.dispose();
+  }
+
+  /// ✅ NEW: Reset all session-specific state and listeners
   void reset() {
     debugPrint("🧹 Resetting OrderNotificationService...");
     _backupSubscription?.cancel();
     _backupSubscription = null;
-    _orderQueue.clear();
-    _isDialogOpen = false;
-    _currentOrderId = null;
-    _lastKnownBranchIds = [];
     if (_scopeService != null && _scopeListener != null) {
       _scopeService!.removeListener(_scopeListener!);
     }
     _scopeListener = null;
     _scopeService = null;
+    _lastKnownBranchIds = [];
+    _orderQueue.clear();
+    _currentOrderId = null;
+    _isDialogOpen = false;
     notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    reset();
-    super.dispose();
   }
 
   void _startBackupListener(UserScopeService scopeService) {

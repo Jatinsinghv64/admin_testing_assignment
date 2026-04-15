@@ -295,4 +295,12 @@ class CsvExportService {
         'Stock_Movements_${DateFormat('yyyyMMdd').format(DateTime.now())}.csv';
     await _exportAndShare(context, filename, rows);
   }
+
+  /// Export pre-built stocktake rows (with actual counts, variances, etc.)
+  static Future<void> exportStocktakeFromRows(
+      BuildContext context, List<List<dynamic>> rows) async {
+    final filename =
+        'Stocktake_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.csv';
+    await _exportAndShare(context, filename, rows);
+  }
 }

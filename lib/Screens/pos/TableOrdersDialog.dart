@@ -5,11 +5,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../main.dart';
-import '../../constants.dart';
-import '../../services/pos/pos_service.dart';
-import '../../services/pos/pos_models.dart';
-import '../../Widgets/PrintingService.dart';
+import '../../../../main.dart';
+import '../../../../constants.dart';
+import '../../../../services/pos/pos_service.dart';
+import '../../../../services/pos/pos_models.dart';
+import '../../../../Widgets/PrintingService.dart';
 import 'pos_payment_dialog.dart';
 
 class TableOrdersDialog extends StatelessWidget {
@@ -51,7 +51,7 @@ class TableOrdersDialog extends StatelessWidget {
   // ── Header ─────────────────────────────────────────────────────
   Widget _buildHeader(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: Colors.deepPurple.withValues(alpha: 0.04),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -65,17 +65,20 @@ class TableOrdersDialog extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
             ),
             child:
-                const Icon(Icons.table_bar, color: Colors.deepPurple, size: 24),
+                const Icon(Icons.table_bar, color: Colors.deepPurple, size: 22),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
+          // Table name + status — constrained so buttons can't push it off
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   tableName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 20,
+                    fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: Colors.black87,
                   ),
@@ -85,7 +88,7 @@ class TableOrdersDialog extends StatelessWidget {
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
+                          horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
                         color: Colors.red.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
@@ -93,7 +96,7 @@ class TableOrdersDialog extends StatelessWidget {
                       child: const Text(
                         'OCCUPIED',
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 9,
                           fontWeight: FontWeight.w700,
                           color: Colors.red,
                           letterSpacing: 0.5,
@@ -101,37 +104,102 @@ class TableOrdersDialog extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      'Active orders',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    // Guest Count display
+                    Consumer<PosService>(
+                      builder: (context, pos, _) {
+                        final count = pos.guestCount;
+                        if (count == null) return const SizedBox.shrink();
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.people_alt, size: 10, color: Colors.blue),
+                              const SizedBox(width: 4),
+                              Text(
+                                '$count Guests',
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.blue,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        'Active orders',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
               ],
             ),
           ),
-          // Add Items button
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(context); // close this dialog
-              onAddItems();
-            },
-            icon: const Icon(Icons.add_circle_outline, size: 18),
-            label: const Text('Add Items'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.deepPurple,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          const SizedBox(width: 8),
+          // ── Compact action buttons that won't overflow ──
+          // Transfer (icon + label on wider screens)
+          Tooltip(
+            message: 'Transfer Table',
+            child: OutlinedButton.icon(
+              onPressed: () => _showTransferDialog(context),
+              icon: const Icon(Icons.swap_horiz, size: 18, color: Colors.blueGrey),
+              label: const Text('Transfer',
+                  style: TextStyle(color: Colors.blueGrey, fontSize: 14, fontWeight: FontWeight.bold)),
+              style: OutlinedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                side: BorderSide(color: Colors.blueGrey.shade200),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
+          // Add Items
+          Tooltip(
+            message: 'Add Items to table',
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context); // close this dialog
+                onAddItems();
+              },
+              icon: const Icon(Icons.add_circle_outline, size: 18),
+              label: const Text('Add Items',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                elevation: 0,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          // Close
           IconButton(
             onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.close, color: Colors.grey),
+            icon: const Icon(Icons.close, color: Colors.grey, size: 20),
+            padding: const EdgeInsets.all(4),
+            constraints: const BoxConstraints(),
           ),
         ],
       ),
@@ -271,30 +339,37 @@ class TableOrdersDialog extends StatelessWidget {
         border: Border(top: BorderSide(color: Colors.grey[200]!)),
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20)),
       ),
-      child: Row(
+      child: Wrap(
+        alignment: WrapAlignment.end,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 12,
+        runSpacing: 12,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${orders.length} orders',
-                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-              ),
-              Text(
-                '${AppConstants.currencySymbol}${outstandingTotal.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
+          SizedBox(
+            width: 140,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${orders.length} orders',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                 ),
-              ),
-              Text(
-                outstandingTotal > 0.001
-                    ? 'Outstanding balance'
-                    : 'No payment due',
-                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-              ),
-            ],
+                Text(
+                  '${AppConstants.currencySymbol}${outstandingTotal.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                Text(
+                  outstandingTotal > 0.001
+                      ? 'Outstanding balance'
+                      : 'No payment due',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                ),
+              ],
+            ),
           ),
           const Spacer(),
           // Print Button
@@ -316,8 +391,7 @@ class TableOrdersDialog extends StatelessWidget {
                 ),
               ),
             ),
-          if (payableOrders.isNotEmpty) ...[
-            const SizedBox(width: 12),
+          if (payableOrders.isNotEmpty)
             SizedBox(
               height: 46,
               child: ElevatedButton.icon(
@@ -338,8 +412,6 @@ class TableOrdersDialog extends StatelessWidget {
                 ),
               ),
             ),
-          ],
-          const SizedBox(width: 12),
           // Complete Order & Free Table Button
           SizedBox(
             height: 46,
@@ -363,7 +435,7 @@ class TableOrdersDialog extends StatelessWidget {
                     },
               icon: const Icon(Icons.check_circle, size: 20),
               label: const Text(
-                'Complete & Free Table',
+                'Complete Table',
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
               ),
               style: ElevatedButton.styleFrom(
@@ -407,6 +479,16 @@ class TableOrdersDialog extends StatelessWidget {
   ) async {
     final posService = context.read<PosService>();
 
+    if (posService.cartItems.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot proceed with Pay All. Please clear your current POS cart first to avoid mixing items.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final result = await showDialog<PosPayment>(
       context: context,
       barrierDismissible: false,
@@ -421,7 +503,17 @@ class TableOrdersDialog extends StatelessWidget {
       ),
     );
 
-    if (result == null || !context.mounted) return; // User cancelled or unmounted
+    if (result == null || !context.mounted)
+      return; // User cancelled or unmounted
+
+    late final OverlayEntry loadingOverlay;
+    loadingOverlay = OverlayEntry(
+      builder: (_) => Container(
+        color: Colors.black54,
+        child: const Center(child: CircularProgressIndicator(color: Colors.deepPurple)),
+      ),
+    );
+    Overlay.of(context).insert(loadingOverlay);
 
     try {
       final userScope = context.read<UserScopeService>();
@@ -435,8 +527,6 @@ class TableOrdersDialog extends StatelessWidget {
 
       if (context.mounted) {
         Navigator.pop(context); // close table orders dialog
-
-        // Success feedback already shown by PosPaymentDialog via Snackbars
       }
     } catch (e) {
       final errorMessage = PosService.displayError(e);
@@ -448,7 +538,103 @@ class TableOrdersDialog extends StatelessWidget {
           ),
         );
       }
+    } finally {
+      if (loadingOverlay.mounted) {
+        loadingOverlay.remove();
+      }
     }
+  }
+
+  Future<void> _showTransferDialog(BuildContext context) async {
+    final snap = await FirebaseFirestore.instance.collection('Branch').doc(branchIds.first).get();
+    final tablesMap = snap.data()?['Tables'] as Map<String, dynamic>? ?? {};
+    final availableTables = tablesMap.entries.where((e) {
+      final status = e.value['status'] ?? 'available';
+      return status == 'available' && e.key != tableId;
+    }).toList();
+
+    if (availableTables.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No available tables to transfer to.'), backgroundColor: Colors.orange),
+        );
+      }
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Transfer to Table'),
+        content: SizedBox(
+          width: 300,
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: availableTables.length,
+            separatorBuilder: (_, __) => const Divider(),
+            itemBuilder: (ctx, i) {
+              final t = availableTables[i];
+              return ListTile(
+                title: Text(t.value['name'] ?? 'Unknown'),
+                onTap: () async {
+                  // Fetch all active orders for current table
+                  final ordersSnap = await FirebaseFirestore.instance
+                      .collection(AppConstants.collectionOrders)
+                      .where('branchIds', arrayContains: branchIds.first)
+                      .where('tableId', isEqualTo: tableId)
+                      .where('Order_type', isEqualTo: 'dine_in')
+                      .where('status', whereIn: [
+                        AppConstants.statusPending,
+                        AppConstants.statusPreparing,
+                        AppConstants.statusPrepared,
+                        AppConstants.statusServed,
+                      ])
+                      .get();
+
+                  final batch = FirebaseFirestore.instance.batch();
+                  for (final doc in ordersSnap.docs) {
+                    batch.update(doc.reference, {
+                      'tableId': t.key,
+                      'tableName': t.value['name'],
+                    });
+                  }
+
+                  // Update floor plan statuses
+                  batch.update(snap.reference, {
+                    'Tables.${t.key}.status': 'occupied',
+                    'Tables.$tableId.status': 'available', // old table goes back
+                  });
+
+                  await batch.commit();
+
+                  if (ctx.mounted) {
+                    // Pop the transfer picker dialog
+                    Navigator.pop(ctx);
+                    // Use microtask so the Navigator is fully unlocked before
+                    // popping the parent TableOrdersDialog — prevents
+                    // the `!_debugLocked` assertion crash on web/desktop.
+                    if (context.mounted) {
+                      Future.microtask(() {
+                        if (context.mounted) Navigator.pop(context);
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Transferred to ${t.value['name']}'),
+                          backgroundColor: Colors.green,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  }
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -699,8 +885,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
                 ),
                 const SizedBox(width: 4),
                 IconButton(
-                  onPressed: () =>
-                      _confirmRemoveItem(context, index),
+                  onPressed: () => _confirmRemoveItem(context, index),
                   icon: const Icon(Icons.delete_outline,
                       size: 16, color: Colors.redAccent),
                   tooltip: 'Remove Item',

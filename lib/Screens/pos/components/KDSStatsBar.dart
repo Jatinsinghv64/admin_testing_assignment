@@ -3,7 +3,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import '../../../constants.dart';
+import '../../../../../constants.dart';
 import 'kds_constants.dart';
 
 class KDSStatsBar extends StatelessWidget {
@@ -31,7 +31,8 @@ class KDSStatsBar extends StatelessWidget {
 
       if (status == AppConstants.statusPending) pending++;
       if (status == AppConstants.statusPreparing) preparing++;
-      if (status == AppConstants.statusPrepared || status == AppConstants.statusServed) ready++;
+      if (status == AppConstants.statusPrepared ||
+          status == AppConstants.statusServed) ready++;
 
       // Elapsed time
       final ts = data['timestamp'] as Timestamp?;
@@ -48,7 +49,8 @@ class KDSStatsBar extends StatelessWidget {
       bySource[source] = (bySource[source] ?? 0) + 1;
     }
 
-    final avgPrepTime = prepCount > 0 ? (totalPrepMinutes / prepCount).round() : 0;
+    final avgPrepTime =
+        prepCount > 0 ? (totalPrepMinutes / prepCount).round() : 0;
     final total = activeOrders.length;
 
     return Container(
@@ -56,7 +58,8 @@ class KDSStatsBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF16213e) : Colors.white,
         border: Border(
-          bottom: BorderSide(color: isDark ? Colors.white10 : Colors.grey[200]!),
+          bottom:
+              BorderSide(color: isDark ? Colors.white10 : Colors.grey[200]!),
         ),
       ),
       child: SingleChildScrollView(
@@ -80,7 +83,8 @@ class KDSStatsBar extends StatelessWidget {
             _buildStatChip('Avg Prep', '${avgPrepTime}m', Colors.teal),
             const SizedBox(width: 8),
             if (delayed > 0) ...[
-              _buildStatChip('Delayed', delayed.toString(), Colors.red, isAlert: true),
+              _buildStatChip('Delayed', delayed.toString(), Colors.red,
+                  isAlert: true),
               const SizedBox(width: 12),
             ],
             if (bySource.isNotEmpty) ...[
@@ -101,11 +105,14 @@ class KDSStatsBar extends StatelessWidget {
     );
   }
 
-  Widget _buildStatChip(String label, String value, Color color, {bool isAlert = false}) {
+  Widget _buildStatChip(String label, String value, Color color,
+      {bool isAlert = false}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: isAlert ? color.withValues(alpha: 0.15) : color.withValues(alpha: 0.08),
+        color: isAlert
+            ? color.withValues(alpha: 0.15)
+            : color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
         border: isAlert ? Border.all(color: color, width: 1.5) : null,
       ),

@@ -2,22 +2,24 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../Models/IngredientModel.dart';
 import '../services/ingredients/IngredientService.dart';
+import 'BarcodeScannerListener.dart';
 
 class IngredientFormSheet extends StatefulWidget {
   final IngredientModel? existing;
   final List<String> branchIds;
   final IngredientService service;
+  final String? prefilledBarcode;
 
   const IngredientFormSheet({
     super.key,
     required this.existing,
     required this.branchIds,
     required this.service,
+    this.prefilledBarcode,
   });
 
   @override
@@ -58,7 +60,7 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
     _minThresholdCtr.text = e != null ? e.getMinThreshold(targetBranch).toString() : '';
     _shelfLifeCtr.text = e?.shelfLifeDays?.toString() ?? '';
     _skuCtr.text = e?.sku ?? '';
-    _barcodeCtr.text = e?.barcode ?? '';
+    _barcodeCtr.text = e?.barcode ?? widget.prefilledBarcode ?? '';
 
     // Fix for assertion error: value must be in items. 
     // If the database has an unknown value like "Burger", we fallback to "other".
@@ -112,7 +114,7 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
     setState(() => _isLoading = true);
 
     try {
-      final String docId = widget.existing?.id ?? FirebaseFirestore.instance.collection('ingredients').doc().id;
+      final String docId = widget.existing?.id ?? _nameCtr.text.trim();
       final String? finalImageUrl = await _uploadImage(docId);
 
       final now = DateTime.now();
@@ -207,17 +209,36 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.only(
-        left: 24,
-        right: 24,
-        top: 24,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+    return BarcodeScannerListener(
+      onBarcodeScanned: (barcode) async {
+        if (!mounted) return;
+        final existingIngredient = await widget.service.findByBarcode(barcode, widget.branchIds);
+        if (existingIngredient != null && existingIngredient.id != widget.existing?.id) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Barcode already assigned to: ${existingIngredient.name}'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        } else {
+          setState(() {
+            _barcodeCtr.text = barcode;
+          });
+        }
+      },
+      child: Container(
+        padding: EdgeInsets.only(
+          left: 24,
+          right: 24,
+          top: 24,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
       child: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -272,6 +293,7 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
                   Expanded(
                     child: TextFormField(
                       controller: _barcodeCtr,
+                      readOnly: widget.prefilledBarcode != null,
                       decoration: InputDecoration(
                         labelText: 'Barcode (Optional)',
                         prefixIcon: const Icon(Icons.qr_code_2),
@@ -459,6 +481,7 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
           ),
         ),
       ),
+    ),
     );
   }
 }

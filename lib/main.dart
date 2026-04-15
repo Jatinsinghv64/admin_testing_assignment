@@ -10,9 +10,9 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_app_check/firebase_app_check.dart'; // ✅ App Check for security
-import 'Screens/ConnectionUtils.dart';
-import 'Screens/MainScreen.dart';
-import 'Screens/SplashScreen.dart';
+import 'Screens/core/ConnectionUtils.dart';
+import 'Screens/core/MainScreen.dart';
+import 'Screens/core/SplashScreen.dart';
 import 'Widgets/Authorization.dart';
 import 'Widgets/RestaurantStatusService.dart';
 import 'Widgets/notification.dart';
@@ -29,6 +29,11 @@ import 'Widgets/BranchFilterService.dart'; // ✅ Branch filter for multi-branch
 import 'services/DashboardThemeService.dart'; // ✅ Added for Dashboard Dark/Light Theme
 import 'services/pos/pos_service.dart';
 import 'services/staff/staff_service.dart';
+import 'services/ai/ai_cache_service.dart';
+import 'services/ai/gemini_service.dart';
+import 'services/ai/ai_data_fetcher.dart';
+import 'services/ai/ai_insights_service.dart';
+import 'services/expenses/expense_service.dart'; // ✅ Added
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -124,7 +129,8 @@ void main() async {
           );
           debugPrint('✅ [DIAGNOSTIC] Firebase App Check initialized');
         } else {
-          debugPrint('ℹ️ [DIAGNOSTIC] App Check skipped for Web (needs ReCaptcha configuration)');
+          debugPrint(
+              'ℹ️ [DIAGNOSTIC] App Check skipped for Web (needs ReCaptcha configuration)');
         }
       } catch (e) {
         debugPrint('⚠️ [DIAGNOSTIC] App Check not configured: $e');
@@ -173,6 +179,9 @@ class MyApp extends StatelessWidget {
         Provider<InventoryService>(create: (_) => InventoryService()),
         Provider<PurchaseOrderService>(create: (_) => PurchaseOrderService()),
         Provider<WasteService>(create: (_) => WasteService()),
+        ChangeNotifierProvider<ExpenseService>(
+          create: (_) => ExpenseService(),
+        ),
         ChangeNotifierProvider<UserScopeService>(
           create: (_) => UserScopeService(),
         ),
@@ -200,6 +209,13 @@ class MyApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<PosService>(create: (_) => PosService()),
         Provider<StaffService>(create: (_) => StaffService()),
+        ChangeNotifierProvider<AIInsightsService>(
+          create: (_) => AIInsightsService(
+            geminiService: GeminiService(),
+            cacheService: AICacheService(),
+            dataFetcher: AIDataFetcher(),
+          ),
+        ),
       ],
       child: MaterialApp(
         navigatorKey: navigatorKey,
@@ -269,6 +285,7 @@ class ScopeLoader extends StatefulWidget {
 
 class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
   bool _showPermissionBanner = false;
+  bool _isPermissionBannerDismissed = false;
 
   @override
   void initState() {
@@ -352,6 +369,8 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     if (mounted) {
       setState(() {
         _showPermissionBanner = !status.isGranted;
+        if (status.isGranted)
+          _isPermissionBannerDismissed = false; // Reset on fix
       });
     }
   }
@@ -361,6 +380,8 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     if (mounted) {
       setState(() {
         _showPermissionBanner = !status.isGranted;
+        if (status.isGranted)
+          _isPermissionBannerDismissed = false; // Reset on fix
       });
     }
   }
@@ -388,6 +409,16 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
               visualDensity: VisualDensity.compact,
             ),
             child: const Text("Enable"),
+          ),
+          IconButton(
+            onPressed: () {
+              setState(() {
+                _isPermissionBannerDismissed = true;
+              });
+            },
+            icon: const Icon(Icons.close, size: 18, color: Colors.grey),
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Dismiss',
           ),
         ],
       ),
@@ -425,7 +456,7 @@ class _ScopeLoaderState extends State<ScopeLoader> with WidgetsBindingObserver {
     return Scaffold(
       body: Column(
         children: [
-          if (_showPermissionBanner)
+          if (_showPermissionBanner && !_isPermissionBannerDismissed)
             SafeArea(bottom: false, child: _buildPermissionBanner()),
           const Expanded(child: HomeScreen()),
         ],
@@ -458,7 +489,8 @@ class UserScopeService with ChangeNotifier {
   /// Normalized check for super_admin role
   bool _isSuperAdminRole(String? role) {
     if (role == null) return false;
-    final r = role.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+    final r =
+        role.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
     return r == 'super_admin' || r == 'superadmin';
   }
 
@@ -514,23 +546,25 @@ class UserScopeService with ChangeNotifier {
     }
   }
 
-  /// Internal method to apply data from staff document, 
+  /// Internal method to apply data from staff document,
   /// handling SuperAdmin branch expansion.
-  Future<void> _applyData(Map<String, dynamic>? data, {bool notify = true}) async {
+  Future<void> _applyData(Map<String, dynamic>? data,
+      {bool notify = true}) async {
     if (data == null) return;
 
     _role = data['role'] as String? ?? 'unknown';
     _permissions = Map<String, bool>.from(data['permissions'] ?? {});
-    
-    final List<String> explicitBranchIds = 
+
+    final List<String> explicitBranchIds =
         List<String>.from(data['branchIds'] ?? []).toSet().toList();
 
     if (_isSuperAdminRole(_role)) {
       try {
         // Super Admins should have access to ALL branches
-        final branchesSnap = await _db.collection(AppConstants.collectionBranch).get();
+        final branchesSnap =
+            await _db.collection(AppConstants.collectionBranch).get();
         final allIds = branchesSnap.docs.map((doc) => doc.id).toSet();
-        
+
         // Combine explicitly assigned with all available
         final combined = explicitBranchIds.toSet()..addAll(allIds);
         _branchIds = combined.toList();
@@ -545,14 +579,15 @@ class UserScopeService with ChangeNotifier {
     if (notify) notifyListeners();
   }
 
-  void _handleScopeUpdate(DocumentSnapshot snapshot, AuthService authService) async {
+  void _handleScopeUpdate(
+      DocumentSnapshot snapshot, AuthService authService) async {
     if (!snapshot.exists) {
       _isAccountMissing = true;
       _isLoaded = false;
       notifyListeners();
       return;
     }
-    
+
     final data = snapshot.data() as Map<String, dynamic>?;
     if (data?['isActive'] != true) {
       _isAccountMissing = true;

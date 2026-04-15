@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../main.dart';
 import '../../constants.dart';
+import '../../Widgets/BranchFilterService.dart';
 import '../../services/pos/pos_service.dart';
 import '../../services/pos/pos_models.dart';
 import '../../Widgets/PrintingService.dart';
@@ -318,15 +319,15 @@ class _PosCartPanelState extends State<PosCartPanel> {
               borderRadius: BorderRadius.circular(8),
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: pos.selectedTableId != null
-                      ? Colors.deepPurple.withValues(alpha: 0.1)
+                      ? Colors.red.withValues(alpha: 0.1)
                       : Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: pos.selectedTableId != null
-                        ? Colors.deepPurple.withValues(alpha: 0.3)
+                        ? Colors.red.withValues(alpha: 0.3)
                         : Colors.orange.withValues(alpha: 0.3),
                   ),
                 ),
@@ -335,19 +336,21 @@ class _PosCartPanelState extends State<PosCartPanel> {
                   children: [
                     Icon(
                       Icons.table_bar,
-                      size: 14,
+                      size: pos.selectedTableId != null ? 18 : 14,
                       color: pos.selectedTableId != null
-                          ? Colors.deepPurple
+                          ? Colors.red
                           : Colors.orange,
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 6),
                     Text(
-                      pos.selectedTableName ?? 'Select Table',
+                      pos.selectedTableName != null
+                          ? 'Taking Order for ${pos.selectedTableName}${pos.guestCount != null && pos.guestCount! > 0 ? ' (${pos.guestCount} Guests)' : ''}'
+                          : 'Select Table',
                       style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                        fontSize: pos.selectedTableId != null ? 14 : 12,
+                        fontWeight: FontWeight.bold,
                         color: pos.selectedTableId != null
-                            ? Colors.deepPurple
+                            ? Colors.red
                             : Colors.orange,
                       ),
                     ),
@@ -766,17 +769,100 @@ class _PosCartPanelState extends State<PosCartPanel> {
     );
   }
 
-  void _showTableSelector(BuildContext context, PosService pos) {
-    final activeBranchId = pos.activeBranchId ?? '';
+  Future<void> _showTableSelector(BuildContext context, PosService pos) async {
+    final userScope = context.read<UserScopeService>();
+    final branchFilter = context.read<BranchFilterService>();
+    final visibleBranchIds =
+        branchFilter.getFilterBranchIds(userScope.branchIds);
+    String? activeBranchId = pos.activeBranchId;
+
+    if (activeBranchId == null || activeBranchId.isEmpty) {
+      if (visibleBranchIds.length == 1) {
+        activeBranchId = visibleBranchIds.first;
+      } else if (visibleBranchIds.length > 1) {
+        activeBranchId = await _pickPosBranch(context, visibleBranchIds);
+      }
+    }
+
+    if (!context.mounted) return;
+    if (activeBranchId == null || activeBranchId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select a branch before choosing a table.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    final resolvedBranchId = activeBranchId;
+
+    if (pos.activeBranchId != resolvedBranchId) {
+      pos.setActiveBranch(resolvedBranchId);
+    }
+
     showDialog(
       context: context,
       builder: (dialogContext) => ChangeNotifierProvider.value(
         value: pos,
         child: _FloorPlanDialog(
-          onSelect: (tableId, tableName) {
-            pos.loadTableContext(tableId, tableName,
-                branchIds: [activeBranchId]);
-            Navigator.pop(dialogContext);
+          onSelect: (tableId, tableName) async {
+            int guestCount = 1;
+            final confirmed = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => StatefulBuilder(
+                builder: (context, setDialogState) {
+                  return AlertDialog(
+                    title: Text('Table $tableName'),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Enter number of guests:'),
+                        const SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.remove_circle_outline),
+                              onPressed: guestCount > 1
+                                  ? () => setDialogState(() => guestCount--)
+                                  : null,
+                            ),
+                            Text('$guestCount',
+                                style: const TextStyle(
+                                    fontSize: 24, fontWeight: FontWeight.bold)),
+                            IconButton(
+                              icon: const Icon(Icons.add_circle_outline),
+                              onPressed: () =>
+                                  setDialogState(() => guestCount++),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel')),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.deepPurple,
+                            foregroundColor: Colors.white),
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Proceed'),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            );
+
+            if (confirmed == true && context.mounted) {
+              pos.loadTableContext(tableId, tableName,
+                  guestCount: guestCount, branchIds: [resolvedBranchId]);
+              if (dialogContext.mounted) {
+                Navigator.pop(dialogContext);
+              }
+            }
           },
           onOccupiedTableTap: (tableId, tableName) {
             // Close the floor plan dialog first
@@ -789,13 +875,54 @@ class _PosCartPanelState extends State<PosCartPanel> {
                 child: TableOrdersDialog(
                   tableId: tableId,
                   tableName: tableName,
-                  branchIds: [activeBranchId],
-                  onAddItems: () {},
+                  branchIds: [resolvedBranchId],
+                  onAddItems: () {
+                    pos.loadTableContext(tableId, tableName,
+                        branchIds: [resolvedBranchId]).catchError((e) {
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Could not load table order: $e'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    });
+                  },
                 ),
               ),
             );
           },
         ),
+      ),
+    );
+  }
+
+  Future<String?> _pickPosBranch(BuildContext context, List<String> branchIds) {
+    final branchFilter = context.read<BranchFilterService>();
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Choose branch'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: branchIds.map((branchId) {
+              return ListTile(
+                leading: const Icon(Icons.storefront_outlined,
+                    color: Colors.deepPurple),
+                title: Text(branchFilter.getBranchName(branchId)),
+                onTap: () => Navigator.pop(dialogContext, branchId),
+              );
+            }).toList(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+        ],
       ),
     );
   }
@@ -1693,7 +1820,9 @@ class _FloorPlanTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tableName = tableData['name']?.toString() ?? tableId;
-    final seats = tableData['seats'];
+    final seatsRaw = tableData['seats'];
+    final int? seats =
+        seatsRaw != null ? int.tryParse(seatsRaw.toString()) : null;
     final shape = (tableData['shape'] ?? 'rectangle').toString().toLowerCase();
 
     // Determine real-time status by checking active orders
@@ -1736,7 +1865,7 @@ class _FloorPlanTable extends StatelessWidget {
           onTap: isAvailable
               ? () => onSelect(tableId, tableName)
               : (isOccupiedByOrder && !isReserved)
-                  ? () => onSelect(tableId, tableName)
+                  ? () => onOccupiedTap(tableId, tableName)
                   : null,
           borderRadius: BorderRadius.circular(isRound ? 100 : 16),
           child: AnimatedContainer(
@@ -1826,14 +1955,20 @@ class _FloorPlanTable extends StatelessWidget {
                             return;
                           }
 
+                          // 🛠️ FIX: Capture root navigator context BEFORE popping the Floor Plan dialog
+                          final navContext =
+                              Navigator.of(context, rootNavigator: true)
+                                  .context;
+                          final posService = context.read<PosService>();
+
                           // Close Floor Plan Dialog before opening Payment Dialog
                           Navigator.pop(context);
 
                           showDialog(
-                            context: context,
+                            context: navContext,
                             barrierDismissible: false,
                             builder: (ctx) => ChangeNotifierProvider.value(
-                              value: context.read<PosService>(),
+                              value: posService,
                               child: PosPaymentDialog(
                                 totalAmount: 0.0,
                                 branchIds: [
@@ -1846,7 +1981,7 @@ class _FloorPlanTable extends StatelessWidget {
                                   if (orderId != null) {
                                     // Let print button handle printing now
                                     showDialog(
-                                      context: context,
+                                      context: navContext,
                                       barrierDismissible: false,
                                       builder: (promptCtx) => AlertDialog(
                                         shape: RoundedRectangleBorder(
@@ -1979,15 +2114,29 @@ class _FloorPlanTable extends StatelessWidget {
                       // Seat count
                       if (seats != null) ...[
                         const SizedBox(height: 2),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 1,
+                          runSpacing: 1,
                           children: [
-                            Icon(Icons.person, size: 12, color: textColor),
-                            const SizedBox(width: 2),
-                            Text(
-                              '$seats',
-                              style: TextStyle(fontSize: 11, color: textColor),
-                            ),
+                            for (int i = 0; i < (seats > 6 ? 6 : seats); i++)
+                              Icon(Icons.chair, size: 12, color: textColor),
+                            if (seats > 6)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 2, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: textColor.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '+${seats - 6}',
+                                  style: TextStyle(
+                                      fontSize: 9,
+                                      color: textColor,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ),
                           ],
                         ),
                       ],

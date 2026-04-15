@@ -258,6 +258,7 @@ class RiderAssignmentService {
           .update({
             'autoAssignStarted': FieldValue.delete(),
             'assignmentNotes': 'Auto-assignment cancelled by admin',
+            'status': AppConstants.statusNeedsAssignment,
           })
           .timeout(AppConstants.firestoreWriteTimeout);
           
@@ -327,6 +328,42 @@ class RiderAssignmentService {
     } catch (e) {
       debugPrint('Error restarting auto-assignment: $e');
       return false;
+    }
+  }
+
+  /// Stream to listen to real-time auto-assignment progress for an order
+  static Stream<DocumentSnapshot> getAssignmentProgressStream(String orderId) {
+    return _firestore
+        .collection('rider_assignments')
+        .doc(orderId)
+        .snapshots();
+  }
+
+  /// Stream to listen to the history of assignment attempts for an order
+  static Stream<QuerySnapshot> getAssignmentEventsStream(String orderId) {
+    return _firestore
+        .collection('rider_assignments')
+        .doc(orderId)
+        .collection('events')
+        .orderBy('timestamp', descending: true)
+        .snapshots();
+  }
+
+  /// Fetch rider info (name, phone, vehicle) for display in the tracker.
+  /// Returns null if the rider document doesn't exist.
+  static Future<Map<String, dynamic>?> getRiderInfo(String riderId) async {
+    try {
+      final doc = await _firestore
+          .collection(AppConstants.collectionStaff)
+          .doc(riderId)
+          .get()
+          .timeout(AppConstants.firestoreTimeout);
+
+      if (!doc.exists) return null;
+      return doc.data();
+    } catch (e) {
+      debugPrint('Error fetching rider info for $riderId: $e');
+      return null;
     }
   }
 }
