@@ -12,6 +12,7 @@ import 'CreatePurchaseOrderScreen.dart';
 import 'ReceivePurchaseOrderScreen.dart';
 import 'SuppliersScreen.dart';
 import 'supplier_import_format_dialog.dart';
+import '../../services/SinglePurchaseOrderPdfService.dart';
 
 class _InvColors {
   static final Color bgDark = Colors.grey.shade50;
@@ -1354,6 +1355,18 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
                                 } catch (e) { _showSnackBar('Unable to duplicate purchase order: $e'); }
                               } else if (val == 'view_history') {
                                 _showPoHistoryDialog(po);
+                              } else if (val == 'download_po') {
+                                try {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                      content: Text('Generating PDF...'),
+                                      backgroundColor: Colors.blue,
+                                    ));
+                                  }
+                                  await SinglePurchaseOrderPdfService.downloadPoPdf(po);
+                                } catch (e) {
+                                  _showSnackBar('Failed to generate PDF: $e');
+                                }
                               }
                             },
                             itemBuilder: (ctx) => [
@@ -1363,6 +1376,7 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
                                 const PopupMenuItem(value: 'receive', child: ListTile(leading: Icon(Icons.shopping_cart_checkout, size: 20), title: Text('Receive Items'), contentPadding: EdgeInsets.zero, dense: true)),
                               const PopupMenuItem(value: 'duplicate', child: ListTile(leading: Icon(Icons.copy_outlined, size: 20), title: Text('Duplicate'), contentPadding: EdgeInsets.zero, dense: true)),
                               const PopupMenuItem(value: 'view_history', child: ListTile(leading: Icon(Icons.history_outlined, size: 20), title: Text('View History'), contentPadding: EdgeInsets.zero, dense: true)),
+                              const PopupMenuItem(value: 'download_po', child: ListTile(leading: Icon(Icons.download_outlined, size: 20), title: Text('Download LPO'), contentPadding: EdgeInsets.zero, dense: true)),
                               if (normalizedStatus != 'received' && normalizedStatus != 'cancelled')
                                 const PopupMenuItem(value: 'cancel', child: ListTile(leading: Icon(Icons.cancel_outlined, size: 20, color: Colors.red), title: Text('Cancel Purchase Order', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero, dense: true)),
                               if (normalizedStatus != 'deleted')

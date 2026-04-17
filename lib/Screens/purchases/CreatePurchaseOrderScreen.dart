@@ -9,6 +9,7 @@ import '../../Widgets/BranchFilterService.dart';
 import '../../main.dart';
 import '../../services/inventory/InventoryService.dart';
 import '../../services/inventory/PurchaseOrderService.dart';
+import '../../services/SinglePurchaseOrderPdfService.dart';
 
 class CreatePurchaseOrderScreen extends StatefulWidget {
   final bool isDrawer;
@@ -800,6 +801,16 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
+                            OutlinedButton.icon(
+                              onPressed: () => _downloadCurrentPo(),
+                              icon: const Icon(Icons.download_outlined, size: 18),
+                              label: const Text('Download LPO'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const Spacer(),
                             OutlinedButton(
                               onPressed: _isSaving
                                   ? null
@@ -1107,6 +1118,49 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     );
   }
 
+  Future<void> _downloadCurrentPo() async {
+    final rows = _lines
+        .map((l) {
+          final qty = double.tryParse(l.qtyCtrl.text.trim()) ?? 0.0;
+          final cost = double.tryParse(l.costCtrl.text.trim()) ?? 0.0;
+          return {
+            'ingredientId': l.ingredientIdCtrl.text.trim(),
+            'ingredientName': l.ingredientNameCtrl.text.trim(),
+            'unit': l.unitCtrl.text.trim(),
+            'orderedQty': qty,
+            'receivedQty': 0.0,
+            'unitCost': cost,
+            'lineTotal': qty * cost,
+          };
+        })
+        .where((r) => (r['ingredientName'] as String).isNotEmpty)
+        .toList();
+
+    final total = rows.fold<double>(0.0, (acc, r) => acc + ((r['lineTotal'] as num).toDouble()));
+
+    final poData = {
+      'poNumber': _poNumber.isNotEmpty ? _poNumber : 'DRAFT',
+      'supplierName': _supplierName,
+      'supplierId': _supplierId,
+      'orderDate': Timestamp.fromDate(_orderDate),
+      'expectedDeliveryDate': _expectedDate != null ? Timestamp.fromDate(_expectedDate!) : null,
+      'totalAmount': total,
+      'notes': _notesCtrl.text.trim(),
+      'lineItems': rows,
+    };
+    
+    try {
+      if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generating PDF...'), backgroundColor: Colors.blue));
+      }
+      await SinglePurchaseOrderPdfService.downloadPoPdf(poData);
+    } catch(e) {
+      if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to download PDF: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
   Future<void> _save(List<String> branchIds, {required String status}) async {
     if (_supplierId == null || _supplierId!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1210,6 +1264,27 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         );
       }
       if (status == 'submitted') {
+        try {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Generating PDF for Email Attachment...'),
+              backgroundColor: Colors.blue,
+            ));
+          }
+          final poData = {
+            'poNumber': _poNumber,
+            'supplierName': _supplierName,
+            'supplierId': _supplierId,
+            'orderDate': Timestamp.fromDate(_orderDate),
+            'expectedDeliveryDate': _expectedDate != null ? Timestamp.fromDate(_expectedDate!) : null,
+            'totalAmount': total,
+            'notes': _notesCtrl.text.trim(),
+            'lineItems': rows,
+          };
+          await SinglePurchaseOrderPdfService.downloadPoPdf(poData);
+        } catch (e) {
+          debugPrint('Failed to download PDF before email: $e');
+        }
         await _openSupplierEmail(rows, total);
       }
       if (mounted) {

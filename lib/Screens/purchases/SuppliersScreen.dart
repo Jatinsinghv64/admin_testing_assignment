@@ -1,4 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../Widgets/BranchFilterService.dart';
@@ -6,6 +8,7 @@ import '../../main.dart';
 import '../../services/inventory/PurchaseOrderService.dart';
 import '../../services/inventory/SupplierImportService.dart';
 import 'supplier_import_format_dialog.dart';
+import 'SupplierPurchaseOrdersDialog.dart';
 
 class SuppliersScreen extends StatefulWidget {
   const SuppliersScreen({
@@ -35,6 +38,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   bool _isImportingSuppliers = false;
   final Set<String> _busySupplierIds = <String>{};
   final TextEditingController _searchCtrl = TextEditingController();
+  String? _expandedSupplierId;
 
   final List<String> availableCategories = [
     'Produce',
@@ -557,30 +561,30 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                                     crossAxisCount = 2;
                                   }
 
-                                  return GridView.builder(
+                                  final cardWidth = (constraints.maxWidth - ((crossAxisCount - 1) * 24)) / crossAxisCount - 0.1; // minor subtraction to prevent wrap rounding issues
+
+                                  return SingleChildScrollView(
                                     padding: const EdgeInsets.only(bottom: 32),
-                                    gridDelegate:
-                                        SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: crossAxisCount,
-                                      mainAxisExtent: 340,
-                                      crossAxisSpacing: 24,
-                                      mainAxisSpacing: 24,
+                                    child: Wrap(
+                                      spacing: 24,
+                                      runSpacing: 24,
+                                      children: suppliers.map((supplier) {
+                                        return SizedBox(
+                                          width: cardWidth,
+                                          child: _supplierCard(
+                                            context: context,
+                                            data: supplier,
+                                            branchIds: branchIds,
+                                            onEdit: () => _openSupplierForm(
+                                              context,
+                                              userScope,
+                                              branchIds,
+                                              existing: supplier,
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
                                     ),
-                                    itemCount: suppliers.length,
-                                    itemBuilder: (_, i) {
-                                      final supplier = suppliers[i];
-                                      return _supplierCard(
-                                        context: context,
-                                        data: supplier,
-                                        branchIds: branchIds,
-                                        onEdit: () => _openSupplierForm(
-                                          context,
-                                          userScope,
-                                          branchIds,
-                                          existing: supplier,
-                                        ),
-                                      );
-                                    },
                                   );
                                 },
                               );
@@ -652,230 +656,275 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     final initials = companyName.isNotEmpty
         ? companyName.substring(0, companyName.length > 1 ? 2 : 1).toUpperCase()
         : 'S';
-    final contactPerson =
-        (data['contactPerson']?.toString().trim().isEmpty ?? true)
-            ? '-'
-            : data['contactPerson'].toString();
-    final phone = (data['phone']?.toString().trim().isEmpty ?? true)
-        ? '-'
-        : data['phone'].toString();
-    final email = (data['email']?.toString().trim().isEmpty ?? true)
-        ? '-'
-        : data['email'].toString();
+    final contactPerson = (data['contactPerson']?.toString().trim().isEmpty ?? true) ? '-' : data['contactPerson'].toString();
+    final phone = (data['phone']?.toString().trim().isEmpty ?? true) ? '-' : data['phone'].toString();
+    final email = (data['email']?.toString().trim().isEmpty ?? true) ? '-' : data['email'].toString();
     final phoneValue = (data['phone'] ?? '').toString().trim();
     final emailValue = (data['email'] ?? '').toString().trim();
     final paymentTerms = (data['paymentTerms'] ?? 'Net 30').toString();
     final List cats = data['supplierCategories'] as List? ?? [];
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: Colors.deepPurple.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.deepPurple.shade100),
-                ),
-                child: Center(
-                  child: Text(initials,
-                      style: TextStyle(
-                          color: Colors.deepPurple.shade700,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 20)),
-                ),
+    final isExpanded = _expandedSupplierId == (data['id']?.toString());
+    
+    return InkWell(
+      onTap: () {
+        setState(() {
+          if (isExpanded) {
+            _expandedSupplierId = null;
+          } else {
+            _expandedSupplierId = data['id']?.toString();
+          }
+        });
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200),
+          boxShadow: [
+            if (isExpanded)
+              BoxShadow(
+                color: Colors.deepPurple.withOpacity(0.08),
+                blurRadius: 15,
+                offset: const Offset(0, 8),
+              )
+            else
+              BoxShadow(
+                color: Colors.black.withOpacity(0.02),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      companyName,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                          color: Colors.black87),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: isActive ? Colors.green : Colors.grey,
+          ],
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: Colors.deepPurple.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.deepPurple.shade100),
+                  ),
+                  child: Center(
+                    child: Text(initials,
+                        style: TextStyle(
+                            color: Colors.deepPurple.shade700,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        companyName,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            color: Colors.black87),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isActive ? Colors.green : Colors.grey,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          isActive ? 'Active' : 'Inactive',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.grey.shade600),
-                        ),
-                      ],
-                    )
+                          const SizedBox(width: 6),
+                          Text(
+                            isActive ? 'Active' : 'Inactive',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.grey.shade600),
+                          ),
+                        ],
+                      )
+                    ],
+                  ),
+                ),
+                PopupMenuButton<_SupplierCardAction>(
+                  icon: Icon(Icons.more_vert, color: Colors.grey.shade400),
+                  padding: EdgeInsets.zero,
+                  tooltip: 'Supplier actions',
+                  constraints: const BoxConstraints(),
+                  onSelected: (action) => _handleSupplierCardAction(
+                    action: action,
+                    data: data,
+                    branchIds: branchIds,
+                    onEdit: onEdit,
+                  ),
+                  itemBuilder: (menuContext) => [
+                    const PopupMenuItem(
+                      value: _SupplierCardAction.viewProfile,
+                      child: Text('View Profile'),
+                    ),
+                    PopupMenuItem(
+                      value: _SupplierCardAction.toggleStatus,
+                      child: Text(
+                        isActive ? 'Mark Inactive' : 'Mark Active',
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: _SupplierCardAction.call,
+                      enabled: phoneValue.isNotEmpty,
+                      child: const Text('Call Supplier'),
+                    ),
+                    PopupMenuItem(
+                      value: _SupplierCardAction.email,
+                      enabled: emailValue.isNotEmpty,
+                      child: const Text('Email Supplier'),
+                    ),
                   ],
                 ),
-              ),
-              PopupMenuButton<_SupplierCardAction>(
-                icon: Icon(Icons.more_vert, color: Colors.grey.shade400),
-                padding: EdgeInsets.zero,
-                tooltip: 'Supplier actions',
-                constraints: const BoxConstraints(),
-                onSelected: (action) => _handleSupplierCardAction(
-                  action: action,
-                  data: data,
-                  branchIds: branchIds,
-                  onEdit: onEdit,
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Divider(height: 1, color: Color(0xFFEEEEEE)),
+            const SizedBox(height: 16),
+            _infoRow(Icons.person_outline, contactPerson),
+            const SizedBox(height: 10),
+            _infoRow(
+              Icons.phone_outlined,
+              phone,
+              isPhone: true,
+              phoneValue: data['phone']?.toString(),
+            ),
+            const SizedBox(height: 10),
+            _infoRow(
+              Icons.email_outlined,
+              email,
+              isEmail: true,
+              emailValue: data['email']?.toString(),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('TOP SUPPLIED',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey.shade400,
+                              letterSpacing: 0.5)),
+                      const SizedBox(height: 8),
+                      cats.isEmpty
+                          ? Text('-', style: TextStyle(color: Colors.grey.shade500, fontSize: 12))
+                          : Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: cats.take(3).map((cat) => Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey.shade100,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(cat.toString(),
+                                        style: TextStyle(fontSize: 10, color: Colors.grey.shade700)),
+                                  )).toList(),
+                            ),
+                    ],
+                  ),
                 ),
-                itemBuilder: (menuContext) => [
-                  const PopupMenuItem(
-                    value: _SupplierCardAction.viewProfile,
-                    child: Text('View Profile'),
-                  ),
-                  PopupMenuItem(
-                    value: _SupplierCardAction.toggleStatus,
-                    child: Text(
-                      isActive ? 'Mark Inactive' : 'Mark Active',
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _SupplierCardAction.call,
-                    enabled: phoneValue.isNotEmpty,
-                    child: const Text('Call Supplier'),
-                  ),
-                  PopupMenuItem(
-                    value: _SupplierCardAction.email,
-                    enabled: emailValue.isNotEmpty,
-                    child: const Text('Email Supplier'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Divider(height: 1, color: Color(0xFFEEEEEE)),
-          const SizedBox(height: 16),
-          _infoRow(Icons.person_outline, contactPerson),
-          const SizedBox(height: 10),
-          _infoRow(
-            Icons.phone_outlined,
-            phone,
-            isPhone: true,
-            phoneValue: data['phone']?.toString(),
-          ),
-          const SizedBox(height: 10),
-          _infoRow(
-            Icons.email_outlined,
-            email,
-            isEmail: true,
-            emailValue: data['email']?.toString(),
-          ),
-          const Spacer(),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
+                Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('TOP SUPPLIED',
+                    Text('PAYMENT TERMS',
                         style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                             color: Colors.grey.shade400,
                             letterSpacing: 0.5)),
                     const SizedBox(height: 8),
-                    cats.isEmpty
-                        ? Text('-',
-                            style: TextStyle(
-                                color: Colors.grey.shade500, fontSize: 12))
-                        : Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: cats
-                                .take(3)
-                                .map((cat) => Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey.shade100,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(cat.toString(),
-                                          style: TextStyle(
-                                              fontSize: 10,
-                                              color: Colors.grey.shade700)),
-                                    ))
-                                .toList(),
-                          ),
+                    Text(
+                      paymentTerms,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
+                    ),
                   ],
                 ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('PAYMENT TERMS',
-                      style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey.shade400,
-                          letterSpacing: 0.5)),
-                  const SizedBox(height: 8),
-                  Text(
-                    paymentTerms,
-                    style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.black87),
+              ],
+            ),
+            if (!isExpanded) ...[
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _expandedSupplierId = data['id']?.toString();
+                    });
+                  },
+                  icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                  label: const Text('View Purchase Orders'),
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.grey.shade50,
+                    foregroundColor: Colors.deepPurple,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: BorderSide(color: Colors.grey.shade200),
+                    ),
                   ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: TextButton.icon(
-              onPressed: onEdit,
-              icon: const Icon(Icons.person_outline, size: 18),
-              label: const Text('View Profile'),
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.grey.shade50,
-                foregroundColor: Colors.deepPurple,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  side: BorderSide(color: Colors.grey.shade200),
                 ),
               ),
-            ),
-          ),
-        ],
+            ],
+            if (isExpanded) ...[
+              const SizedBox(height: 16),
+              const Divider(color: Color(0xFFEEEEEE)),
+              const SizedBox(height: 12),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 300),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: _SupplierInlinePurchaseOrders(
+                  supplierId: data['id']?.toString() ?? '',
+                  branchIds: branchIds,
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _expandedSupplierId = null;
+                    });
+                  },
+                  icon: const Icon(Icons.keyboard_arrow_up, size: 20),
+                  label: const Text('Collapse History'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.grey.shade600,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -1344,5 +1393,164 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       addressCtrl.dispose();
       notesCtrl.dispose();
     }
+  }
+}
+
+class _SupplierInlinePurchaseOrders extends StatelessWidget {
+  final String supplierId;
+  final List<String> branchIds;
+
+  const _SupplierInlinePurchaseOrders({
+    required this.supplierId,
+    required this.branchIds,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final poService = Provider.of<PurchaseOrderService>(context, listen: false);
+    final userScope = context.watch<UserScopeService>();
+    final isAllBranches = branchIds.length >= userScope.branchIds.length && branchIds.length > 1;
+
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: poService.streamPurchaseOrders(
+        branchIds,
+        supplierId: supplierId,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.deepPurple),
+            ),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text('Error loading history: ${snapshot.error}',
+                  style: const TextStyle(color: Colors.red, fontSize: 12)),
+            ),
+          );
+        }
+        final orders = snapshot.data ?? [];
+        if (orders.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.receipt_long_outlined, size: 32, color: Colors.grey),
+                  SizedBox(height: 8),
+                  Text('No purchase orders found',
+                      style: TextStyle(color: Colors.grey, fontSize: 13)),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return Scrollbar(
+          thumbVisibility: true,
+          child: ListView.separated(
+            padding: const EdgeInsets.all(12),
+            itemCount: orders.length,
+            shrinkWrap: true,
+            separatorBuilder: (_, __) => const Divider(height: 16, color: Color(0xFFEEEEEE)),
+            itemBuilder: (context, index) {
+              final order = orders[index];
+              final poNumber = (order['poNumber'] ?? 'Unknown').toString();
+              final status = (order['status'] ?? 'draft').toString().toLowerCase();
+              final amount = (order['totalAmount'] as num?)?.toDouble() ?? 0.0;
+              final date = (order['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+              final orderBranchIds = List<String>.from(order['branchIds'] ?? []);
+
+              Color statusColor;
+              switch (status) {
+                case 'received': statusColor = Colors.green; break;
+                case 'partial': statusColor = Colors.orange; break;
+                case 'submitted': statusColor = Colors.blue; break;
+                case 'cancelled': statusColor = Colors.red; break;
+                default: statusColor = Colors.grey;
+              }
+
+              return Row(
+                children: [
+                   Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.description_outlined, size: 16, color: statusColor),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          poNumber,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87),
+                        ),
+                        Text(
+                          DateFormat('MMM dd, yyyy • hh:mm a').format(date),
+                          style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                        ),
+                        if (isAllBranches && orderBranchIds.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 4,
+                            children: orderBranchIds.take(2).map((b) => Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'Branch $b',
+                                style: TextStyle(fontSize: 8, color: Colors.blue.shade700, fontWeight: FontWeight.bold),
+                              ),
+                            )).toList(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '\$${amount.toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87),
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: statusColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: statusColor.withOpacity(0.3)),
+                        ),
+                        child: Text(
+                          status.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold,
+                            color: statusColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 }

@@ -14,6 +14,7 @@ import '../../../../Widgets/BranchFilterService.dart';
 import '../../../../Widgets/CancellationDialog.dart';
 import 'components/kds_constants.dart';
 import '../../../../services/pos/pos_service.dart';
+import '../../../../Widgets/PrintingService.dart';
 
 // KDS Tab definition
 enum _KdsTab { all, toCook, ready, recall }
@@ -1253,6 +1254,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
             : '#$orderNum';
     final tableName = _data['tableName']?.toString() ?? '';
     final tablePrefix = tableName.isNotEmpty ? tableName : 'Order';
+    final previousTableName = _data['previousTableName']?.toString() ?? '';
     // Display name: prefer displayName > name split, never show email
     final rawCreatedBy =
         _data['createdBy']?.toString() ?? _data['staffName']?.toString() ?? '';
@@ -1432,6 +1434,38 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                                   fontWeight: FontWeight.w600)),
                         ],
                       ),
+                      const SizedBox(width: 8),
+                      // Print KOT icon button
+                      Tooltip(
+                        message: 'Print KOT',
+                        child: InkWell(
+                          onTap: () async {
+                            await PrintingService.printKOT(
+                                context, widget.orderDoc);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('KOT sent to printer'),
+                                  backgroundColor: Colors.green,
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(4),
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                  color: Colors.green.withValues(alpha: 0.2)),
+                            ),
+                            child: const Icon(Icons.print,
+                                size: 16, color: Colors.green),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 3),
@@ -1459,7 +1493,32 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                         ),
                     ],
                   ),
+                  // ── Table transfer indicator ──
+                  if (previousTableName.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Row(
+                        children: [
+                          Icon(Icons.swap_horiz,
+                              size: 12, color: Colors.orange[700]),
+                          const SizedBox(width: 3),
+                          Expanded(
+                            child: Text(
+                              '← from $previousTableName',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.orange[700],
+                                fontStyle: FontStyle.italic,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
+
               ),
             ),
 

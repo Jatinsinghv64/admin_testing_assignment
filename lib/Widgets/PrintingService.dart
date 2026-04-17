@@ -739,13 +739,30 @@ class PrintingService {
             Map<String, dynamic>.from(orderDoc.data() as Map);
 
         final List<dynamic> rawItems = (order['items'] ?? []) as List<dynamic>;
-        final items = rawItems.map((e) {
-          final m = Map<String, dynamic>.from(e as Map);
+        final List<dynamic> rawCancelled =
+            (order['cancelledItems'] ?? []) as List<dynamic>;
+
+        // Combine active and cancelled items
+        final List<Map<String, dynamic>> combinedItems = [
+          ...rawItems.map((e) =>
+              {...Map<String, dynamic>.from(e as Map), 'isCancelled': false}),
+          ...rawCancelled.map((e) =>
+              {...Map<String, dynamic>.from(e as Map), 'isCancelled': true}),
+        ];
+
+        final items = combinedItems.map((m) {
           final bool isAddOn = m['isAddOn'] == true;
+          final bool isCancelled = m['isCancelled'] == true;
           final String baseName = (m['name'] ?? 'Item').toString();
+          final String baseNameAr =
+              (m['name_ar'] ?? m['nameAr'] ?? '').toString();
+
           return {
-            'name': isAddOn ? '[ADD-ON] $baseName' : baseName,
-            'name_ar': (m['name_ar'] ?? m['nameAr'] ?? '').toString(),
+            'name': (isCancelled ? '$baseName (CANCELLED)' : baseName),
+            'name_ar': (isCancelled && baseNameAr.isNotEmpty
+                ? '$baseNameAr (ملغاة)'
+                : baseNameAr),
+            'isCancelled': isCancelled,
             'qty':
                 int.tryParse((m['quantity'] ?? m['qty'] ?? '1').toString()) ??
                     1,
@@ -766,7 +783,10 @@ class PrintingService {
             .toString()
             .toUpperCase()
             .replaceAll('_', ' ');
-        final String tableNumber = (order['tableNumber'] ?? '').toString();
+        final String tableName =
+            (order['tableName'] ?? order['tableNumber'] ?? '').toString();
+        final String previousTableName =
+            (order['previousTableName'] ?? '').toString();
         final String specialInstructions =
             (order['specialInstructions'] ?? '').toString();
 
@@ -818,8 +838,17 @@ class PrintingService {
                         ]),
                     pw.SizedBox(height: 4),
                     pw.Text('Type: $orderType', style: fontMedBold),
-                    if (tableNumber.isNotEmpty)
-                      pw.Text('Table: $tableNumber', style: fontMedBold),
+                    if (tableName.isNotEmpty)
+                      pw.Row(children: [
+                        pw.Text('Table: $tableName', style: fontMedBold),
+                        if (previousTableName.isNotEmpty) ...[
+                          pw.SizedBox(width: 6),
+                          pw.Text('<- from $previousTableName',
+                              style: fontMed.copyWith(
+                                  color: PdfColors.grey700,
+                                  fontStyle: pw.FontStyle.italic)),
+                        ]
+                      ]),
                     pw.SizedBox(height: 8),
                     pw.Divider(thickness: 1),
                     pw.SizedBox(height: 8),
@@ -838,14 +867,32 @@ class PrintingService {
                                         pw.CrossAxisAlignment.start,
                                     children: [
                                       pw.Text(item['name'].toString(),
-                                          style: fontLarge),
+                                          style: fontLarge.copyWith(
+                                            decoration: item['isCancelled'] ==
+                                                    true
+                                                ? pw.TextDecoration.lineThrough
+                                                : null,
+                                            color: item['isCancelled'] == true
+                                                ? PdfColors.red
+                                                : PdfColors.black,
+                                          )),
                                       if (item['name_ar']
                                               .toString()
                                               .isNotEmpty &&
                                           arabicFont != null)
                                         pw.Text(item['name_ar'].toString(),
                                             style: fontArLarge.copyWith(
-                                                fontSize: 12),
+                                                fontSize: 12,
+                                                decoration: item[
+                                                            'isCancelled'] ==
+                                                        true
+                                                    ? pw.TextDecoration
+                                                        .lineThrough
+                                                    : null,
+                                                color: item['isCancelled'] ==
+                                                        true
+                                                    ? PdfColors.red
+                                                    : PdfColors.black),
                                             textDirection:
                                                 pw.TextDirection.rtl),
                                       if ((item['addons'] as List).isNotEmpty)

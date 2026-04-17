@@ -598,6 +598,9 @@ class TableOrdersDialog extends StatelessWidget {
                     batch.update(doc.reference, {
                       'tableId': t.key,
                       'tableName': t.value['name'],
+                      'previousTableId': tableId,
+                      'previousTableName': tableName,
+                      'tableTransferredAt': FieldValue.serverTimestamp(),
                     });
                   }
 

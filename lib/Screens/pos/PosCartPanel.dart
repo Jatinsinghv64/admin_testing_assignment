@@ -314,50 +314,92 @@ class _PosCartPanelState extends State<PosCartPanel> {
           ],
           if (pos.orderType == PosOrderType.dineIn) ...[
             const SizedBox(width: 8),
-            InkWell(
-              onTap: () => _showTableSelector(context, pos),
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: pos.selectedTableId != null
-                      ? Colors.red.withValues(alpha: 0.1)
-                      : Colors.orange.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
+            Flexible(
+              child: InkWell(
+                onTap: () => _showTableSelector(context, pos),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
                     color: pos.selectedTableId != null
-                        ? Colors.red.withValues(alpha: 0.3)
-                        : Colors.orange.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.table_bar,
-                      size: pos.selectedTableId != null ? 18 : 14,
+                        ? Colors.red.withValues(alpha: 0.1)
+                        : Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
                       color: pos.selectedTableId != null
-                          ? Colors.red
-                          : Colors.orange,
+                          ? Colors.red.withValues(alpha: 0.3)
+                          : Colors.orange.withValues(alpha: 0.3),
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      pos.selectedTableName != null
-                          ? 'Taking Order for ${pos.selectedTableName}${pos.guestCount != null && pos.guestCount! > 0 ? ' (${pos.guestCount} Guests)' : ''}'
-                          : 'Select Table',
-                      style: TextStyle(
-                        fontSize: pos.selectedTableId != null ? 14 : 12,
-                        fontWeight: FontWeight.bold,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.table_bar,
+                        size: pos.selectedTableId != null ? 18 : 14,
                         color: pos.selectedTableId != null
                             ? Colors.red
                             : Colors.orange,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          pos.selectedTableName != null
+                              ? 'Taking Order for ${pos.selectedTableName}${pos.guestCount != null && pos.guestCount! > 0 ? ' (${pos.guestCount} Guests)' : ''}'
+                              : 'Select Table',
+                          style: TextStyle(
+                            fontSize: pos.selectedTableId != null ? 14 : 12,
+                            fontWeight: FontWeight.bold,
+                            color: pos.selectedTableId != null
+                                ? Colors.red
+                                : Colors.orange,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
+            // ── Table Change Button (only when table is active) ──
+            if (pos.selectedTableId != null) ...[
+              const SizedBox(width: 8),
+              Tooltip(
+                message: 'Change Table',
+                child: InkWell(
+                  onTap: () => _showTableChangeDialog(context, pos),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.blueGrey.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: Colors.blueGrey.withValues(alpha: 0.3)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.swap_horiz,
+                            size: 18, color: Colors.blueGrey),
+                        SizedBox(width: 4),
+                        Text(
+                          'Table Change',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blueGrey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ],
       ),
@@ -865,36 +907,267 @@ class _PosCartPanelState extends State<PosCartPanel> {
             }
           },
           onOccupiedTableTap: (tableId, tableName) {
-            // Close the floor plan dialog first
-            Navigator.pop(dialogContext);
-            // Open the Table Orders Dialog
-            showDialog(
-              context: context,
-              builder: (_) => ChangeNotifierProvider.value(
-                value: pos,
-                child: TableOrdersDialog(
-                  tableId: tableId,
-                  tableName: tableName,
-                  branchIds: [resolvedBranchId],
-                  onAddItems: () {
-                    pos.loadTableContext(tableId, tableName,
-                        branchIds: [resolvedBranchId]).catchError((e) {
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Could not load table order: $e'),
-                          backgroundColor: Colors.red,
-                        ),
-                      );
-                    });
-                  },
+            // Directly load table context — no redundant dialog
+            pos.loadTableContext(tableId, tableName,
+                branchIds: [resolvedBranchId]).catchError((e) {
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Could not load table order: $e'),
+                  backgroundColor: Colors.red,
                 ),
-              ),
-            );
+              );
+            });
+            if (dialogContext.mounted) Navigator.pop(dialogContext);
           },
         ),
       ),
     );
+  }
+
+  /// Transfer active orders from the currently selected table to a different
+  /// available table. Stores `previousTableName`/`previousTableId` for KDS
+  /// audit trail and updates branch floor plan statuses atomically.
+  Future<void> _showTableChangeDialog(
+      BuildContext context, PosService pos) async {
+    final currentTableId = pos.selectedTableId;
+    final currentTableName = pos.selectedTableName ?? 'Current';
+    final branchId = pos.activeBranchId;
+    if (currentTableId == null || branchId == null) return;
+
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: Colors.deepPurple),
+      ),
+    );
+
+    try {
+      final branchSnap = await FirebaseFirestore.instance
+          .collection('Branch')
+          .doc(branchId)
+          .get()
+          .timeout(AppConstants.firestoreTimeout);
+
+      if (!context.mounted) return;
+      Navigator.pop(context); // close loading
+
+      final tablesMap =
+          branchSnap.data()?['Tables'] as Map<String, dynamic>? ?? {};
+
+      // Get available tables (exclude current)
+      final availableTables = tablesMap.entries.where((e) {
+        final status =
+            (e.value['status'] ?? 'available').toString().toLowerCase();
+        return status == 'available' && e.key != currentTableId;
+      }).toList();
+
+      if (availableTables.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No available tables to transfer to.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (!context.mounted) return;
+
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blueGrey.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child:
+                    const Icon(Icons.swap_horiz, color: Colors.blueGrey),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Transfer Table',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('From $currentTableName',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey[600])),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 340,
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: availableTables.length,
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: Colors.grey[200]),
+              itemBuilder: (ctx, i) {
+                final t = availableTables[i];
+                final tName =
+                    t.value['name']?.toString() ?? 'Table ${t.key}';
+                final seats = t.value['seats']?.toString();
+                return ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.table_bar,
+                        color: Colors.green, size: 20),
+                  ),
+                  title: Text(tName,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600)),
+                  subtitle: seats != null
+                      ? Text('$seats seats',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey[500]))
+                      : null,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  onTap: () async {
+                    // Show transferring indicator
+                    Navigator.pop(ctx);
+                    if (!context.mounted) return;
+
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => const Center(
+                        child: CircularProgressIndicator(
+                            color: Colors.deepPurple),
+                      ),
+                    );
+
+                    try {
+                      // Fetch active orders for current table
+                      final ordersSnap = await FirebaseFirestore.instance
+                          .collection(AppConstants.collectionOrders)
+                          .where('branchIds',
+                              arrayContains: branchId)
+                          .where('tableId',
+                              isEqualTo: currentTableId)
+                          .where('Order_type',
+                              isEqualTo: 'dine_in')
+                          .where('status', whereIn: [
+                            AppConstants.statusPending,
+                            AppConstants.statusPreparing,
+                            AppConstants.statusPrepared,
+                            AppConstants.statusServed,
+                          ])
+                          .get()
+                          .timeout(AppConstants.firestoreTimeout);
+
+                      if (ordersSnap.docs.isEmpty) {
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'No active orders to transfer.'),
+                              backgroundColor: Colors.orange,
+                            ),
+                          );
+                        }
+                        return;
+                      }
+
+                      // Batch: update orders + floor plan statuses
+                      final batch =
+                          FirebaseFirestore.instance.batch();
+                      for (final doc in ordersSnap.docs) {
+                        batch.update(doc.reference, {
+                          'tableId': t.key,
+                          'tableName': tName,
+                          'previousTableId': currentTableId,
+                          'previousTableName': currentTableName,
+                          'tableTransferredAt':
+                              FieldValue.serverTimestamp(),
+                        });
+                      }
+
+                      // Update floor plan statuses
+                      batch.update(branchSnap.reference, {
+                        'Tables.${t.key}.status': 'occupied',
+                        'Tables.$currentTableId.status':
+                            'available',
+                      });
+
+                      await batch.commit();
+
+                      // Update POS context to new table
+                      await pos.loadTableContext(
+                        t.key,
+                        tName,
+                        branchIds: [branchId],
+                      );
+
+                      if (context.mounted) {
+                        Navigator.pop(context); // close loading
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                                'Transferred to $tName'),
+                            backgroundColor: Colors.green,
+                            duration:
+                                const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        Navigator.pop(context); // close loading
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content:
+                                Text('Transfer failed: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel',
+                  style: TextStyle(color: Colors.grey)),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context); // close loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<String?> _pickPosBranch(BuildContext context, List<String> branchIds) {

@@ -793,8 +793,13 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                       const SizedBox(width: 20),
                       Expanded(
                         flex: 2,
-                        child: _card(
-                          title: 'Stock Movement Summary',
+                        child: GestureDetector(
+                          onTap: () => _showMovementHistoryDialog(context, ranged),
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: _card(
+                              title: 'Stock Movement Summary',
+                              trailing: const Icon(Icons.open_in_new, size: 14, color: _InvColors.textMuted),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -906,6 +911,8 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                             ],
                           ),
                         ),
+                        ),
+                      ),
                       ),
                     ],
                   ),
@@ -1205,26 +1212,256 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: _InvColors.textMain,
-                  ),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: _InvColors.textMain,
+                  letterSpacing: -0.3,
                 ),
               ),
               if (trailing != null) trailing,
             ],
           ),
-          const SizedBox(height: 14),
-          if (fillContent) Expanded(child: child) else child,
+          const SizedBox(height: 16),
+          fillContent ? Expanded(child: child) : child,
         ],
       ),
+    );
+  }
+
+  void _showMovementHistoryDialog(BuildContext context, List<Map<String, dynamic>> movements) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Container(
+            width: 700,
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+            decoration: BoxDecoration(
+              color: _InvColors.bgDark,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  decoration: BoxDecoration(
+                    color: _InvColors.surfaceDark,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                    border: Border(bottom: BorderSide(color: _InvColors.borderDark)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Detailed Stock Movement',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _InvColors.textMain),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close, color: _InvColors.textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: movements.isEmpty
+                      ? const Center(child: Text('No movements to show.', style: TextStyle(color: _InvColors.textMuted)))
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(24),
+                          itemCount: movements.length,
+                          separatorBuilder: (_, __) => Divider(color: _InvColors.borderDark, height: 24),
+                          itemBuilder: (context, index) {
+                            final m = movements[index];
+                            final qty = (m['quantity'] as num?)?.toDouble() ?? 0.0;
+                            final isPositive = qty >= 0;
+                            final name = (m['ingredientName'] ?? '').toString();
+                            final type = (m['movementType'] ?? '').toString().replaceAll('_', ' ');
+                            final user = (m['userEmail'] ?? m['userName'] ?? 'System').toString();
+                            final dt = (m['createdAt'] as Timestamp?)?.toDate();
+                            final notes = (m['notes'] ?? m['reason'] ?? '').toString();
+                            final poNumber = m['poNumber']?.toString();
+
+                            final bBefore = (m['balanceBefore'] as num?)?.toDouble();
+                            final bAfter = (m['balanceAfter'] as num?)?.toDouble();
+                            final warning = (m['warning'] ?? '').toString();
+                            final refId = m['referenceId']?.toString();
+                            final displayRef = poNumber ?? refId;
+
+                            final branchFilter = context.read<BranchFilterService>();
+                            final branchIdsRaw = m['branchIds'] as List<dynamic>? ?? [];
+                            final memBranchIds = branchIdsRaw.map((e) => e.toString()).toList();
+                            String branchLabel = '';
+                            if (memBranchIds.isNotEmpty) {
+                              branchLabel = branchFilter.getBranchName(memBranchIds.first);
+                              if (memBranchIds.length > 1) {
+                                branchLabel += ' (+${memBranchIds.length - 1} more)';
+                              }
+                            }
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: _InvColors.bgDark,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: _InvColors.borderDark),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Container(
+                                        width: 42,
+                                        height: 42,
+                                        decoration: BoxDecoration(
+                                          color: (isPositive ? Colors.green : Colors.red).withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Icon(
+                                          isPositive ? Icons.add_rounded : Icons.remove_rounded,
+                                          size: 20,
+                                          color: isPositive ? Colors.green.shade600 : Colors.red.shade600,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _InvColors.textMain)),
+                                            const SizedBox(height: 6),
+                                            Row(
+                                              children: [
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                                  decoration: BoxDecoration(
+                                                    color: _InvColors.primary.withOpacity(0.1),
+                                                    borderRadius: BorderRadius.circular(6),
+                                                  ),
+                                                  child: Text(type.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _InvColors.primary)),
+                                                ),
+                                                if (displayRef != null) ...[
+                                                  const SizedBox(width: 10),
+                                                  Text('REF: $displayRef', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted)),
+                                                ],
+                                              ],
+                                            ),
+                                            if ((user.isNotEmpty && user != 'null') || branchLabel.isNotEmpty) ...[
+                                              const SizedBox(height: 8),
+                                              Row(
+                                                children: [
+                                                  if (user.isNotEmpty && user != 'null') ...[
+                                                    const Icon(Icons.person_outline, size: 14, color: _InvColors.textMuted),
+                                                    const SizedBox(width: 4),
+                                                    Text(user, style: const TextStyle(fontSize: 12, color: _InvColors.textMuted)),
+                                                  ],
+                                                  if (branchLabel.isNotEmpty) ...[
+                                                    if (user.isNotEmpty && user != 'null')
+                                                      const SizedBox(width: 12),
+                                                    const Icon(Icons.storefront_rounded, size: 14, color: _InvColors.textMuted),
+                                                    const SizedBox(width: 4),
+                                                    Flexible(child: Text(branchLabel, style: const TextStyle(fontSize: 12, color: _InvColors.textMuted), overflow: TextOverflow.ellipsis)),
+                                                  ]
+                                                ],
+                                              )
+                                            ]
+                                          ],
+                                        ),
+                                      ),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Text(
+                                            '${isPositive ? '+' : ''}${qty.toStringAsFixed(2)}',
+                                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: isPositive ? Colors.green.shade600 : Colors.red.shade600),
+                                          ),
+                                          if (dt != null) ...[
+                                            const SizedBox(height: 6),
+                                            Text(dt.toLocal().toString().split(' ').first, style: const TextStyle(fontSize: 11, color: _InvColors.textMuted)),
+                                            Text(dt.toLocal().toString().split(' ')[1].substring(0, 5), style: const TextStyle(fontSize: 11, color: _InvColors.textMuted)),
+                                          ],
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  if ((bBefore != null && bAfter != null) || notes.isNotEmpty || warning.isNotEmpty) ...[
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                      child: Divider(height: 1, color: _InvColors.borderDark),
+                                    ),
+                                    Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        if (bBefore != null && bAfter != null)
+                                          Expanded(
+                                            flex: 1,
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                const Text('Balance Shift', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _InvColors.textMuted)),
+                                                const SizedBox(height: 6),
+                                                Row(
+                                                  children: [
+                                                    Text(bBefore.toStringAsFixed(2), style: const TextStyle(fontSize: 13, color: _InvColors.textMuted, fontWeight: FontWeight.w600)),
+                                                    const Padding(
+                                                      padding: EdgeInsets.symmetric(horizontal: 6),
+                                                      child: Icon(Icons.arrow_forward_rounded, size: 14, color: _InvColors.textMuted),
+                                                    ),
+                                                    Text(bAfter.toStringAsFixed(2), style: const TextStyle(fontSize: 14, color: _InvColors.textMain, fontWeight: FontWeight.w900)),
+                                                  ],
+                                                ),
+                                              ]
+                                            ),
+                                          ),
+                                        if (notes.isNotEmpty || warning.isNotEmpty)
+                                          Expanded(
+                                            flex: 2,
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                if (notes.isNotEmpty) ...[
+                                                  const Text('Notes', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _InvColors.textMuted)),
+                                                  const SizedBox(height: 4),
+                                                  Text(notes, style: const TextStyle(fontSize: 12, color: _InvColors.textMain)),
+                                                ],
+                                                if (warning.isNotEmpty) ...[
+                                                  if (notes.isNotEmpty) const SizedBox(height: 10),
+                                                  Row(
+                                                    children: [
+                                                      Icon(Icons.warning_amber_rounded, size: 14, color: Colors.orange.shade700),
+                                                      const SizedBox(width: 4),
+                                                      Flexible(child: Text(warning, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.orange.shade700))),
+                                                    ]
+                                                  )
+                                                ]
+                                              ]
+                                            )
+                                          )
+                                      ]
+                                    )
+                                  ]
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
