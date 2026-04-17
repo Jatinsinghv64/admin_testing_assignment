@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../Models/IngredientModel.dart';
+import '../Models/inventory/purchase_order.dart';
 import '../utils/web_download_stub.dart'
     if (dart.library.html) '../utils/web_download_web.dart';
 
@@ -46,7 +47,7 @@ class CsvExportService {
       await Share.shareXFiles(
         [XFile(path)],
         text: 'Attached is the requested CSV export: $fileName',
-        subject: 'Zayka Analytics Export',
+        subject: 'Qore Analytics Export',
       );
     } catch (e) {
       if (context.mounted) Navigator.pop(context);
@@ -160,7 +161,7 @@ class CsvExportService {
 
   static Future<void> exportPurchaseOrdersFromData(
     BuildContext context,
-    List<Map<String, dynamic>> orders,
+    List<PurchaseOrder> orders,
   ) async {
     final List<List<dynamic>> rows = [
       [
@@ -175,17 +176,16 @@ class CsvExportService {
     ];
 
     for (final order in orders) {
-      final orderDate = (order['orderDate'] as Timestamp?)?.toDate();
-      final expDelDate =
-          (order['expectedDeliveryDate'] as Timestamp?)?.toDate();
-      final recDate = (order['receivedDate'] as Timestamp?)?.toDate();
+      final orderDate = order.orderDate;
+      final expDelDate = order.expectedDeliveryDate;
+      final recDate = order.receivedDate;
 
       rows.add([
-        order['poNumber'] ?? '-',
-        orderDate != null ? DateFormat('yyyy-MM-dd').format(orderDate) : '-',
-        order['supplierName'] ?? '-',
-        order['status'] ?? '-',
-        ((order['totalAmount'] as num?) ?? 0).toDouble(),
+        order.poNumber,
+        DateFormat('yyyy-MM-dd').format(orderDate),
+        order.supplierName,
+        order.status,
+        order.totalAmount,
         expDelDate != null ? DateFormat('yyyy-MM-dd').format(expDelDate) : '-',
         recDate != null ? DateFormat('yyyy-MM-dd').format(recDate) : '-',
       ]);

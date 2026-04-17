@@ -10,6 +10,7 @@ import '../../main.dart';
 import '../../services/inventory/InventoryService.dart';
 import '../../services/inventory/PurchaseOrderService.dart';
 import '../../services/SinglePurchaseOrderPdfService.dart';
+import '../../Models/inventory/supplier.dart';
 
 class CreatePurchaseOrderScreen extends StatefulWidget {
   final bool isDrawer;
@@ -228,30 +229,26 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
               ),
             ),
           Expanded(
-            child: StreamBuilder<List<Map<String, dynamic>>>(
+            child: StreamBuilder<List<Supplier>>(
               stream: _service.streamSuppliers(branchIds, isActive: true),
               builder: (context, snapshot) {
                 final suppliers = snapshot.data ?? [];
-                final selectedSupplier = suppliers.firstWhere(
-                  (s) => (s['id']?.toString() ?? '') == (_supplierId ?? ''),
-                  orElse: () => <String, dynamic>{},
+                final selectedSupplier = suppliers.cast<Supplier?>().firstWhere(
+                  (s) => s?.id == (_supplierId ?? ''),
+                  orElse: () => null,
                 );
                 if (_supplierId != null &&
                     _supplierName.isEmpty &&
-                    selectedSupplier.isNotEmpty) {
+                    selectedSupplier != null) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!mounted) return;
                     setState(() {
-                      _supplierName =
-                          (selectedSupplier['companyName'] ?? '').toString();
-                      _supplierEmail =
-                          (selectedSupplier['email'] ?? '').toString();
+                      _supplierName = selectedSupplier.companyName;
+                      _supplierEmail = selectedSupplier.email;
                     });
                   });
                 }
-                final supplierIngredientIds = List<String>.from(
-                  selectedSupplier['ingredientIds'] as List? ?? [],
-                );
+                final supplierIngredientIds = selectedSupplier?.ingredientIds ?? [];
                 return Center(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 850),
@@ -320,22 +317,16 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                           ? 'Select Supplier'
                                           : _supplierName,
                                       items: suppliers
-                                          .map((s) => (s['companyName'] ?? '')
-                                              .toString())
+                                          .map((s) => s.companyName)
                                           .toList(),
                                       onChanged: (selectedName) {
                                         final hit = suppliers.firstWhere(
-                                          (s) =>
-                                              (s['companyName'] ?? '')
-                                                  .toString() ==
-                                              selectedName,
-                                          orElse: () => {},
+                                          (s) => s.companyName == selectedName,
                                         );
                                         setState(() {
-                                          _supplierId = hit['id']?.toString();
+                                          _supplierId = hit.id;
                                           _supplierName = selectedName;
-                                          _supplierEmail =
-                                              (hit['email'] ?? '').toString();
+                                          _supplierEmail = hit.email;
                                         });
                                       },
                                       icon: Icons.business_outlined,

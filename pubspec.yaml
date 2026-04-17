@@ -71,14 +71,16 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/admin.jpg"
+  image_path: "assets/Qore.JPG"
 
 # Flutter-specific configuration
 flutter:
   uses-material-design: true
   assets:
+    - assets/
     - assets/google_logo.png
     - assets/admin.jpg
+    - assets/Qore.JPG
     - assets/notification.mp3
     - assets/placeholder_avatar.png
     - assets/mitranlogo.jpg # Added for receipt printing

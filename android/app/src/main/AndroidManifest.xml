@@ -17,7 +17,7 @@
 
 
     <application
-        android:label="Zayka Admin"
+        android:label="Qore Admin"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="false">
 

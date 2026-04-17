@@ -1572,12 +1572,16 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
     try {
       final payment =
           _isSplitBill ? _buildSplitSummaryPayment() : _buildSinglePayment();
-      await _submitPayment(payment);
+      final orderId =
+          await _submitPayment(payment);
 
       if (mounted) {
         setState(() => _isSuccess = true);
         await Future.delayed(const Duration(milliseconds: 1500));
-        if (mounted) Navigator.pop(context, payment);
+        if (mounted) {
+          Navigator.pop(context, payment);
+          widget.onPaymentComplete(orderId);
+        }
       }
     } catch (e) {
       final errorMessage = PosService.displayError(e);
@@ -1677,12 +1681,12 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
     );
   }
 
-  Future<void> _submitPayment(PosPayment payment) async {
+  Future<String?> _submitPayment(PosPayment payment) async {
     if (widget.returnPaymentOnly) {
       if (mounted) {
         Navigator.pop(context, payment);
       }
-      return;
+      return null;
     }
 
     final pos = context.read<PosService>();
@@ -1695,9 +1699,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
       existingOrders: widget.existingOrders,
     );
 
-    if (!mounted) return;
-
-    widget.onPaymentComplete(orderId);
+    return orderId;
   }
 
   void _showInfo(String message) {

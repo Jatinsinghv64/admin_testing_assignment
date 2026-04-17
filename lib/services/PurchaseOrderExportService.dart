@@ -9,11 +9,12 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import 'CsvExportService.dart';
+import '../Models/inventory/purchase_order.dart';
 
 class PurchaseOrderExportService {
   static Future<void> exportOrders(
     BuildContext context, {
-    required List<Map<String, dynamic>> orders,
+    required List<PurchaseOrder> orders,
     required String format,
   }) async {
     if (orders.isEmpty) {
@@ -99,18 +100,18 @@ class PurchaseOrderExportService {
     }
   }
 
-  static List<int> _buildExcel(List<Map<String, dynamic>> orders) {
+  static List<int> _buildExcel(List<PurchaseOrder> orders) {
     final excel = excel_lib.Excel.createExcel();
     final summarySheet = excel['Summary'];
     final ordersSheet = excel['Purchase Orders'];
 
     final totalAmount = orders.fold<double>(
       0,
-      (runningTotal, order) => runningTotal + _readTotalAmount(order),
+      (runningTotal, order) => runningTotal + order.totalAmount,
     );
     final statusCounts = <String, int>{};
     for (final order in orders) {
-      final status = _readStatus(order);
+      final status = order.status;
       statusCounts[status] = (statusCounts[status] ?? 0) + 1;
     }
 
@@ -152,20 +153,16 @@ class PurchaseOrderExportService {
 
     for (final order in orders) {
       ordersSheet.appendRow([
-        excel_lib.TextCellValue((order['poNumber'] ?? '-').toString()),
-        excel_lib.TextCellValue(_formatDate(_orderDate(order))),
-        excel_lib.TextCellValue((order['supplierName'] ?? '-').toString()),
-        excel_lib.TextCellValue(_readStatus(order)),
-        excel_lib.IntCellValue((order['lineItems'] as List?)?.length ?? 0),
-        excel_lib.DoubleCellValue(_readTotalAmount(order)),
-        excel_lib.TextCellValue(
-          _formatDate((order['expectedDeliveryDate'] as Timestamp?)?.toDate()),
-        ),
-        excel_lib.TextCellValue(
-          _formatDate((order['receivedDate'] as Timestamp?)?.toDate()),
-        ),
-        excel_lib.TextCellValue((order['createdBy'] ?? '-').toString()),
-        excel_lib.TextCellValue((order['notes'] ?? '').toString()),
+        excel_lib.TextCellValue(order.poNumber),
+        excel_lib.TextCellValue(_formatDate(order.orderDate)),
+        excel_lib.TextCellValue(order.supplierName),
+        excel_lib.TextCellValue(order.status),
+        excel_lib.IntCellValue(order.itemsCount),
+        excel_lib.DoubleCellValue(order.totalAmount),
+        excel_lib.TextCellValue(_formatDate(order.expectedDeliveryDate)),
+        excel_lib.TextCellValue(_formatDate(order.receivedDate)),
+        excel_lib.TextCellValue(order.createdBy),
+        excel_lib.TextCellValue(order.notes),
       ]);
     }
 
@@ -177,11 +174,11 @@ class PurchaseOrderExportService {
     return bytes;
   }
 
-  static Future<List<int>> _buildPdf(List<Map<String, dynamic>> orders) async {
+  static Future<List<int>> _buildPdf(List<PurchaseOrder> orders) async {
     final pdf = pw.Document();
     final totalAmount = orders.fold<double>(
       0,
-      (runningTotal, order) => runningTotal + _readTotalAmount(order),
+      (runningTotal, order) => runningTotal + order.totalAmount,
     );
 
     pdf.addPage(
@@ -241,18 +238,14 @@ class PurchaseOrderExportService {
             data: orders
                 .map(
                   (order) => [
-                    (order['poNumber'] ?? '-').toString(),
-                    _formatDate(_orderDate(order)),
-                    (order['supplierName'] ?? '-').toString(),
-                    _readStatus(order),
-                    '${(order['lineItems'] as List?)?.length ?? 0}',
-                    _readTotalAmount(order).toStringAsFixed(2),
-                    _formatDate(
-                      (order['expectedDeliveryDate'] as Timestamp?)?.toDate(),
-                    ),
-                    _formatDate(
-                      (order['receivedDate'] as Timestamp?)?.toDate(),
-                    ),
+                    order.poNumber,
+                    _formatDate(order.orderDate),
+                    order.supplierName,
+                    order.status,
+                    '${order.itemsCount}',
+                    order.totalAmount.toStringAsFixed(2),
+                    _formatDate(order.expectedDeliveryDate),
+                    _formatDate(order.receivedDate),
                   ],
                 )
                 .toList(),
@@ -301,24 +294,10 @@ class PurchaseOrderExportService {
     );
   }
 
-  static DateTime? _orderDate(Map<String, dynamic> order) {
-    return (order['orderDate'] as Timestamp?)?.toDate() ??
-        (order['createdAt'] as Timestamp?)?.toDate();
-  }
-
   static String _formatDate(DateTime? date) {
     if (date == null) {
       return '-';
     }
     return DateFormat('yyyy-MM-dd').format(date);
-  }
-
-  static String _readStatus(Map<String, dynamic> order) {
-    final status = (order['status'] ?? 'unknown').toString().trim();
-    return status.isEmpty ? 'unknown' : status;
-  }
-
-  static double _readTotalAmount(Map<String, dynamic> order) {
-    return ((order['totalAmount'] as num?) ?? 0).toDouble();
   }
 }

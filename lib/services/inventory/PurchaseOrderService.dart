@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../Models/inventory/supplier.dart';
+import '../../Models/inventory/purchase_order.dart';
 import '../../constants.dart';
 
 class PurchaseOrderService {
@@ -16,11 +18,11 @@ class PurchaseOrderService {
   CollectionReference<Map<String, dynamic>> get _movementsCol =>
       _db.collection(AppConstants.collectionStockMovements);
 
-  Stream<List<Map<String, dynamic>>> streamSuppliers(
+  Stream<List<Supplier>> streamSuppliers(
     List<String> branchIds, {
     bool? isActive,
   }) {
-    if (branchIds.isEmpty) return const Stream.empty();
+    if (branchIds.isEmpty) return Stream.value([]);
     Query<Map<String, dynamic>> q = _suppliersCol;
     if (branchIds.length == 1) {
       q = q.where('branchIds', arrayContains: branchIds.first);
@@ -32,51 +34,38 @@ class PurchaseOrderService {
     }
     return q.snapshots().map(
       (snap) {
-        final docs = snap.docs
-            .map((d) => {
-                  'id': d.id,
-                  ...d.data(),
-                })
+        final suppliers = snap.docs
+            .map((d) => Supplier.fromMap(d.id, d.data()))
             .toList();
+        
         // Client-side sorting to avoid composite index requirement
-        docs.sort((a, b) {
-          final nameA = (a['companyName'] ?? '').toString().toLowerCase();
-          final nameB = (b['companyName'] ?? '').toString().toLowerCase();
-          return nameA.compareTo(nameB);
-        });
-        return docs;
+        suppliers.sort((a, b) => a.companyName.toLowerCase().compareTo(b.companyName.toLowerCase()));
+        
+        return suppliers;
       },
     );
   }
 
-  Future<void> saveSupplier({
-    String? supplierId,
-    required List<String> branchIds,
-    required Map<String, dynamic> data,
-  }) async {
-    final doc = supplierId == null
+  Future<void> saveSupplier(Supplier supplier) async {
+    final doc = supplier.id.isEmpty
         ? _suppliersCol.doc()
-        : _suppliersCol.doc(supplierId);
-    final now = Timestamp.fromDate(DateTime.now());
-    final payload = {
-      ...data,
-      'branchIds': branchIds,
-      'updatedAt': now,
-      if (supplierId == null) 'createdAt': now,
-    };
-    if (supplierId == null) {
+        : _suppliersCol.doc(supplier.id);
+    
+    final payload = supplier.toMap();
+    
+    if (supplier.id.isEmpty) {
       await doc.set(payload);
     } else {
       await doc.update(payload);
     }
   }
 
-  Stream<List<Map<String, dynamic>>> streamPurchaseOrders(
+  Stream<List<PurchaseOrder>> streamPurchaseOrders(
     List<String> branchIds, {
     String status = 'all',
     String? supplierId,
   }) {
-    if (branchIds.isEmpty) return const Stream.empty();
+    if (branchIds.isEmpty) return Stream.value([]);
     Query<Map<String, dynamic>> q = _poCol;
     if (branchIds.length == 1) {
       q = q.where('branchIds', arrayContains: branchIds.first);
@@ -92,24 +81,19 @@ class PurchaseOrderService {
 
     return q.snapshots().map(
       (snap) {
-        final docs = snap.docs
-            .map((d) => {
-                  'id': d.id,
-                  ...d.data(),
-                })
+        final orders = snap.docs
+            .map((d) => PurchaseOrder.fromMap(d.id, d.data()))
             .toList();
+        
         // Client-side sorting to avoid composite index requirement
-        docs.sort((a, b) {
-          final dateA = (a['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
-          final dateB = (b['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
-          return dateB.compareTo(dateA); // descending
-        });
-        return docs;
+        orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        
+        return orders;
       },
     );
   }
 
-  Future<List<Map<String, dynamic>>> getPurchaseOrdersByRange(
+  Future<List<PurchaseOrder>> getPurchaseOrdersByRange(
     List<String> branchIds, {
     required DateTime start,
     required DateTime end,
@@ -129,14 +113,12 @@ class PurchaseOrderService {
       q = q.where('status', whereIn: statuses.take(10).toList());
     }
     final snap = await q.get();
-    final docs = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+    final orders = snap.docs.map((d) => PurchaseOrder.fromMap(d.id, d.data())).toList();
+    
     // Client-side sorting
-    docs.sort((a, b) {
-      final dateA = (a['orderDate'] as Timestamp?)?.toDate() ?? DateTime(0);
-      final dateB = (b['orderDate'] as Timestamp?)?.toDate() ?? DateTime(0);
-      return dateB.compareTo(dateA); // descending
-    });
-    return docs;
+    orders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
+    
+    return orders;
   }
 
   Future<String> generatePoNumber(List<String> branchIds) async {
