@@ -123,7 +123,7 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
                 child: Container(
                   decoration: BoxDecoration(
                     border:
-                        Border(right: BorderSide(color: Colors.grey.shade200)),
+                        Border(right: BorderSide(color: Theme.of(context).dividerColor)),
                   ),
                   child: _buildOrdersList(),
                 ),
@@ -173,7 +173,7 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -241,7 +241,7 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
           // Layout Toggle
           Container(
             decoration: BoxDecoration(
-              color: Colors.grey[100],
+              color: Theme.of(context).scaffoldBackgroundColor,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
             ),
@@ -501,7 +501,7 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.grey[100],
+              color: Theme.of(context).scaffoldBackgroundColor,
               shape: BoxShape.circle,
             ),
             child: Icon(icon, size: 48, color: Colors.grey[400]),
@@ -544,12 +544,12 @@ class _DeliveryOrdersPanelState extends State<DeliveryOrdersPanel>
                   Icon(Icons.error_outline, size: 40, color: Colors.red[400]),
             ),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               'Failed to load orders',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
-                color: Colors.black87,
+                color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
               ),
             ),
             const SizedBox(height: 8),
@@ -954,8 +954,8 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
 
         return Container(
           decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border(left: BorderSide(color: Colors.grey.shade200)),
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+            border: Border(left: BorderSide(color: Theme.of(context).dividerColor)),
           ),
           child: Column(
             children: [
@@ -992,7 +992,7 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
+        border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
       ),
       child: Row(
         children: [
@@ -1154,8 +1154,8 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade100)),
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
         boxShadow: [
           BoxShadow(
               color: Colors.black.withValues(alpha: 0.05),
@@ -1174,11 +1174,11 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
                 onPressed:
                     _isUpdating ? null : () => _updateOrderStatus(nextStatus!),
                 icon: _isUpdating
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 24,
                         height: 24,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
+                            strokeWidth: 2, color: Theme.of(context).cardColor))
                     : Icon(statusIcon, size: 28),
                 label: Text(statusLabel,
                     style: const TextStyle(

@@ -125,6 +125,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
     final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
@@ -135,31 +136,31 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     if (_filter == 'inactive') streamIsActive = false;
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: Column(
         children: [
-          _buildHeader(branchIds),
+          _buildHeader(branchIds, theme),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(32.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildFilterRow(),
+                  _buildFilterRow(theme),
                   const SizedBox(height: 16),
-                  _buildCategoryFilter(),
+                  _buildCategoryFilter(theme),
                   const SizedBox(height: 24),
                   Expanded(
                     child: branchIds.isEmpty
-                        ? _buildEmptyState('Select a branch to manage suppliers.')
+                        ? _buildEmptyState('Select a branch to manage suppliers.', theme)
                         : StreamBuilder<List<Supplier>>(
                             stream: poService.streamSuppliers(branchIds, isActive: streamIsActive),
                             builder: (context, snapshot) {
                               if (snapshot.connectionState == ConnectionState.waiting) {
-                                return const Center(child: CircularProgressIndicator(color: Colors.deepPurple));
+                                return Center(child: CircularProgressIndicator(color: theme.colorScheme.primary));
                               }
                               if (snapshot.hasError) {
-                                return _buildEmptyState('Error loading suppliers: ${snapshot.error}');
+                                return _buildEmptyState('Error loading suppliers: ${snapshot.error}', theme);
                               }
 
                               var suppliers = snapshot.data ?? [];
@@ -174,7 +175,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                                 suppliers = suppliers.where((s) => s.supplierCategories.contains(_categoryFilter)).toList();
                               }
 
-                              if (suppliers.isEmpty) return _buildEmptyState('No suppliers found matching your criteria.');
+                              if (suppliers.isEmpty) return _buildEmptyState('No suppliers found matching your criteria.', theme);
 
                               return _buildSupplierGrid(suppliers, branchIds);
                             },
@@ -189,12 +190,12 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     );
   }
 
-  Widget _buildHeader(List<String> branchIds) {
+  Widget _buildHeader(List<String> branchIds, ThemeData theme) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+        color: theme.cardColor,
+        border: Border(bottom: BorderSide(color: theme.dividerColor)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -202,22 +203,22 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Suppliers', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87)),
-              Text('Manage relationships, contacts, and purchase history.', style: TextStyle(color: Colors.grey[600])),
+              Text('Suppliers', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color)),
+              Text('Manage relationships, contacts, and purchase history.', style: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6))),
             ],
           ),
           Row(
             children: [
-              _buildSearchBar(),
+              _buildSearchBar(theme),
               const SizedBox(width: 16),
               OutlinedButton.icon(
                 onPressed: branchIds.isEmpty ? null : () => _handleSupplierImport(branchIds),
                 icon: const Icon(Icons.upload_file_outlined, size: 18),
                 label: const Text('Import'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.deepPurple,
+                  foregroundColor: theme.colorScheme.primary,
                   padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                  side: BorderSide(color: Colors.grey.shade300),
+                  side: BorderSide(color: theme.dividerColor),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
@@ -227,7 +228,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                 icon: const Icon(Icons.add, size: 20),
                 label: const Text('Add New Supplier', style: TextStyle(fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
+                  backgroundColor: theme.colorScheme.primary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -241,20 +242,21 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     );
   }
 
-  Widget _buildSearchBar() {
+  Widget _buildSearchBar(ThemeData theme) {
     return Container(
       width: 280,
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        color: theme.brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: theme.dividerColor),
       ),
       child: TextField(
         controller: _searchCtrl,
+        style: TextStyle(color: theme.textTheme.bodyLarge?.color),
         decoration: InputDecoration(
           hintText: 'Search suppliers...',
-          hintStyle: TextStyle(color: Colors.grey[500], fontSize: 14),
-          prefixIcon: Icon(Icons.search, color: Colors.grey[500], size: 20),
+          hintStyle: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5), fontSize: 14),
+          prefixIcon: Icon(Icons.search, color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5), size: 20),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           isDense: true,
@@ -264,25 +266,25 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     );
   }
 
-  Widget _buildFilterRow() {
+  Widget _buildFilterRow(ThemeData theme) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const Text('Supplier Directory', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
+        Text('Supplier Directory', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color)),
         Row(
           children: [
-            _statusFilterButton('All', 'all'),
+            _statusFilterButton('All', 'all', theme),
             const SizedBox(width: 8),
-            _statusFilterButton('Active', 'active'),
+            _statusFilterButton('Active', 'active', theme),
             const SizedBox(width: 8),
-            _statusFilterButton('Inactive', 'inactive'),
+            _statusFilterButton('Inactive', 'inactive', theme),
           ],
         ),
       ],
     );
   }
 
-  Widget _statusFilterButton(String label, String value) {
+  Widget _statusFilterButton(String label, String value, ThemeData theme) {
     final isSelected = _filter == value;
     return InkWell(
       onTap: () => setState(() => _filter = value),
@@ -290,13 +292,13 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.deepPurple.shade50 : Colors.transparent,
+          color: isSelected ? theme.colorScheme.primary.withOpacity(0.1) : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: isSelected ? Colors.deepPurple : Colors.grey.shade600,
+            color: isSelected ? theme.colorScheme.primary : theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
             fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
             fontSize: 14,
           ),
@@ -305,30 +307,31 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     );
   }
 
-  Widget _buildCategoryFilter() {
+  Widget _buildCategoryFilter(ThemeData theme) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-          _categoryChip('All'),
+          _categoryChip('All', theme),
           ...availableCategories.map((c) => Padding(
             padding: const EdgeInsets.only(left: 8),
-            child: _categoryChip(c),
+            child: _categoryChip(c, theme),
           )),
         ],
       ),
     );
   }
 
-  Widget _categoryChip(String label) {
+  Widget _categoryChip(String label, ThemeData theme) {
     final selected = _categoryFilter == label;
     return ChoiceChip(
       label: Text(label),
       selected: selected,
       onSelected: (_) => setState(() => _categoryFilter = label),
-      selectedColor: Colors.deepPurple,
+      selectedColor: theme.colorScheme.primary,
+      backgroundColor: theme.cardColor,
       labelStyle: TextStyle(
-        color: selected ? Colors.white : Colors.grey[700],
+        color: selected ? Colors.white : theme.textTheme.bodyMedium?.color?.withOpacity(0.8),
         fontWeight: selected ? FontWeight.bold : FontWeight.normal,
       ),
     );
@@ -360,14 +363,14 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     );
   }
 
-  Widget _buildEmptyState(String message) {
+  Widget _buildEmptyState(String message, ThemeData theme) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey[200]),
+          Icon(Icons.inventory_2_outlined, size: 64, color: theme.dividerColor),
           const SizedBox(height: 16),
-          Text(message, style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+          Text(message, style: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6), fontSize: 16)),
         ],
       ),
     );

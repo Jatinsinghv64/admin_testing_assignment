@@ -27,13 +27,12 @@ import '../../Widgets/ai/trending_suggestions_panel.dart';
 
 // ─── Theme Colors (matching app ThemeData: light bg, deepPurple primary) ─────
 class _InvColors {
-  static final Color bgDark = Colors.grey.shade50; // app scaffold bg
-  static const Color surfaceDark = Colors.white; // card surfaces
-  static final Color surfaceLighter = Colors.grey.shade100; // subtle surfaces
-  static final Color borderDark = Colors.grey.shade200; // borders
-  static final Color primary = Colors.deepPurple;
-  static const Color textMain = Color(0xFF1E293B); // slate-800
-  static const Color textMuted = Color(0xFF64748B); // slate-500
+  static Color background(BuildContext context) => Theme.of(context).scaffoldBackgroundColor;
+  static Color surface(BuildContext context) => Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor;
+  static Color border(BuildContext context) => Theme.of(context).dividerColor;
+  static Color primary(BuildContext context) => Theme.of(context).colorScheme.primary;
+  static Color textMain(BuildContext context) => Theme.of(context).textTheme.bodyLarge?.color ?? const Color(0xFF1E293B);
+  static Color textMuted(BuildContext context) => Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6) ?? const Color(0xFF64748B);
 }
 
 class InventoryDashboardScreen extends StatefulWidget {
@@ -307,7 +306,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
 
       _showSnackBar(
         'Generating ${selectedFormat.toUpperCase()} report...',
-        backgroundColor: _InvColors.primary,
+        backgroundColor: Theme.of(context).colorScheme.primary,
       );
       await ExportReportService.generateReport(
         context: context,
@@ -356,7 +355,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
     final isRecipeTab = idx == 6;
 
     return Scaffold(
-      backgroundColor: _InvColors.bgDark,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
           // ─── Header ────────────────────────────────────────────────
@@ -364,33 +363,33 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
           // ─── Search (for Categories / Menu Items) ──────────────────
           if (isCategoryTab || isMenuTab)
             Container(
-              color: _InvColors.surfaceDark,
+              color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
               padding: const EdgeInsets.fromLTRB(24, 4, 24, 12),
               child: TextField(
                 controller: _searchController,
                 style:
-                    const TextStyle(color: _InvColors.textMain, fontSize: 14),
+                    TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: isCategoryTab
                       ? 'Search categories by name...'
                       : 'Search menu items by name...',
-                  hintStyle: const TextStyle(
-                      color: _InvColors.textMuted, fontSize: 14),
-                  prefixIcon: const Icon(Icons.search_rounded,
-                      color: _InvColors.textMuted),
+                  hintStyle: TextStyle(
+                      color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6), fontSize: 14),
+                  prefixIcon: Icon(Icons.search_rounded,
+                      color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                   filled: true,
-                  fillColor: _InvColors.bgDark,
+                  fillColor: Theme.of(context).scaffoldBackgroundColor,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: _InvColors.borderDark),
+                    borderSide: BorderSide(color: Theme.of(context).dividerColor),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: _InvColors.borderDark),
+                    borderSide: BorderSide(color: Theme.of(context).dividerColor),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: _InvColors.primary),
+                    borderSide: BorderSide(color: Theme.of(context).colorScheme.primary),
                   ),
                   contentPadding: const EdgeInsets.symmetric(vertical: 12),
                 ),
@@ -428,9 +427,9 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
     return Container(
       padding: const EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 16),
       decoration: BoxDecoration(
-        color: _InvColors.bgDark,
+        color: Theme.of(context).scaffoldBackgroundColor,
         border: Border(
-          bottom: BorderSide(color: _InvColors.borderDark, width: 1),
+          bottom: BorderSide(color: Theme.of(context).dividerColor, width: 1),
         ),
       ),
       child: SafeArea(
@@ -445,12 +444,12 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Inventory Management',
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.w900,
-                          color: _InvColors.textMain,
+                          color: Theme.of(context).textTheme.bodyLarge?.color,
                           letterSpacing: -0.5,
                         ),
                       ),
@@ -459,7 +458,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                         'Track stock levels, manage waste, and monitor categories.',
                         style: TextStyle(
                           fontSize: 13,
-                          color: _InvColors.textMuted,
+                          color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                         ),
                       ),
                     ],
@@ -545,19 +544,19 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                               horizontal: 16, vertical: 10),
                           decoration: BoxDecoration(
                             color: selected
-                                ? _InvColors.primary
-                                : Colors.white,
+                                ? Theme.of(context).colorScheme.primary
+                                : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.white),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: selected
-                                  ? _InvColors.primary
-                                  : _InvColors.borderDark,
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).dividerColor,
                               width: 1.2,
                             ),
                             boxShadow: selected
                                 ? [
                                     BoxShadow(
-                                      color: _InvColors.primary.withOpacity(0.2),
+                                      color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
                                       blurRadius: 8,
                                       offset: const Offset(0, 4),
                                     )
@@ -572,7 +571,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                                 size: 16,
                                 color: selected
                                     ? Colors.white
-                                    : _InvColors.textMuted,
+                                    : Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                               ),
                               const SizedBox(width: 8),
                               Text(
@@ -584,7 +583,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                                       : FontWeight.w600,
                                   color: selected
                                       ? Colors.white
-                                      : _InvColors.textMain,
+                                      : Theme.of(context).textTheme.bodyLarge?.color,
                                 ),
                               ),
                             ],
@@ -616,13 +615,13 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: filled ? _InvColors.primary : _InvColors.surfaceDark,
+            color: filled ? Theme.of(context).colorScheme.primary : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor),
             borderRadius: BorderRadius.circular(10),
-            border: filled ? null : Border.all(color: _InvColors.borderDark),
+            border: filled ? null : Border.all(color: Theme.of(context).dividerColor),
             boxShadow: filled
                 ? [
                     BoxShadow(
-                        color: _InvColors.primary.withOpacity(0.25),
+                        color: Theme.of(context).colorScheme.primary.withOpacity(0.25),
                         blurRadius: 12)
                   ]
                 : null,
@@ -632,14 +631,14 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
             children: [
               Icon(icon,
                   size: 18,
-                  color: filled ? _InvColors.bgDark : _InvColors.textMain),
+                  color: filled ? Theme.of(context).scaffoldBackgroundColor : Theme.of(context).textTheme.bodyLarge?.color),
               const SizedBox(width: 6),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: filled ? _InvColors.bgDark : _InvColors.textMain,
+                  color: filled ? Theme.of(context).colorScheme.onPrimary : Theme.of(context).textTheme.bodyLarge?.color,
                 ),
               ),
             ],
@@ -699,7 +698,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
         }
         if (ingSnap.connectionState == ConnectionState.waiting) {
           return Center(
-            child: CircularProgressIndicator(color: _InvColors.primary),
+            child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
           );
         }
         if (ingSnap.hasError) {
@@ -799,7 +798,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                             cursor: SystemMouseCursors.click,
                             child: _card(
                               title: 'Stock Movement Summary',
-                              trailing: const Icon(Icons.open_in_new, size: 14, color: _InvColors.textMuted),
+                              trailing: Icon(Icons.open_in_new, size: 14, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -828,14 +827,14 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                               ),
                               if (movements.isNotEmpty) ...[
                                 const SizedBox(height: 18),
-                                Divider(color: _InvColors.borderDark, height: 1),
+                                Divider(color: Theme.of(context).dividerColor, height: 1),
                                 const SizedBox(height: 12),
                                 Text(
                                   'Recent Activity',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.4,
                                   ),
                                 ),
@@ -870,17 +869,17 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                                             children: [
                                               Text(
                                                 name,
-                                                style: const TextStyle(
+                                                style: TextStyle(
                                                   fontSize: 12,
                                                   fontWeight: FontWeight.w600,
-                                                  color: _InvColors.textMain,
+                                                  color: Theme.of(context).textTheme.bodyLarge?.color,
                                                 ),
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
                                               ),
                                               Text(
                                                 type,
-                                                style: const TextStyle(fontSize: 10, color: _InvColors.textMuted),
+                                                style: TextStyle(fontSize: 10, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                                               ),
                                             ],
                                           ),
@@ -899,7 +898,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                                             if (dt != null)
                                               Text(
                                                 dt.toLocal().toString().split(' ').first,
-                                                style: const TextStyle(fontSize: 10, color: _InvColors.textMuted),
+                                                style: TextStyle(fontSize: 10, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                                               ),
                                           ],
                                         ),
@@ -971,18 +970,18 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: _InvColors.borderDark),
+            border: Border.all(color: Theme.of(context).dividerColor),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 18, color: _InvColors.textMuted),
+              Icon(icon, size: 18, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
               const SizedBox(width: 8),
               Text(label,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: _InvColors.textMain)),
+                      color: Theme.of(context).textTheme.bodyLarge?.color)),
             ],
           ),
         ),
@@ -996,9 +995,9 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
         constraints: const BoxConstraints(maxWidth: 420),
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: _InvColors.surfaceDark,
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: _InvColors.borderDark),
+          border: Border.all(color: Theme.of(context).dividerColor),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1006,16 +1005,16 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
             Icon(
               Icons.account_tree_outlined,
               size: 34,
-              color: _InvColors.primary,
+              color: Theme.of(context).colorScheme.primary,
             ),
             const SizedBox(height: 14),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: _InvColors.textMain,
+                color: Theme.of(context).textTheme.bodyLarge?.color,
               ),
             ),
           ],
@@ -1033,19 +1032,19 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
           color: selected
-              ? _InvColors.primary.withOpacity(0.15)
-              : _InvColors.bgDark,
+              ? Theme.of(context).colorScheme.primary.withOpacity(0.15)
+              : Theme.of(context).scaffoldBackgroundColor,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: selected
-                ? _InvColors.primary.withOpacity(0.4)
-                : _InvColors.borderDark,
+                ? Theme.of(context).colorScheme.primary.withOpacity(0.4)
+                : Theme.of(context).dividerColor,
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: selected ? _InvColors.primary : _InvColors.textMuted,
+            color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
             fontWeight: selected ? FontWeight.bold : FontWeight.w500,
             fontSize: 12,
           ),
@@ -1073,7 +1072,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
           Text(
             label,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: _InvColors.textMuted, fontSize: 11),
+            style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6), fontSize: 11),
           ),
         ],
       ),
@@ -1103,7 +1102,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
           title: 'Total Items',
           value: totalItems.toString(),
           icon: Icons.category_outlined,
-          color: _InvColors.primary,
+          color: Theme.of(context).colorScheme.primary,
         ),
         _kpiCard(
           title: 'Inventory Value',
@@ -1147,7 +1146,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
     VoidCallback? onTap,
   }) {
     return Material(
-      color: _InvColors.surfaceDark,
+      color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
@@ -1158,7 +1157,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color:
-                  isAlert ? Colors.red.withOpacity(0.4) : _InvColors.borderDark,
+                  isAlert ? Colors.red.withOpacity(0.4) : Theme.of(context).dividerColor,
             ),
           ),
           child: Column(
@@ -1175,8 +1174,8 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
               const Spacer(),
               Text(
                 title,
-                style: const TextStyle(
-                  color: _InvColors.textMuted,
+                style: TextStyle(
+                  color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
                 ),
@@ -1185,7 +1184,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
               Text(
                 value,
                 style: TextStyle(
-                  color: isAlert ? Colors.red : _InvColors.textMain,
+                  color: isAlert ? Colors.red : Theme.of(context).textTheme.bodyLarge?.color,
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
                 ),
@@ -1206,9 +1205,9 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: _InvColors.surfaceDark,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _InvColors.borderDark),
+        border: Border.all(color: Theme.of(context).dividerColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1219,10 +1218,10 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
             children: [
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: _InvColors.textMain,
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
                   letterSpacing: -0.3,
                 ),
               ),
@@ -1246,7 +1245,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
             width: 700,
             constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
             decoration: BoxDecoration(
-              color: _InvColors.bgDark,
+              color: Theme.of(context).scaffoldBackgroundColor,
               borderRadius: BorderRadius.circular(20),
             ),
             child: Column(
@@ -1254,31 +1253,31 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                   decoration: BoxDecoration(
-                    color: _InvColors.surfaceDark,
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                    border: Border(bottom: BorderSide(color: _InvColors.borderDark)),
+                    border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
+                      Text(
                         'Detailed Stock Movement',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _InvColors.textMain),
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Theme.of(context).textTheme.bodyLarge?.color),
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close, color: _InvColors.textMuted),
+                        icon: Icon(Icons.close, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                       ),
                     ],
                   ),
                 ),
                 Expanded(
                   child: movements.isEmpty
-                      ? const Center(child: Text('No movements to show.', style: TextStyle(color: _InvColors.textMuted)))
+                      ? Center(child: Text('No movements to show.', style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))))
                       : ListView.separated(
                           padding: const EdgeInsets.all(24),
                           itemCount: movements.length,
-                          separatorBuilder: (_, __) => Divider(color: _InvColors.borderDark, height: 24),
+                          separatorBuilder: (_, __) => Divider(color: Theme.of(context).dividerColor, height: 24),
                           itemBuilder: (context, index) {
                             final m = movements[index];
                             final qty = (m['quantity'] as num?)?.toDouble() ?? 0.0;
@@ -1311,9 +1310,9 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                               margin: const EdgeInsets.only(bottom: 12),
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: _InvColors.bgDark,
+                                color: Theme.of(context).scaffoldBackgroundColor,
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: _InvColors.borderDark),
+                                border: Border.all(color: Theme.of(context).dividerColor),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1339,21 +1338,21 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                                         child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            Text(name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _InvColors.textMain)),
+                                            Text(name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Theme.of(context).textTheme.bodyLarge?.color)),
                                             const SizedBox(height: 6),
                                             Row(
                                               children: [
                                                 Container(
                                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                                   decoration: BoxDecoration(
-                                                    color: _InvColors.primary.withOpacity(0.1),
+                                                    color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
                                                     borderRadius: BorderRadius.circular(6),
                                                   ),
-                                                  child: Text(type.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _InvColors.primary)),
+                                                  child: Text(type.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.primary)),
                                                 ),
                                                 if (displayRef != null) ...[
                                                   const SizedBox(width: 10),
-                                                  Text('REF: $displayRef', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _InvColors.textMuted)),
+                                                  Text('REF: $displayRef', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
                                                 ],
                                               ],
                                             ),
@@ -1362,16 +1361,16 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                                               Row(
                                                 children: [
                                                   if (user.isNotEmpty && user != 'null') ...[
-                                                    const Icon(Icons.person_outline, size: 14, color: _InvColors.textMuted),
+                                                    Icon(Icons.person_outline, size: 14, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                                                     const SizedBox(width: 4),
-                                                    Text(user, style: const TextStyle(fontSize: 12, color: _InvColors.textMuted)),
+                                                    Text(user, style: TextStyle(fontSize: 12, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
                                                   ],
                                                   if (branchLabel.isNotEmpty) ...[
                                                     if (user.isNotEmpty && user != 'null')
                                                       const SizedBox(width: 12),
-                                                    const Icon(Icons.storefront_rounded, size: 14, color: _InvColors.textMuted),
+                                                    Icon(Icons.storefront_rounded, size: 14, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                                                     const SizedBox(width: 4),
-                                                    Flexible(child: Text(branchLabel, style: const TextStyle(fontSize: 12, color: _InvColors.textMuted), overflow: TextOverflow.ellipsis)),
+                                                    Flexible(child: Text(branchLabel, style: TextStyle(fontSize: 12, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)), overflow: TextOverflow.ellipsis)),
                                                   ]
                                                 ],
                                               )
@@ -1388,8 +1387,8 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                                           ),
                                           if (dt != null) ...[
                                             const SizedBox(height: 6),
-                                            Text(dt.toLocal().toString().split(' ').first, style: const TextStyle(fontSize: 11, color: _InvColors.textMuted)),
-                                            Text(dt.toLocal().toString().split(' ')[1].substring(0, 5), style: const TextStyle(fontSize: 11, color: _InvColors.textMuted)),
+                                            Text(dt.toLocal().toString().split(' ').first, style: TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
+                                            Text(dt.toLocal().toString().split(' ')[1].substring(0, 5), style: TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
                                           ],
                                         ],
                                       ),
@@ -1398,7 +1397,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                                   if ((bBefore != null && bAfter != null) || notes.isNotEmpty || warning.isNotEmpty) ...[
                                     Padding(
                                       padding: const EdgeInsets.symmetric(vertical: 12),
-                                      child: Divider(height: 1, color: _InvColors.borderDark),
+                                      child: Divider(height: 1, color: Theme.of(context).dividerColor),
                                     ),
                                     Row(
                                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1409,16 +1408,16 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                                             child: Column(
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
-                                                const Text('Balance Shift', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _InvColors.textMuted)),
+                                                Text('Balance Shift', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
                                                 const SizedBox(height: 6),
                                                 Row(
                                                   children: [
-                                                    Text(bBefore.toStringAsFixed(2), style: const TextStyle(fontSize: 13, color: _InvColors.textMuted, fontWeight: FontWeight.w600)),
-                                                    const Padding(
+                                                    Text(bBefore.toStringAsFixed(2), style: TextStyle(fontSize: 13, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6), fontWeight: FontWeight.w600)),
+                                                    Padding(
                                                       padding: EdgeInsets.symmetric(horizontal: 6),
-                                                      child: Icon(Icons.arrow_forward_rounded, size: 14, color: _InvColors.textMuted),
+                                                      child: Icon(Icons.arrow_forward_rounded, size: 14, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                                                     ),
-                                                    Text(bAfter.toStringAsFixed(2), style: const TextStyle(fontSize: 14, color: _InvColors.textMain, fontWeight: FontWeight.w900)),
+                                                    Text(bAfter.toStringAsFixed(2), style: TextStyle(fontSize: 14, color: Theme.of(context).textTheme.bodyLarge?.color, fontWeight: FontWeight.w900)),
                                                   ],
                                                 ),
                                               ]
@@ -1431,9 +1430,9 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
                                                 if (notes.isNotEmpty) ...[
-                                                  const Text('Notes', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _InvColors.textMuted)),
+                                                  Text('Notes', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
                                                   const SizedBox(height: 4),
-                                                  Text(notes, style: const TextStyle(fontSize: 12, color: _InvColors.textMain)),
+                                                  Text(notes, style: TextStyle(fontSize: 12, color: Theme.of(context).textTheme.bodyLarge?.color)),
                                                 ],
                                                 if (warning.isNotEmpty) ...[
                                                   if (notes.isNotEmpty) const SizedBox(height: 10),
@@ -1520,7 +1519,7 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return Center(
-                child: CircularProgressIndicator(color: _InvColors.primary),
+                child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
               );
             }
             if (snapshot.hasError) {
@@ -1546,7 +1545,7 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
                   widget.searchQuery.isNotEmpty
                       ? 'No categories match your search.'
                       : 'No categories found.',
-                  style: const TextStyle(color: _InvColors.textMuted),
+                  style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                 ),
               );
             }
@@ -1556,9 +1555,9 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
               padding: const EdgeInsets.all(16),
               child: Container(
                 decoration: BoxDecoration(
-                  color: _InvColors.surfaceDark,
+                  color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _InvColors.borderDark),
+                  border: Border.all(color: Theme.of(context).dividerColor),
                 ),
                 child: Column(
                   children: [
@@ -1567,11 +1566,11 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 20, vertical: 14),
                       decoration: BoxDecoration(
-                        color: _InvColors.surfaceLighter,
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Theme.of(context).cardColor,
                         borderRadius: const BorderRadius.vertical(
                             top: Radius.circular(12)),
                       ),
-                      child: const Row(children: [
+                      child: Row(children: [
                         SizedBox(width: 52), // image col
                         Expanded(
                             flex: 3,
@@ -1579,7 +1578,7 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.8))),
                         Expanded(
                             flex: 1,
@@ -1587,7 +1586,7 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.8))),
                         Expanded(
                             flex: 1,
@@ -1595,7 +1594,7 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.8))),
                         Expanded(
                             flex: 1,
@@ -1603,7 +1602,7 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.8))),
                         SizedBox(
                             width: 100,
@@ -1612,7 +1611,7 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.8))),
                       ]),
                     ),
@@ -1631,7 +1630,7 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
                         decoration: BoxDecoration(
                           border: Border(
                               top: BorderSide(
-                                  color: _InvColors.borderDark, width: 0.5)),
+                                  color: Theme.of(context).dividerColor, width: 0.5)),
                         ),
                         child: Material(
                           color: Colors.transparent,
@@ -1675,17 +1674,17 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
                                           CrossAxisAlignment.start,
                                       children: [
                                         Text(name,
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                                 fontWeight: FontWeight.w600,
                                                 fontSize: 14,
-                                                color: _InvColors.textMain),
+                                                color: Theme.of(context).textTheme.bodyLarge?.color),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis),
                                         if (nameAr.isNotEmpty)
                                           Text(nameAr,
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                   fontSize: 12,
-                                                  color: _InvColors.textMuted),
+                                                  color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               textDirection: TextDirection.rtl),
@@ -1695,16 +1694,16 @@ class _CategoriesManagementTabState extends State<_CategoriesManagementTab> {
                                 Expanded(
                                     flex: 1,
                                     child: Text('$sortOrder',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                             fontSize: 13,
-                                            color: _InvColors.textMuted))),
+                                            color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)))),
                                 // Branches
                                 Expanded(
                                     flex: 1,
                                     child: Text('${branchIds.length}',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                             fontSize: 13,
-                                            color: _InvColors.textMuted))),
+                                            color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)))),
                                 // Status
                                 Expanded(
                                     flex: 1,
@@ -1845,7 +1844,7 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return Center(
-                child: CircularProgressIndicator(color: _InvColors.primary),
+                child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
               );
             }
             if (snapshot.hasError) {
@@ -1871,7 +1870,7 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                   widget.searchQuery.isNotEmpty
                       ? 'No menu items match your search.'
                       : 'No menu items found.',
-                  style: const TextStyle(color: _InvColors.textMuted),
+                  style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                 ),
               );
             }
@@ -1881,9 +1880,9 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
               padding: const EdgeInsets.all(16),
               child: Container(
                 decoration: BoxDecoration(
-                  color: _InvColors.surfaceDark,
+                  color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _InvColors.borderDark),
+                  border: Border.all(color: Theme.of(context).dividerColor),
                 ),
                 child: Column(
                   children: [
@@ -1892,11 +1891,11 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 20, vertical: 14),
                       decoration: BoxDecoration(
-                        color: _InvColors.surfaceLighter,
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Theme.of(context).cardColor,
                         borderRadius: const BorderRadius.vertical(
                             top: Radius.circular(12)),
                       ),
-                      child: const Row(children: [
+                      child: Row(children: [
                         SizedBox(width: 52), // image col
                         Expanded(
                             flex: 3,
@@ -1904,7 +1903,7 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.8))),
                         Expanded(
                             flex: 2,
@@ -1912,7 +1911,7 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.8))),
                         Expanded(
                             flex: 1,
@@ -1920,7 +1919,7 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.8))),
                         Expanded(
                             flex: 1,
@@ -1928,7 +1927,7 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.8))),
                         SizedBox(
                             width: 100,
@@ -1937,7 +1936,7 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _InvColors.textMuted,
+                                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                     letterSpacing: 0.8))),
                       ]),
                     ),
@@ -1961,7 +1960,7 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                         decoration: BoxDecoration(
                           border: Border(
                               top: BorderSide(
-                                  color: _InvColors.borderDark, width: 0.5)),
+                                  color: Theme.of(context).dividerColor, width: 0.5)),
                         ),
                         child: Material(
                           color: Colors.transparent,
@@ -2011,12 +2010,11 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                                         Row(children: [
                                           Flexible(
                                               child: Text(name,
-                                                  style: const TextStyle(
+                                                  style: TextStyle(
                                                       fontWeight:
                                                           FontWeight.w600,
                                                       fontSize: 14,
-                                                      color:
-                                                          _InvColors.textMain),
+                                                      color: Theme.of(context).textTheme.bodyLarge?.color),
                                                   maxLines: 1,
                                                   overflow:
                                                       TextOverflow.ellipsis)),
@@ -2054,9 +2052,9 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                                         ]),
                                         if (nameAr.isNotEmpty)
                                           Text(nameAr,
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                   fontSize: 12,
-                                                  color: _InvColors.textMuted),
+                                                  color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               textDirection: TextDirection.rtl),
@@ -2083,9 +2081,9 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis),
                                         )
-                                      : const Text('—',
+                                      : Text('—',
                                           style: TextStyle(
-                                              color: _InvColors.textMuted)),
+                                              color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
                                 ),
                                 // Price
                                 Expanded(
@@ -2101,14 +2099,14 @@ class _MenuItemsManagementTabState extends State<_MenuItemsManagementTab> {
                                               fontWeight: FontWeight.w600,
                                               color: hasDiscount
                                                   ? Colors.green.shade700
-                                                  : _InvColors.textMain),
+                                                  : Theme.of(context).textTheme.bodyLarge?.color),
                                         ),
                                         if (hasDiscount)
                                           Text(
                                               'QAR ${price.toStringAsFixed(2)}',
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                   fontSize: 11,
-                                                  color: _InvColors.textMuted,
+                                                  color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                                                   decoration: TextDecoration
                                                       .lineThrough)),
                                       ],

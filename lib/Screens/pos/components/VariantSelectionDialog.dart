@@ -61,7 +61,7 @@ class _VariantSelectionDialogState extends State<VariantSelectionDialog> {
                   onPressed: () => Navigator.pop(context),
                   icon: const Icon(Icons.close),
                   style: IconButton.styleFrom(
-                    backgroundColor: Colors.grey[100],
+                    backgroundColor: Theme.of(context).scaffoldBackgroundColor,
                   ),
                 ),
               ],
@@ -134,8 +134,8 @@ class _VariantSelectionDialogState extends State<VariantSelectionDialog> {
                                   ),
                                 ),
                                 child: isSelected
-                                    ? const Icon(Icons.check,
-                                        size: 14, color: Colors.white)
+                                    ? Icon(Icons.check,
+                                        size: 14, color: Theme.of(context).cardColor)
                                     : null,
                               ),
                               const SizedBox(width: 16),

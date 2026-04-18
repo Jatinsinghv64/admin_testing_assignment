@@ -27,9 +27,9 @@ class WeeklyScheduleGrid extends StatelessWidget {
     return Container(
       width: double.infinity, // Ensure it fills available width
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).dividerColor),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -47,7 +47,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: days.length,
-            separatorBuilder: (context, index) => Divider(height: 1, color: Colors.grey[100]),
+            separatorBuilder: (context, index) => Divider(height: 1, color: Theme.of(context).dividerColor),
             itemBuilder: (context, index) => _buildDayRow(context, days[index]),
           ),
         ],
@@ -71,7 +71,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
                   color: Colors.deepPurple.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.calendar_today, color: Colors.deepPurple, size: 20),
+                child: Icon(Icons.calendar_today, color: Theme.of(context).primaryColor, size: 20),
               ),
               const SizedBox(width: 16),
               Column(
@@ -80,13 +80,13 @@ class WeeklyScheduleGrid extends StatelessWidget {
                   Text(
                     'WEEKLY SCHEDULE',
                     style: textTheme.titleMedium?.copyWith(
-                      color: Colors.black87,
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
                   Text(
                     'Define operational shifts and staffing',
-                    style: textTheme.bodySmall?.copyWith(color: Colors.grey[500]),
+                    style: textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
                   ),
                 ],
               ),
@@ -137,8 +137,8 @@ class WeeklyScheduleGrid extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
-        border: Border(bottom: BorderSide(color: Colors.grey[100]!)),
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.grey[50],
+        border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
       ),
       child: Row(
         children: [
@@ -175,7 +175,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
                 Text(
                   day,
                   style: textTheme.titleMedium?.copyWith(
-                    color: Colors.black87,
+                    color: Theme.of(context).textTheme.bodyLarge?.color,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -271,10 +271,10 @@ class WeeklyScheduleGrid extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.grey[50],
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.grey[50],
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isUnderstaffed ? Colors.red.withOpacity(0.3) : (hasConflict ? Colors.orange.withOpacity(0.3) : Colors.grey[200]!),
+              color: isUnderstaffed ? Colors.red.withOpacity(0.3) : (hasConflict ? Colors.orange.withOpacity(0.3) : Theme.of(context).dividerColor),
               width: 1,
             ),
           ),
@@ -285,7 +285,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
                 onTap: () => onUpdateShift(day, index, shift),
                 child: _buildTimeField(context, 'FROM', startTime),
               ),
-              Container(width: 1, height: 16, color: Colors.grey[200], margin: const EdgeInsets.symmetric(horizontal: 8)),
+              Container(width: 1, height: 16, color: Theme.of(context).dividerColor, margin: const EdgeInsets.symmetric(horizontal: 8)),
               InkWell(
                 onTap: () => onUpdateShift(day, index, shift),
                 child: _buildTimeField(context, 'TO', endTime),
@@ -329,7 +329,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
         ),
         Text(
           value,
-          style: textTheme.bodySmall?.copyWith(color: Colors.black87, fontWeight: FontWeight.bold),
+          style: textTheme.bodySmall?.copyWith(color: Theme.of(context).textTheme.bodyLarge?.color, fontWeight: FontWeight.bold),
         ),
       ],
     );
@@ -369,7 +369,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey[300]!, style: BorderStyle.solid),
+          border: Border.all(color: Theme.of(context).dividerColor, style: BorderStyle.solid),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

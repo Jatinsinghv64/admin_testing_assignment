@@ -104,7 +104,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
 
             // Mobile view below
             return Container(
-              color: Colors.grey[50], // Match global bg
+              color: Theme.of(context).scaffoldBackgroundColor, // Match global bg
               child: Column(
                 children: [
                   _buildTopControls(),
@@ -165,7 +165,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
     List<String> branchIds,
   ) {
     return Container(
-      color: Colors.grey[50],
+      color: Theme.of(context).scaffoldBackgroundColor,
       child: Column(
         children: [
           Expanded(
@@ -251,8 +251,8 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
           title: 'Total Ingredients',
           value: all.length.toString(),
           icon: Icons.inventory_2_outlined,
-          iconColor: Colors.deepPurple,
-          bgColor: Colors.deepPurple.shade50,
+          iconColor: Theme.of(context).colorScheme.primary,
+          bgColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
           subtitle: 'Active inventory',
         ),
         const SizedBox(width: 16),
@@ -261,7 +261,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
           value: lowStockCount.toString(),
           icon: Icons.warning_amber_rounded,
           iconColor: Colors.orange.shade700,
-          bgColor: Colors.orange.shade50,
+          bgColor: Colors.orange.withOpacity(0.1),
           subtitle: '${lowStockCount > 0 ? 'Needs attention' : 'All good!'}',
           subtitleColor: lowStockCount > 0
               ? Colors.orange.shade800
@@ -273,7 +273,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
           value: outOfStockCount.toString().padLeft(2, '0'),
           icon: Icons.block,
           iconColor: Colors.red.shade600,
-          bgColor: Colors.red.shade50,
+          bgColor: Colors.red.withOpacity(0.1),
           subtitle:
               '${outOfStockCount > 0 ? 'Critical restock required' : 'Fully stocked'}',
           subtitleColor:
@@ -285,7 +285,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
           value: 'QAR ${totalValue.toStringAsFixed(2)}',
           icon: Icons.payments_outlined,
           iconColor: Colors.teal.shade600,
-          bgColor: Colors.teal.shade50,
+          bgColor: Colors.teal.withOpacity(0.1),
           subtitle: 'Estimated cost basis',
         ),
       ],
@@ -305,8 +305,8 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: Colors.grey.shade200),
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+            border: Border.all(color: Theme.of(context).dividerColor),
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
@@ -322,7 +322,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
               children: [
                 Text(title,
                     style: TextStyle(
-                        color: Colors.grey.shade600,
+                        color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                         fontSize: 13,
                         fontWeight: FontWeight.w600)),
                 Container(
@@ -335,8 +335,8 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
             ),
             const SizedBox(height: 16),
             Text(value,
-                style: const TextStyle(
-                    color: Colors.black87,
+                style: TextStyle(
+                    color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                     fontSize: 28,
                     fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -355,15 +355,15 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.deepPurple.withOpacity(0.04),
-        border: Border.all(color: Colors.deepPurple.withOpacity(0.1)),
+        color: Theme.of(context).colorScheme.primary.withOpacity(0.04),
+        border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.1)),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
         children: [
           Text('FILTERS:',
               style: TextStyle(
-                  color: Colors.grey.shade500,
+                  color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5),
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.0)),
@@ -397,16 +397,16 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
             child: Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: !_isGridView ? Colors.deepPurple.shade100 : Colors.white,
+                color: !_isGridView ? Theme.of(context).colorScheme.primary.withOpacity(0.2) : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.white),
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
                     color: !_isGridView
                         ? Colors.transparent
-                        : Colors.grey.shade300),
+                        : Theme.of(context).dividerColor),
               ),
               child: Icon(Icons.view_list,
                   color:
-                      !_isGridView ? Colors.deepPurple : Colors.grey.shade400,
+                      !_isGridView ? Theme.of(context).colorScheme.primary : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.4) : Colors.grey.shade400),
                   size: 18),
             ),
           ),
@@ -416,15 +416,15 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
             child: Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: _isGridView ? Colors.deepPurple.shade100 : Colors.white,
+                color: _isGridView ? Theme.of(context).colorScheme.primary.withOpacity(0.2) : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.white),
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
                     color: _isGridView
                         ? Colors.transparent
-                        : Colors.grey.shade300),
+                        : Theme.of(context).dividerColor),
               ),
               child: Icon(Icons.grid_view,
-                  color: _isGridView ? Colors.deepPurple : Colors.grey.shade400,
+                  color: _isGridView ? Theme.of(context).colorScheme.primary : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.4) : Colors.grey.shade400),
                   size: 18),
             ),
           ),
@@ -444,22 +444,22 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
       height: 38,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.grey.shade200),
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+        border: Border.all(color: Theme.of(context).dividerColor),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text('$label: ',
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+              style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5), fontSize: 12)),
           DropdownButtonHideUnderline(
             child: DropdownButton<String>(
               value: value,
               icon: Icon(Icons.expand_more,
-                  color: Colors.grey.shade600, size: 16),
-              style: const TextStyle(
-                  color: Colors.black87,
+                  color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6), size: 16),
+              style: TextStyle(
+                  color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                   fontSize: 13,
                   fontWeight: FontWeight.w600),
               onChanged: onChanged,
@@ -482,8 +482,8 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
   ) {
     return Container(
       decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(color: Colors.grey.shade200),
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+          border: Border.all(color: Theme.of(context).dividerColor),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
@@ -503,7 +503,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Container(
-                    color: Colors.deepPurple.shade50.withOpacity(0.5),
+                    color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
                     padding: const EdgeInsets.symmetric(
                         horizontal: 24, vertical: 16),
                     child: Row(
@@ -532,22 +532,22 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: Colors.grey.shade100))),
+                border: Border(top: BorderSide(color: Theme.of(context).dividerColor))),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 RichText(
                   text: TextSpan(
                       style: TextStyle(
-                          color: Colors.grey.shade600,
+                          color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                           fontSize: 13,
                           fontWeight: FontWeight.w500),
                       children: [
                         const TextSpan(text: 'Showing total '),
                         TextSpan(
                             text: '${ingredients.length}',
-                            style: const TextStyle(
-                                color: Colors.black87,
+                            style: TextStyle(
+                                color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                                 fontWeight: FontWeight.bold)),
                         const TextSpan(text: ' entries'),
                       ]),
@@ -569,7 +569,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
         child: Text(
           text.toUpperCase(),
           style: TextStyle(
-              color: Colors.grey.shade500,
+              color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5),
               fontSize: 11,
               fontWeight: FontWeight.bold,
               letterSpacing: 0.5),
@@ -635,13 +635,13 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
       rowAccentColor = Colors.orange.shade400;
 
     return Material(
-      color: Colors.white,
+      color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
       child: InkWell(
         onTap: () => _openEditIngredientForm(context, i),
         child: Container(
           decoration: BoxDecoration(
               border: Border(
-            bottom: BorderSide(color: Colors.grey.shade100),
+            bottom: BorderSide(color: Theme.of(context).dividerColor),
             left: rowAccentColor != null
                 ? BorderSide(color: rowAccentColor, width: 4)
                 : BorderSide.none,
@@ -660,8 +660,8 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(i.name,
-                              style: const TextStyle(
-                                  color: Colors.black87,
+                              style: TextStyle(
+                                  color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold),
                               maxLines: 1,
@@ -672,7 +672,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                               if (i.sku?.isNotEmpty == true) ...[
                                 Text('SKU: ${i.sku}',
                                     style: TextStyle(
-                                        color: Colors.grey.shade500,
+                                        color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5),
                                         fontSize: 11)),
                                 Container(
                                     width: 4,
@@ -686,7 +686,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                               if (i.barcode?.isNotEmpty == true)
                                 Text('BC: ${i.barcode}',
                                     style: TextStyle(
-                                        color: Colors.grey.shade500,
+                                        color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5),
                                         fontSize: 11)),
                             ],
                           )
@@ -735,14 +735,14 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                           Text(
                               'Min: ${minThreshold.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}${i.unit}',
                               style: TextStyle(
-                                  color: Colors.grey.shade500, fontSize: 10)),
+                                  color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5), fontSize: 10)),
                         ],
                       ),
                       const SizedBox(height: 6),
                       Container(
                         height: 5,
                         decoration: BoxDecoration(
-                            color: Colors.grey.shade200,
+                            color: Theme.of(context).dividerColor,
                             borderRadius: BorderRadius.circular(3)),
                         child: Row(
                           children: [
@@ -774,14 +774,14 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('QAR ${i.costPerUnit.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                            color: Colors.black87,
+                        style: TextStyle(
+                            color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                             fontSize: 13,
                             fontWeight: FontWeight.w600)),
                     const SizedBox(height: 2),
                     Text('Per ${i.unit}',
                         style: TextStyle(
-                            color: Colors.grey.shade500, fontSize: 10)),
+                            color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5), fontSize: 10)),
                   ],
                 ),
               ),
@@ -1028,9 +1028,9 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
         borderRadius: BorderRadius.circular(16),
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.shade200),
+            border: Border.all(color: Theme.of(context).dividerColor),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.02),
@@ -1054,8 +1054,8 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                       children: [
                         Text(
                           i.name,
-                          style: const TextStyle(
-                              color: Colors.black87,
+                          style: TextStyle(
+                              color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                               fontSize: 16,
                               fontWeight: FontWeight.bold),
                           maxLines: 1,
@@ -1088,10 +1088,10 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                 children: [
                   Text('SKU:',
                       style:
-                          TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                          TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5), fontSize: 12)),
                   Text(i.sku?.isNotEmpty == true ? i.sku! : '-',
-                      style: const TextStyle(
-                          color: Colors.black87,
+                      style: TextStyle(
+                          color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                           fontSize: 12,
                           fontWeight: FontWeight.w600)),
                 ],
@@ -1102,10 +1102,10 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                 children: [
                   Text('Cost:',
                       style:
-                          TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                          TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5), fontSize: 12)),
                   Text('QAR ${i.costPerUnit.toStringAsFixed(2)} / ${i.unit}',
-                      style: const TextStyle(
-                          color: Colors.black87,
+                      style: TextStyle(
+                          color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                           fontSize: 12,
                           fontWeight: FontWeight.w600)),
                 ],
@@ -1116,7 +1116,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                 children: [
                   Text('Category:',
                       style:
-                          TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                          TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5), fontSize: 12)),
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -1138,7 +1138,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
               Container(
                 height: 6,
                 decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: Theme.of(context).dividerColor,
                     borderRadius: BorderRadius.circular(3)),
                 child: Row(
                   children: [
@@ -1180,12 +1180,12 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                         _showMovementHistory(context, i.name, i.id, branchIds),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.all(8),
-                      side: BorderSide(color: Colors.grey.shade200),
+                      side: BorderSide(color: Theme.of(context).dividerColor),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8)),
                     ),
                     child: Icon(Icons.history,
-                        size: 16, color: Colors.grey.shade500),
+                        size: 16, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5)),
                   ),
                 ],
               ),
@@ -1200,7 +1200,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
 
   Widget _buildTopControls() {
     return Container(
-      color: Colors.white,
+      color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Column(
         children: [
@@ -1512,7 +1512,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
     List<String> branchIds,
   ) {
     return Material(
-      color: Colors.white,
+      color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -1537,10 +1537,10 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                   children: [
                     Text(
                       i.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 15,
-                        color: Colors.black87,
+                        color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -1681,7 +1681,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -1809,11 +1809,11 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                               }
                             },
                       child: saving
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 18,
                               height: 18,
                               child: CircularProgressIndicator(
-                                color: Colors.white,
+                                color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                                 strokeWidth: 2,
                               ),
                             )
@@ -1841,7 +1841,7 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -1906,9 +1906,9 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
                       return Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.grey[50],
+                          color: Theme.of(context).scaffoldBackgroundColor,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey.shade200),
+                          border: Border.all(color: Theme.of(context).dividerColor),
                         ),
                         child: Row(
                           children: [
@@ -1992,16 +1992,16 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
 
   Widget _buildNoBranchState(String message) {
     return Container(
-      color: Colors.grey[50],
+      color: Theme.of(context).scaffoldBackgroundColor,
       alignment: Alignment.center,
       padding: const EdgeInsets.all(24),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 420),
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.grey.shade200),
+          border: Border.all(color: Theme.of(context).dividerColor),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2015,10 +2015,10 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: Colors.black87,
+                color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
               ),
             ),
           ],
@@ -2096,7 +2096,7 @@ class _RestockPurchaseOrderScreen extends StatelessWidget {
         elevation: 0,
       ),
       body: Container(
-        color: Colors.grey[50],
+        color: Theme.of(context).scaffoldBackgroundColor,
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 900),
@@ -2183,23 +2183,25 @@ class _RestockPurchaseOrderScreen extends StatelessWidget {
                     // Info table
                     Container(
                       decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade200),
+                        border: Border.all(color: Theme.of(context).dividerColor),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Column(
                         children: [
-                          _infoRow('Ingredient', ingredient.name,
+                          _infoRow(context, 'Ingredient', ingredient.name,
                               isFirst: true),
-                          _infoRow('SKU', ingredient.sku ?? '—'),
-                          _infoRow('Unit', ingredient.unit),
-                          _infoRow('Cost per Unit',
+                          _infoRow(context, 'SKU', ingredient.sku ?? '—'),
+                          _infoRow(context, 'Unit', ingredient.unit),
+                          _infoRow(context, 'Cost per Unit',
                               'QAR ${ingredient.costPerUnit.toStringAsFixed(2)}'),
                           _infoRow(
+                            context,
                             'Suggested Qty',
                             '${restockQty.toStringAsFixed(1)} ${ingredient.unit}',
                             highlight: true,
                           ),
                           _infoRow(
+                            context,
                             'Estimated Cost',
                             'QAR ${(restockQty * ingredient.costPerUnit).toStringAsFixed(2)}',
                             highlight: true,
@@ -2259,7 +2261,7 @@ class _RestockPurchaseOrderScreen extends StatelessWidget {
     );
   }
 
-  Widget _infoRow(String label, String value,
+  Widget _infoRow(BuildContext context, String label, String value,
       {bool highlight = false, bool isFirst = false, bool isLast = false}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -2271,14 +2273,14 @@ class _RestockPurchaseOrderScreen extends StatelessWidget {
         ),
         border: isLast
             ? null
-            : Border(bottom: BorderSide(color: Colors.grey.shade100)),
+            : Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
       ),
       child: Row(
         children: [
           Text(label,
               style: TextStyle(
                   fontSize: 13,
-                  color: Colors.grey.shade600,
+                  color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                   fontWeight: FontWeight.w500)),
           const Spacer(),
           Text(

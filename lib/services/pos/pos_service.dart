@@ -71,6 +71,7 @@ class PosService extends ChangeNotifier {
   String?
       _registerSessionId; // Active register session ID for order attribution
   StreamSubscription? _ordersSubscription;
+  DateTime? _tableOccupiedAt; // NEW: track when table was seated
 
   @override
   void dispose() {
@@ -94,6 +95,7 @@ class PosService extends ChangeNotifier {
     _orderDiscount = 0;
     _orderNotes = '';
     _isSubmitting = false;
+    _tableOccupiedAt = null;
     notifyListeners();
   }
 
@@ -106,6 +108,7 @@ class PosService extends ChangeNotifier {
   String get customerName => _customerName;
   String? get customerPhone => _customerPhone;
   double get orderDiscount => _orderDiscount;
+  DateTime? get tableOccupiedAt => _tableOccupiedAt;
   String get orderNotes => _orderNotes;
   bool get isEmpty => _cartItems.isEmpty;
   int get itemCount => _cartItems.fold(0, (acc, item) => acc + item.quantity);
@@ -399,6 +402,7 @@ class PosService extends ChangeNotifier {
     _orderDiscount = 0;
     _orderNotes = '';
     _ongoingOrders = [];
+    _tableOccupiedAt = null;
     _disposeSubscription();
     notifyListeners();
   }
@@ -588,15 +592,17 @@ class PosService extends ChangeNotifier {
           final counterSnap = await transaction.get(counterRef);
 
           // 2. LOGIC / CALCULATIONS
-          if (branchSnap != null) {
-            // 🛠️ FIX: Safer casting for Web
-            final data = branchSnap.data();
-            final tables =
-                (data?['tables'] as Map?)?.cast<String, dynamic>() ?? {};
-            final tableDataRaw = tables[_selectedTableId];
-            final tableData = tableDataRaw is Map
-                ? tableDataRaw.cast<String, dynamic>()
-                : null;
+            Map<String, dynamic>? tableData;
+            if (branchSnap != null) {
+              // 🛠️ FIX: Safer casting for Web
+              final data = branchSnap.data();
+              final tables =
+                  (data?['Tables'] as Map?)?.cast<String, dynamic>() ?? 
+                  (data?['tables'] as Map?)?.cast<String, dynamic>() ?? {};
+              final tableDataRaw = tables[_selectedTableId];
+              tableData = tableDataRaw is Map
+                  ? tableDataRaw.cast<String, dynamic>()
+                  : null;
 
             final currentOrderId = tableData?['currentOrderId']?.toString();
             if (tableData?['status'] == 'occupied' &&
@@ -630,9 +636,13 @@ class PosService extends ChangeNotifier {
               SetOptions(merge: true));
 
           if (_orderType == PosOrderType.dineIn && _selectedTableId != null) {
+            final existingOccupiedAt = tableData?['occupiedAt'];
             transaction.update(branchRef, {
-              'tables.$_selectedTableId.status': 'occupied',
-              'tables.$_selectedTableId.currentOrderId': orderId,
+              'Tables.$_selectedTableId.status': 'occupied',
+              'Tables.$_selectedTableId.currentOrderId': orderId,
+              if (existingOccupiedAt == null)
+                'Tables.$_selectedTableId.occupiedAt':
+                    FieldValue.serverTimestamp(),
             });
           }
 
@@ -1173,6 +1183,17 @@ class PosService extends ChangeNotifier {
                     updateData['status'] ?? docData['status'];
                 updateData['orderStatus'] = updateData['orderStatus'] ??
                     PosOrderLifecycle.stageFromData(docData);
+                // ✅ FIX: Even if order is not yet 'served', the payment is
+                // captured. Queue a cleanup so that once all orders
+                // for this table are paid+served, the table goes dirty.
+                // We do this unconditionally — cleanupTableIfEmpty will
+                // check live state and only mark dirty if truly empty.
+                if (orderType == AppConstants.orderTypeDineIn) {
+                  final tableId = docData['tableId']?.toString();
+                  if (tableId != null && tableId.isNotEmpty) {
+                    tablesToCleanup.add(tableId);
+                  }
+                }
               }
 
               transaction.update(snap.reference, updateData);
@@ -1431,11 +1452,11 @@ class PosService extends ChangeNotifier {
           .doc(primaryBranchId);
 
       final Map<String, dynamic> updates = {
-        'tables.$tableId.status': status,
+        'Tables.$tableId.status': status,
       };
 
       if (status == 'available') {
-        updates['tables.$tableId.currentOrderId'] = FieldValue.delete();
+        updates['Tables.$tableId.currentOrderId'] = FieldValue.delete();
       }
 
       await branchDoc.update(updates);
@@ -2030,23 +2051,53 @@ class PosService extends ChangeNotifier {
         final branchRef = FirebaseFirestore.instance
             .collection(AppConstants.collectionBranch)
             .doc(primaryBranchId);
+        // ✅ FIX: Set 'dirty' first — staff must manually clear the table.
+        // Do NOT write 'available' here. Staff confirm clearance from the floor plan.
         await branchRef.update({
-          'tables.$tableId.status': 'available',
-          'tables.$tableId.currentOrderId': FieldValue.delete(),
+          'Tables.$tableId.status': 'dirty',
+          'Tables.$tableId.dirtyAt': FieldValue.serverTimestamp(),
+          'Tables.$tableId.currentOrderId': FieldValue.delete(),
+          'Tables.$tableId.occupiedAt': FieldValue.delete(),
         });
-        debugPrint('🧹 POS: Table $tableId cleared (no active orders)');
+        debugPrint('🧹 POS: Table $tableId marked dirty (needs bussing)');
       }
     } catch (e) {
       debugPrint('⚠️ POS: Table cleanup failed: $e');
     }
   }
 
-  /// Free a table (mark as available). Used by Pay All flow.
+  /// Marks a table as needing bussing (dirty). Used by Pay All flow.
+  /// Staff must confirm clearance from the floor plan before it becomes available.
   Future<void> freeTable({
     required List<String> branchIds,
     required String tableId,
   }) async {
+    // ✅ FIX: Always go through 'dirty' first. Staff mark clean from floor plan.
+    await _updateTableStatus(branchIds, tableId, 'dirty');
+    debugPrint('🧹 POS: Table $tableId marked dirty via freeTable (needs bussing)');
+  }
+
+  /// Staff confirms the table has been cleaned and reset. Makes it available.
+  Future<void> markTableClean({
+    required List<String> branchIds,
+    required String tableId,
+  }) async {
     await _updateTableStatus(branchIds, tableId, 'available');
+    // Also clear the dirtyAt timestamp
+    if (branchIds.isNotEmpty) {
+      try {
+        await FirebaseFirestore.instance
+            .collection(AppConstants.collectionBranch)
+            .doc(branchIds.first)
+            .update({
+          'Tables.$tableId.dirtyAt': FieldValue.delete(),
+          'Tables.$tableId.occupiedAt': FieldValue.delete(),
+        });
+      } catch (e) {
+        debugPrint('⚠️ POS: Could not clear dirtyAt for table $tableId: $e');
+      }
+    }
+    debugPrint('✅ POS: Table $tableId cleared by staff — now available');
   }
 
   /// Pre-select a table for the "Add Items" flow.
@@ -2071,6 +2122,26 @@ class PosService extends ChangeNotifier {
       await _syncSelectedTableOrders(branchIds, notify: false);
       _guestCount ??= _guestCountFromOrders(_ongoingOrders);
       _startOrdersListener(tableId, branchIds);
+
+      try {
+        final branchSnap = await FirebaseFirestore.instance.collection('Branch').doc(branchIds.first).get();
+        final rawData = branchSnap.data();
+        if (rawData != null) {
+            final tables = rawData['Tables'] ?? rawData['tables'];
+            if (tables != null && tables[tableId] != null) {
+                final timestamp = tables[tableId]['occupiedAt'];
+                if (timestamp is Timestamp) {
+                    _tableOccupiedAt = timestamp.toDate();
+                } else {
+                    _tableOccupiedAt = null;
+                }
+            } else {
+                _tableOccupiedAt = null;
+            }
+        }
+      } catch (e) {
+          _tableOccupiedAt = null;
+      }
     } else {
       _ongoingOrders = [];
       notifyListeners();

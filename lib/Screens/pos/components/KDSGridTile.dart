@@ -185,13 +185,13 @@ class KDSGridTile extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.timer_outlined,
-                                  size: 11, color: Colors.white),
+                              Icon(Icons.timer_outlined,
+                                  size: 11, color: Theme.of(context).cardColor),
                               const SizedBox(width: 2),
                               Text(
                                 '${elapsed}m',
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                style: TextStyle(
+                                  color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 11,
                                 ),
@@ -289,9 +289,9 @@ class KDSGridTile extends StatelessWidget {
               ? const Padding(
                   padding: EdgeInsets.all(6),
                   child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2),
+                      color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor, strokeWidth: 2),
                 )
-              : Icon(icon, color: Colors.white, size: 18),
+              : Icon(icon, color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor, size: 18),
         ),
       ),
     );

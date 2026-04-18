@@ -18,16 +18,6 @@ import 'components/purchase_order_table.dart';
 import 'components/supplier_quick_grid.dart';
 import 'components/purchase_order_filters.dart';
 
-class _InvColors {
-  static final Color bgDark = Colors.grey.shade50;
-  static const Color surfaceDark = Colors.white;
-  static final Color surfaceLighter = Color(0xFFF1F5F9);
-  static final Color borderDark = Colors.grey.shade200;
-  static final Color primary = Colors.deepPurple;
-  static const Color textMain = Color(0xFF1E293B);
-  static const Color textMuted = Color(0xFF64748B);
-}
-
 class PurchaseOrdersScreen extends StatefulWidget {
   const PurchaseOrdersScreen({super.key});
 
@@ -40,7 +30,7 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
   bool _servicesInitialized = false;
   String _searchQuery = '';
   PurchaseFilterSelection _filters = const PurchaseFilterSelection.all();
-  bool _isImportingSuppliers = false;
+  // bool _isImportingSuppliers = false;
   List<PurchaseOrder> _latestPurchaseOrders = const [];
  
   UserScopeService get userScope => Provider.of<UserScopeService>(context, listen: false);
@@ -124,14 +114,16 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final branchFilter = context.watch<BranchFilterService>();
     final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
     return Scaffold(
       key: _scaffoldKey,
-      backgroundColor: _InvColors.bgDark,
+      backgroundColor: theme.scaffoldBackgroundColor,
       endDrawer: Drawer(
         width: 450,
+        backgroundColor: theme.scaffoldBackgroundColor,
         child: CreatePurchaseOrderScreen(
           key: ValueKey(_drawerSessionKey),
           isDrawer: true,
@@ -143,7 +135,7 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
       ),
       body: Column(
         children: [
-          _buildHeader(branchIds),
+          _buildHeader(branchIds, theme),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(24),
@@ -154,7 +146,7 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
                 const SizedBox(height: 16),
                 _buildSuppliersGrid(branchIds),
                 const SizedBox(height: 40),
-                _buildSectionHeader('Purchase Order History', trail: _buildHistoryActions()),
+                _buildSectionHeader('Purchase Order History', trail: _buildHistoryActions(theme)),
                 const SizedBox(height: 16),
                 _buildOrdersTable(branchIds),
               ],
@@ -166,16 +158,17 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
   }
 
   Widget _buildSectionHeader(String title, {Widget? trail}) {
+    final theme = Theme.of(context);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _InvColors.textMain)),
+        Text(title, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color)),
         if (trail != null) trail,
       ],
     );
   }
 
-  Widget _buildHistoryActions() {
+  Widget _buildHistoryActions(ThemeData theme) {
     return Row(
       children: [
         PurchaseOrderFilters(
@@ -189,9 +182,9 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
           icon: const Icon(Icons.file_download_outlined, size: 18),
           label: const Text('Export'),
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.white,
-            foregroundColor: Colors.deepPurple,
-            side: const BorderSide(color: Colors.deepPurple, width: 1),
+            backgroundColor: theme.cardColor,
+            foregroundColor: theme.colorScheme.primary,
+            side: BorderSide(color: theme.colorScheme.primary, width: 1),
             elevation: 0,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -201,22 +194,24 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
     );
   }
 
-  Widget _buildHeader(List<String> branchIds) {
+  Widget _buildHeader(List<String> branchIds, ThemeData theme) {
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 40, 24, 24),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: _InvColors.borderDark)),
+        color: theme.cardColor,
+        border: Border(bottom: BorderSide(color: theme.dividerColor)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Column(
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Suppliers & Purchase Orders', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: _InvColors.textMain)),
-              SizedBox(height: 4),
-              Text('Track inventory orders and manage supplier relationships.', style: TextStyle(color: _InvColors.textMuted)),
+              Text('Suppliers & Purchase Orders', 
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color)),
+              const SizedBox(height: 4),
+              Text('Track inventory orders and manage supplier relationships.', 
+                style: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6))),
             ],
           ),
           Row(
@@ -228,7 +223,7 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
                 icon: const Icon(Icons.add),
                 label: const Text('New Order'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
+                  backgroundColor: theme.colorScheme.primary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -344,10 +339,11 @@ class _ViewAllButton extends StatelessWidget {
   const _ViewAllButton({required this.onTap});
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return TextButton.icon(
       onPressed: onTap,
-      label: const Text('View All', style: TextStyle(color: Colors.deepPurple, fontWeight: FontWeight.bold)),
-      icon: const Icon(Icons.arrow_forward, size: 16, color: Colors.deepPurple),
+      label: Text('View All', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold)),
+      icon: Icon(Icons.arrow_forward, size: 16, color: theme.colorScheme.primary),
     );
   }
 }
@@ -357,18 +353,26 @@ class _SearchField extends StatelessWidget {
   const _SearchField({required this.onChanged});
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
       width: 300,
-      decoration: BoxDecoration(color: Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
+      decoration: BoxDecoration(
+        color: theme.brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.dividerColor),
+      ),
       child: TextField(
         onChanged: onChanged,
-        decoration: const InputDecoration(
+        style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+        decoration: InputDecoration(
           hintText: 'Search orders, suppliers...',
-          prefixIcon: Icon(Icons.search, size: 20, color: Colors.grey),
+          hintStyle: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5)),
+          prefixIcon: Icon(Icons.search, size: 20, color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5)),
           border: InputBorder.none,
-          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         ),
       ),
     );
   }
 }
+

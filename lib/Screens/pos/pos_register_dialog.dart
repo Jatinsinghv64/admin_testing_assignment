@@ -65,7 +65,7 @@ class _PosRegisterOpeningDialogState extends State<PosRegisterOpeningDialog>
       return PopScope(
         canPop: false,
         child: Dialog(
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           child: Container(
             width: 400,
@@ -89,17 +89,17 @@ class _PosRegisterOpeningDialogState extends State<PosRegisterOpeningDialog>
                       ),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.check_rounded,
-                        color: Colors.white, size: 48),
+                    child: Icon(Icons.check_rounded,
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor, size: 48),
                   ),
                 ),
                 const SizedBox(height: 24),
-                const Text(
+                Text(
                   'Register Opened!',
                   style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w900,
-                      color: Colors.black87),
+                      color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87)),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -116,7 +116,7 @@ class _PosRegisterOpeningDialogState extends State<PosRegisterOpeningDialog>
     return PopScope(
       canPop: true, // Allow dismissal to return to branch selection
       child: Dialog(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: Container(
           width: 460,
@@ -144,20 +144,20 @@ class _PosRegisterOpeningDialogState extends State<PosRegisterOpeningDialog>
                         ),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: const Icon(Icons.point_of_sale,
-                          color: Colors.white, size: 24),
+                      child: Icon(Icons.point_of_sale,
+                          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor, size: 24),
                     ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Open Register',
                             style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w900,
-                                color: Colors.black87),
+                                color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87)),
                           ),
                           const SizedBox(height: 2),
                           Text(
@@ -217,7 +217,7 @@ class _PosRegisterOpeningDialogState extends State<PosRegisterOpeningDialog>
                               elevation: 0,
                             ),
                             icon: _isForceClosingStale
-                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).cardColor))
                                 : const Icon(Icons.close, size: 16),
                             label: Text(_isForceClosingStale ? 'Force Closing...' : 'FORCE CLOSE PREVIOUS REGISTER',
                                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
@@ -276,10 +276,10 @@ class _PosRegisterOpeningDialogState extends State<PosRegisterOpeningDialog>
                     FilteringTextInputFormatter.allow(
                         RegExp(r'^\d+\.?\d{0,2}')),
                   ],
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: Colors.black87),
+                      color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87)),
                   decoration: InputDecoration(
                     prefixText: 'QAR ',
                     prefixStyle: TextStyle(
@@ -363,11 +363,11 @@ class _PosRegisterOpeningDialogState extends State<PosRegisterOpeningDialog>
                           elevation: 0,
                         ),
                         icon: _isOpening
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 16,
                                 height: 16,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white))
+                                    strokeWidth: 2, color: Theme.of(context).cardColor))
                             : const Icon(Icons.lock_open, size: 18),
                         label: Text(
                           _isOpening ? 'Opening...' : 'OPEN REGISTER',
@@ -390,9 +390,9 @@ class _PosRegisterOpeningDialogState extends State<PosRegisterOpeningDialog>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: Theme.of(context).scaffoldBackgroundColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).dividerColor),
       ),
       child: Row(
         children: [
@@ -409,10 +409,10 @@ class _PosRegisterOpeningDialogState extends State<PosRegisterOpeningDialog>
                       letterSpacing: 1)),
               const SizedBox(height: 2),
               Text(value,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: Colors.black87)),
+                      color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87))),
             ],
           ),
         ],
@@ -614,7 +614,7 @@ class _PosRegisterClosingDialogState extends State<PosRegisterClosingDialog>
       return PopScope(
         canPop: false,
         child: Dialog(
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           child: Container(
             width: 400,
@@ -644,7 +644,7 @@ class _PosRegisterClosingDialogState extends State<PosRegisterClosingDialog>
                       widget.isForceClosed
                           ? Icons.warning_amber_rounded
                           : Icons.lock_rounded,
-                      color: Colors.white,
+                      color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                       size: 48,
                     ),
                   ),
@@ -654,10 +654,10 @@ class _PosRegisterClosingDialogState extends State<PosRegisterClosingDialog>
                   widget.isForceClosed
                       ? 'Register Force-Closed'
                       : 'Register Closed',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w900,
-                      color: Colors.black87),
+                      color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87)),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -678,7 +678,7 @@ class _PosRegisterClosingDialogState extends State<PosRegisterClosingDialog>
     final m = widget.metrics ?? RegisterSessionMetrics.empty();
 
     return Dialog(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Container(
         width: 520,
@@ -711,7 +711,7 @@ class _PosRegisterClosingDialogState extends State<PosRegisterClosingDialog>
                         widget.isForceClosed
                             ? Icons.warning_amber_rounded
                             : Icons.lock,
-                        color: Colors.white,
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                         size: 24,
                       ),
                     ),
@@ -724,10 +724,10 @@ class _PosRegisterClosingDialogState extends State<PosRegisterClosingDialog>
                             widget.isForceClosed
                                 ? 'Force Close Register'
                                 : 'Close Register',
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w900,
-                                color: Colors.black87),
+                                color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87)),
                           ),
                           const SizedBox(height: 2),
                           const Text('End of day cash reconciliation',
@@ -1013,11 +1013,11 @@ class _PosRegisterClosingDialogState extends State<PosRegisterClosingDialog>
                           elevation: 0,
                         ),
                         icon: _isClosing
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 16,
                                 height: 16,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white))
+                                    strokeWidth: 2, color: Theme.of(context).cardColor))
                             : const Icon(Icons.lock, size: 18),
                         label: Text(
                           _isClosing

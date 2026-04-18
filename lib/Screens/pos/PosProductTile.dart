@@ -35,12 +35,14 @@ class PosProductTile extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           decoration: BoxDecoration(
-            color: isAvailable ? Colors.white : Colors.grey[100],
+            color: isAvailable
+                ? Theme.of(context).cardColor
+                : Theme.of(context).disabledColor.withOpacity(0.05),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: isAvailable
-                  ? Colors.grey.withValues(alpha: 0.15)
-                  : Colors.grey.withValues(alpha: 0.3),
+                  ? Theme.of(context).dividerColor.withOpacity(0.15)
+                  : Theme.of(context).dividerColor.withOpacity(0.3),
             ),
             boxShadow: [
               BoxShadow(
@@ -69,8 +71,8 @@ class PosProductTile extends StatelessWidget {
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
                             color: isAvailable
-                                ? Colors.grey[900]
-                                : Colors.grey[500],
+                                ? Theme.of(context).textTheme.bodyLarge?.color
+                                : Theme.of(context).disabledColor,
                             height: 1.25,
                           ),
                           maxLines: 3,
@@ -99,7 +101,7 @@ class PosProductTile extends StatelessWidget {
                 Positioned.fill(
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.5),
+                      color: Theme.of(context).cardColor.withValues(alpha: 0.5),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Center(
@@ -113,7 +115,7 @@ class PosProductTile extends StatelessWidget {
                         child: Text(
                           unavailableLabel,
                           style: TextStyle(
-                            color: Colors.white,
+                            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                           ),

@@ -33,10 +33,24 @@ class AnalyticsPdfService {
   }) async {
     final pdf = pw.Document();
 
+    // Load fonts for universal support
+    pw.Font? regular;
+    pw.Font? bold;
+    pw.Font? arabic;
+
+    try {
+      regular = await PdfGoogleFonts.robotoRegular();
+      bold = await PdfGoogleFonts.robotoBold();
+      arabic = await PdfGoogleFonts.notoSansArabicRegular();
+    } catch (_) {
+      regular = pw.Font.helvetica();
+      bold = pw.Font.helveticaBold();
+    }
+
     // Load logo
     Uint8List? logoBytes;
     try {
-      final logoData = await rootBundle.load('assets/mitranlogo.jpg');
+      final logoData = await rootBundle.load('assets/Qore.JPG');
       logoBytes = logoData.buffer
           .asUint8List(logoData.offsetInBytes, logoData.lengthInBytes);
     } catch (e) {
@@ -51,6 +65,14 @@ class AnalyticsPdfService {
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(40),
+        theme: pw.ThemeData.withFont(
+          base: regular,
+          bold: bold,
+        ).copyWith(
+          defaultTextStyle: pw.TextStyle(
+            fontFallback: arabic != null ? [arabic] : [],
+          ),
+        ),
         header: (pw.Context context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -59,32 +81,39 @@ class AnalyticsPdfService {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   if (logoBytes != null)
-                    pw.Image(pw.MemoryImage(logoBytes), width: 60, height: 60)
+                    pw.Image(pw.MemoryImage(logoBytes), width: 70, height: 70)
                   else
-                    pw.Container(width: 60),
+                    pw.Container(width: 70),
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
                     children: [
                       pw.Text(
-                        reportTitle,
+                        'Qore Operations Intelligence',
                         style: pw.TextStyle(
-                          fontSize: 24,
+                          fontSize: 18,
                           fontWeight: pw.FontWeight.bold,
                           color: PdfColors.deepPurple,
                         ),
                       ),
                       pw.SizedBox(height: 4),
                       pw.Text(
-                        dateRangeStr,
+                        reportTitle,
                         style: const pw.TextStyle(
                           fontSize: 12,
+                          color: PdfColors.grey800,
+                        ),
+                      ),
+                      pw.Text(
+                        dateRangeStr,
+                        style: const pw.TextStyle(
+                          fontSize: 10,
                           color: PdfColors.grey700,
                         ),
                       ),
                       pw.Text(
                         'Order Type: ${_formatOrderType(orderType)}',
                         style: const pw.TextStyle(
-                          fontSize: 10,
+                          fontSize: 9,
                           color: PdfColors.grey600,
                         ),
                       ),
@@ -92,7 +121,7 @@ class AnalyticsPdfService {
                   ),
                 ],
               ),
-              pw.Divider(color: PdfColors.deepPurple, thickness: 2),
+              pw.Divider(color: PdfColors.deepPurple, thickness: 1.5),
               pw.SizedBox(height: 10),
             ],
           );
@@ -103,7 +132,7 @@ class AnalyticsPdfService {
             margin: const pw.EdgeInsets.only(top: 10),
             child: pw.Text(
               'Page ${context.pageNumber} of ${context.pagesCount} | Generated on ${DateFormat('MMM dd, yyyy HH:mm').format(DateTime.now())}',
-              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey),
+              style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey),
             ),
           );
         },
@@ -211,16 +240,7 @@ class AnalyticsPdfService {
               headerDecoration:
                   const pw.BoxDecoration(color: PdfColors.deepPurple),
               cellPadding: const pw.EdgeInsets.all(8),
-              headerAlignments: {
-                0: pw.Alignment.centerLeft,
-                1: pw.Alignment.center,
-                2: pw.Alignment.center,
-              },
-              cellAlignments: {
-                0: pw.Alignment.centerLeft,
-                1: pw.Alignment.center,
-                2: pw.Alignment.center,
-              },
+              cellAlignment: pw.Alignment.center,
               headers: ['Order Type', 'Count', 'Percentage'],
               data: orderTypeDistribution.entries.map((e) {
                 final total =
@@ -255,22 +275,7 @@ class AnalyticsPdfService {
               headerDecoration:
                   const pw.BoxDecoration(color: PdfColors.deepPurple),
               cellPadding: const pw.EdgeInsets.all(6),
-              headerAlignments: {
-                0: pw.Alignment.center,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.center,
-                3: pw.Alignment.center,
-                4: pw.Alignment.center,
-                5: pw.Alignment.center,
-              },
-              cellAlignments: {
-                0: pw.Alignment.center,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.center,
-                3: pw.Alignment.center,
-                4: pw.Alignment.center,
-                5: pw.Alignment.center,
-              },
+              cellAlignment: pw.Alignment.center,
               headers: [
                 '#',
                 'Item Name',
@@ -335,16 +340,7 @@ class AnalyticsPdfService {
               headerDecoration:
                   const pw.BoxDecoration(color: PdfColors.deepPurple),
               cellPadding: const pw.EdgeInsets.all(8),
-              headerAlignments: {
-                0: pw.Alignment.center,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.center,
-              },
-              cellAlignments: {
-                0: pw.Alignment.center,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.center,
-              },
+              cellAlignment: pw.Alignment.center,
               headers: ['Rank', 'Rider Name', 'Deliveries'],
               data: topRiders.asMap().entries.map((e) {
                 final rider = e.value;
@@ -368,18 +364,7 @@ class AnalyticsPdfService {
               headerDecoration:
                   const pw.BoxDecoration(color: PdfColors.deepPurple),
               cellPadding: const pw.EdgeInsets.all(8),
-              headerAlignments: {
-                0: pw.Alignment.center,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.center,
-                3: pw.Alignment.center,
-              },
-              cellAlignments: {
-                0: pw.Alignment.center,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.center,
-                3: pw.Alignment.center,
-              },
+              cellAlignment: pw.Alignment.center,
               headers: ['Rank', 'Customer', 'Orders', 'Total Spend'],
               data: topCustomers.asMap().entries.map((e) {
                 final customer = e.value;
@@ -404,18 +389,7 @@ class AnalyticsPdfService {
               headerDecoration:
                   const pw.BoxDecoration(color: PdfColors.deepPurple),
               cellPadding: const pw.EdgeInsets.all(8),
-              headerAlignments: {
-                0: pw.Alignment.center,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.center,
-                3: pw.Alignment.center,
-              },
-              cellAlignments: {
-                0: pw.Alignment.center,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.center,
-                3: pw.Alignment.center,
-              },
+              cellAlignment: pw.Alignment.center,
               headers: ['#', 'Item Name', 'Wasted Qty', 'Est. Loss (QAR)'],
               data: topWastedItems.asMap().entries.map((e) {
                 final item = e.value as Map<String, dynamic>;

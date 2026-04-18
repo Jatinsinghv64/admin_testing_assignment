@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../../../main.dart';
 import '../../../../constants.dart';
@@ -8,6 +9,7 @@ import '../../../../services/pos/pos_service.dart';
 import 'TableOrdersDialog.dart';
 import '../../../../Widgets/PrintingService.dart';
 import '../management/TableManagement.dart';
+import '../management/TableDialogHelper.dart';
 
 class DineInFloorPlanPanel extends StatefulWidget {
   final VoidCallback onSwitchToPos;
@@ -69,7 +71,7 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
         : branchFilter.getFilterBranchIds(userScope.branchIds);
 
     return Container(
-      color: Colors.grey[100],
+      color: Theme.of(context).scaffoldBackgroundColor,
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -140,6 +142,8 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
               _buildLegendDot(Colors.red, 'Occupied'),
               const SizedBox(width: 16),
               _buildLegendDot(Colors.orange, 'Reserved'),
+              const SizedBox(width: 16),
+              _buildLegendDot(Colors.brown, 'Needs Bussing'),
             ],
           ),
           const SizedBox(height: 24),
@@ -231,7 +235,7 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                                     label: Text(zone),
                                     selected: isSelected,
                                     selectedColor: Colors.deepPurple,
-                                    backgroundColor: Colors.white,
+                                    backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                                     labelStyle: TextStyle(
                                       color: isSelected
                                           ? Colors.white
@@ -466,7 +470,7 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
   // ── Super Admin Editing Methods ──
 
   void _showAddTableDialog(BuildContext context, String branchId) {
-    _showTableEditorDialog(context, branchId, null, null, {});
+    TableDialogHelper.showTableDialog(context, branchId: branchId, existingTableData: null, isEdit: false);
   }
 
   void _showEditTableDialog(
@@ -475,193 +479,7 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
       String tableId,
       Map<String, dynamic> tableData,
       Map<String, dynamic> allTables) {
-    _showTableEditorDialog(context, branchId, tableId, tableData, allTables);
-  }
-
-  void _showTableEditorDialog(
-      BuildContext context,
-      String branchId,
-      String? tableId,
-      Map<String, dynamic>? initialData,
-      Map<String, dynamic> allTables) {
-    final isEdit = tableId != null;
-    final nameController =
-        TextEditingController(text: initialData?['name']?.toString() ?? '');
-    final seatsController =
-        TextEditingController(text: initialData?['seats']?.toString() ?? '4');
-    final zoneController = TextEditingController(
-        text: initialData?['zone']?.toString() ??
-            initialData?['floor']?.toString() ??
-            'Main');
-    String shape = initialData?['shape']?.toString() ?? 'rectangle';
-    String status = initialData?['status']?.toString() ?? 'available';
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: Text(isEdit ? 'Edit Table' : 'Add New Table'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Display Name',
-                      hintText: 'Table 1, Window Seat, etc.',
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: seatsController,
-                    decoration: const InputDecoration(
-                      labelText: 'Number of Seats',
-                      hintText: 'Enter seat capacity',
-                    ),
-                    keyboardType: TextInputType.number,
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: zoneController,
-                    decoration: const InputDecoration(
-                      labelText: 'Zone / Floor',
-                      hintText: 'Main Floor, Rooftop, etc.',
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    value: shape,
-                    decoration: const InputDecoration(labelText: 'Shape'),
-                    items: const [
-                      DropdownMenuItem(
-                          value: 'rectangle', child: Text('Rectangle')),
-                      DropdownMenuItem(value: 'circle', child: Text('Circle')),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) setDialogState(() => shape = val);
-                    },
-                  ),
-                  if (isEdit) ...[
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      value: status,
-                      decoration: const InputDecoration(labelText: 'Status'),
-                      items: const [
-                        DropdownMenuItem(
-                            value: 'available', child: Text('Available')),
-                        DropdownMenuItem(
-                            value: 'reserved', child: Text('Reserved')),
-                        DropdownMenuItem(
-                            value: 'occupied', child: Text('Occupied')),
-                      ],
-                      onChanged: (val) {
-                        if (val != null) setDialogState(() => status = val);
-                      },
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              if (isEdit)
-                TextButton(
-                  onPressed: () async {
-                    // Delete table
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (c) => AlertDialog(
-                        title: const Text('Delete Table?'),
-                        content: const Text(
-                            'Are you sure you want to delete this table?'),
-                        actions: [
-                          TextButton(
-                              onPressed: () => Navigator.pop(c, false),
-                              child: const Text('Cancel')),
-                          TextButton(
-                              onPressed: () => Navigator.pop(c, true),
-                              child: const Text('Delete',
-                                  style: TextStyle(color: Colors.red))),
-                        ],
-                      ),
-                    );
-
-                    if (confirm == true) {
-                      try {
-                        await FirebaseFirestore.instance
-                            .collection('Branch')
-                            .doc(branchId)
-                            .set({
-                          'Tables': {
-                            tableId: FieldValue.delete(),
-                          }
-                        }, SetOptions(merge: true));
-                        if (context.mounted) {
-                          Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Table deleted')));
-                        }
-                      } catch (e) {
-                        if (context.mounted)
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error: $e')));
-                      }
-                    }
-                  },
-                  child:
-                      const Text('Delete', style: TextStyle(color: Colors.red)),
-                ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  if (nameController.text.trim().isEmpty) return;
-
-                  final newTableId = isEdit
-                      ? tableId
-                      : 'T${DateTime.now().millisecondsSinceEpoch}';
-                  final seats = int.tryParse(seatsController.text) ?? 4;
-
-                  try {
-                    await FirebaseFirestore.instance
-                        .collection('Branch')
-                        .doc(branchId)
-                        .set({
-                      'Tables': {
-                        newTableId: {
-                          'name': nameController.text.trim(),
-                          'seats': seats,
-                          'zone': zoneController.text.trim(),
-                          'shape': shape,
-                          'status': status,
-                          'updatedAt': FieldValue.serverTimestamp(),
-                          if (!isEdit)
-                            'createdAt': FieldValue.serverTimestamp(),
-                        }
-                      }
-                    }, SetOptions(merge: true));
-
-                    if (context.mounted) {
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Table saved')));
-                    }
-                  } catch (e) {
-                    if (context.mounted)
-                      ScaffoldMessenger.of(context)
-                          .showSnackBar(SnackBar(content: Text('Error: $e')));
-                  }
-                },
-                child: const Text('Save'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+    TableDialogHelper.showTableDialog(context, branchId: branchId, existingTableId: tableId, existingTableData: tableData, isEdit: true);
   }
 }
 
@@ -689,13 +507,18 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
     final int? seats = seatsRaw != null ? int.tryParse(seatsRaw.toString()) : null;
     final shape = (tableData['shape'] ?? 'rectangle').toString().toLowerCase();
 
-    // Determine real-time status by checking active orders
+    final String tableStatus = (tableData['status'] ?? 'available').toString().toLowerCase();
     final bool isOccupiedByOrder = occupiedTableIds.contains(tableId);
-    final staticStatus =
-        (tableData['status'] ?? 'available').toString().toLowerCase();
-    final isReserved = staticStatus == 'reserved';
-    final isAvailable =
-        !isOccupiedByOrder && !isReserved && staticStatus != 'occupied';
+    final bool isReserved = tableStatus == 'reserved';
+    final bool isDirty   = tableStatus == 'dirty';
+    final bool isOccupied = isOccupiedByOrder && !isReserved && !isDirty;
+    final bool isAvailable = !isOccupiedByOrder && !isReserved && !isDirty
+        && tableStatus != 'occupied';
+
+    DateTime? occupiedAt;
+    if (tableData['occupiedAt'] is Timestamp) {
+      occupiedAt = (tableData['occupiedAt'] as Timestamp).toDate();
+    }
 
     // Color coding
     Color borderColor;
@@ -706,6 +529,10 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
       borderColor = Colors.blue;
       bgColor = Colors.blue.withValues(alpha: 0.08);
       textColor = Colors.blue[800]!;
+    } else if (isDirty) {
+      borderColor = Colors.brown;
+      bgColor = Colors.brown.withValues(alpha: 0.08);
+      textColor = Colors.brown[800]!;
     } else if (isAvailable) {
       borderColor = Colors.green;
       bgColor = Colors.green.withValues(alpha: 0.08);
@@ -721,39 +548,99 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
     }
 
     final isRound = shape == 'circle' || shape == 'round';
+    final isSofa = shape == 'corner_sofa' || shape == 'sofa';
+    final isStool = shape == 'bar_stool' || shape == 'stool';
+
+    IconData tableIcon;
+    if (isSofa) {
+      tableIcon = Icons.weekend_rounded;
+    } else if (shape == 'booth' || shape == 'sofa') {
+      tableIcon = Icons.event_seat_outlined;
+    } else if (isStool) {
+      tableIcon = Icons.chair_alt_rounded;
+    } else if (isRound) {
+      tableIcon = Icons.circle_outlined;
+    } else if (shape == 'square') {
+      tableIcon = Icons.crop_square_rounded;
+    } else if (shape == 'oval') {
+      tableIcon = Icons.vignette_outlined;
+    } else {
+      tableIcon = Icons.table_bar_rounded;
+    }
 
     return Tooltip(
       message: isEditMode
           ? 'Tap to edit'
-          : isAvailable
-              ? 'Tap to select'
-              : isReserved
-                  ? 'Reserved'
-                  : 'Occupied',
+          : isDirty
+              ? 'Needs Bussing — tap Mark Clean when ready'
+              : isAvailable
+                  ? 'Tap to select'
+                  : isReserved
+                      ? 'Reserved'
+                      : 'Occupied',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: () async {
             if (isEditMode) {
               onSelect(tableId, tableName);
+            } else if (isDirty) {
+              final clean = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  title: Row(
+                    children: [
+                      Icon(Icons.cleaning_services_rounded, color: Colors.brown[800]),
+                      const SizedBox(width: 8),
+                      Text('Table Needs Cleaning', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  content: Text('Table $tableName needs bussing.\n\nMark it as clean and make it available?',
+                    style: GoogleFonts.inter()),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: Text('No', style: TextStyle(color: Colors.grey[600])),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.brown, foregroundColor: Colors.white),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Yes, Mark Clean'),
+                    ),
+                  ],
+                ),
+              );
+              if (clean == true && context.mounted) {
+                final pos = context.read<PosService>();
+                final userScope = context.read<UserScopeService>();
+                final branchFilter = context.read<BranchFilterService>();
+                final effectiveBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+                await pos.markTableClean(
+                  branchIds: effectiveBranchIds,
+                  tableId: tableId,
+                );
+              }
             } else if (isAvailable) {
               onSelect(tableId, tableName);
             } else if (isReserved) {
               final proceed = await showDialog<bool>(
                 context: context,
                 builder: (ctx) => AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   title: Row(
                     children: [
                       Icon(Icons.warning_amber_rounded, color: Colors.orange[800]),
                       const SizedBox(width: 8),
-                      const Text('Table Reserved'),
+                      Text('Table Reserved', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
                     ],
                   ),
-                  content: Text('Table $tableName is currently marked as reserved.\n\nDo you want to use it anyway?'),
+                  content: Text('Table $tableName is currently marked as reserved.\n\nDo you want to use it anyway?',
+                    style: GoogleFonts.inter()),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Cancel'),
+                      child: Text('Cancel', style: TextStyle(color: Colors.grey[600])),
                     ),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
@@ -776,88 +663,142 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
           },
           borderRadius: BorderRadius.circular(isRound ? 200 : 20),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
             decoration: BoxDecoration(
               color: bgColor,
               borderRadius: BorderRadius.circular(isRound ? 200 : 20),
-              border: Border.all(color: borderColor, width: 2),
+              border: Border.all(color: borderColor.withValues(alpha: 0.5), width: 2.5),
               boxShadow: (isAvailable || isEditMode)
                   ? [
                       BoxShadow(
-                        color: borderColor.withValues(alpha: 0.2),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
+                        color: borderColor.withValues(alpha: 0.15),
+                        blurRadius: 15,
+                        spreadRadius: 2,
+                        offset: const Offset(0, 6),
                       )
                     ]
-                  : null,
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      )
+                    ],
             ),
             child: Stack(
               children: [
                 if (isEditMode)
                   Positioned(
-                    top: 8,
-                    right: 8,
+                    top: 10,
+                    right: 10,
                     child: Container(
-                      padding: const EdgeInsets.all(4),
+                      padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
                         color: Colors.blue.withValues(alpha: 0.2),
                         shape: BoxShape.circle,
+                        border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
                       ),
-                      child:
-                          const Icon(Icons.edit, size: 14, color: Colors.blue),
+                      child: const Icon(Icons.settings_outlined, size: 14, color: Colors.blue),
                     ),
                   )
-                else if (isOccupiedByOrder && !isReserved)
+                else if (isDirty)
                   Positioned(
-                    top: 4,
-                    right: 4,
+                    top: 6,
+                    right: 6,
                     child: Material(
                       color: Colors.transparent,
-                      child: IconButton(
-                        icon: const Icon(Icons.print, size: 18),
-                        color: textColor,
-                        tooltip: 'Print Invoice',
-                        onPressed: () async {
-                          // Find active order for this table
-                          final userScope = context.read<UserScopeService>();
-                          final branchFilter =
-                              context.read<BranchFilterService>();
-                          final effectiveBranchIds = branchFilter
-                              .getFilterBranchIds(userScope.branchIds);
-                          try {
-                            final snapshot = await FirebaseFirestore.instance
-                                .collection(AppConstants.collectionOrders)
-                                .where('branchIds',
-                                    arrayContainsAny: effectiveBranchIds)
-                                .where('tableId', isEqualTo: tableId)
-                                .where('Order_type', isEqualTo: 'dine_in')
-                                .where('status', whereIn: [
-                                  AppConstants.statusPending,
-                                  AppConstants.statusPreparing,
-                                  AppConstants.statusPrepared,
-                                  AppConstants.statusServed,
-                                ])
-                                .limit(1)
-                                .get();
+                      child: Tooltip(
+                        message: 'Mark Table Clean',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(20),
+                          onTap: () async {
+                            final pos = context.read<PosService>();
+                            final userScope = context.read<UserScopeService>();
+                            final branchFilter = context.read<BranchFilterService>();
+                            final effectiveBranchIds = branchFilter
+                                .getFilterBranchIds(userScope.branchIds);
+                            await pos.markTableClean(
+                              branchIds: effectiveBranchIds,
+                              tableId: tableId,
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.brown.withValues(alpha: 0.15),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.brown.withValues(alpha: 0.4),
+                                width: 1.5,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.cleaning_services_rounded,
+                              size: 18,
+                              color: Colors.brown,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                else if (isOccupied)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: textColor.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.receipt_long_rounded, size: 18),
+                          color: textColor,
+                          tooltip: 'Print Invoice',
+                          onPressed: () async {
+                            final userScope = context.read<UserScopeService>();
+                            final branchFilter =
+                                context.read<BranchFilterService>();
+                            final effectiveBranchIds = branchFilter
+                                .getFilterBranchIds(userScope.branchIds);
+                            try {
+                              final snapshot = await FirebaseFirestore.instance
+                                  .collection(AppConstants.collectionOrders)
+                                  .where('branchIds',
+                                      arrayContainsAny: effectiveBranchIds)
+                                  .where('tableId', isEqualTo: tableId)
+                                  .where('Order_type', isEqualTo: 'dine_in')
+                                  .where('status', whereIn: [
+                                    AppConstants.statusPending,
+                                    AppConstants.statusPreparing,
+                                    AppConstants.statusPrepared,
+                                    AppConstants.statusServed,
+                                  ])
+                                  .limit(1)
+                                  .get();
 
-                            if (snapshot.docs.isNotEmpty && context.mounted) {
-                              PrintingService.printReceipt(
-                                  context, snapshot.docs.first);
-                            } else if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text(
-                                        'No active orders found to print.')),
-                              );
+                              if (snapshot.docs.isNotEmpty && context.mounted) {
+                                PrintingService.printReceipt(
+                                    context, snapshot.docs.first);
+                              } else if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text(
+                                          'No active orders found to print.')),
+                                );
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error printing: $e')),
+                                );
+                              }
                             }
-                          } catch (e) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Error printing: $e')),
-                              );
-                            }
-                          }
-                        },
+                          },
+                        ),
                       ),
                     ),
                   ),
@@ -865,16 +806,24 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        isRound ? Icons.circle_outlined : Icons.table_bar,
-                        color: borderColor,
-                        size: 40,
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: borderColor.withValues(alpha: 0.1),
+                          shape: isRound ? BoxShape.circle : BoxShape.rectangle,
+                          borderRadius: isRound ? null : BorderRadius.circular(15),
+                        ),
+                        child: Icon(
+                          tableIcon,
+                          color: borderColor,
+                          size: 36,
+                        ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       Text(
                         tableName,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: GoogleFonts.outfit(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                           color: textColor,
@@ -883,52 +832,47 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                       if (seats != null) ...[
-                        const SizedBox(height: 6),
-                        Wrap(
-                          alignment: WrapAlignment.center,
-                          spacing: 2,
-                          runSpacing: 2,
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            for (int i = 0; i < (seats > 6 ? 6 : seats); i++)
-                              Icon(Icons.chair, size: 14, color: textColor),
-                            if (seats > 6)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: textColor.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  '+${seats - 6}',
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      color: textColor,
-                                      fontWeight: FontWeight.bold),
-                                ),
+                            Icon(Icons.people_outline_rounded, size: 14, color: textColor.withValues(alpha: 0.7)),
+                            const SizedBox(width: 4),
+                            Text(
+                              '$seats Seats',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: textColor.withValues(alpha: 0.7),
                               ),
+                            ),
                           ],
                         ),
                       ],
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
+                            horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
                           color: borderColor.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: borderColor.withValues(alpha: 0.2)),
                         ),
                         child: Text(
                           isEditMode
-                              ? 'Edit'
-                              : isAvailable
-                                  ? 'Available'
-                                  : isReserved
-                                      ? 'Reserved'
-                                      : 'View Orders',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
+                              ? 'Tap to Edit'
+                              : isDirty
+                                  ? 'NEEDS CLEANING'
+                                  : isAvailable
+                                      ? 'AVAILABLE'
+                                      : isReserved
+                                          ? 'RESERVED'
+                                          : 'ACTIVE ORDER',
+                          style: GoogleFonts.inter(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
                             color: textColor,
+                            letterSpacing: 0.5,
                           ),
                         ),
                       ),
@@ -943,3 +887,4 @@ class _FullScreenFloorPlanTable extends StatelessWidget {
     );
   }
 }
+

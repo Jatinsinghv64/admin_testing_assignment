@@ -12,14 +12,7 @@ import '../../main.dart';
 import '../../services/inventory/InventoryService.dart';
 import '../../services/CsvExportService.dart';
 
-class _StockColors {
-  static const Color primary = Color(0xFF673AB7); // Deep Purple
-  static const Color backgroundLight = Color(0xFFF8FAFC);
-  static const Color surfaceLight = Color(0xFFF1F5F9);
-  static const Color textMain = Color(0xFF0F172A);
-  static const Color textMuted = Color(0xFF64748B);
-  static const Color border = Color(0x1A673AB7); // primary with 10% opacity
-}
+
 
 class StocktakeScreen extends StatefulWidget {
   const StocktakeScreen({super.key});
@@ -73,7 +66,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     }
 
     return Container(
-      color: _StockColors.backgroundLight,
+      color: Theme.of(context).scaffoldBackgroundColor,
       child: Column(
         children: [
           _buildHeaderAndControls(branchFilter, userScope),
@@ -83,9 +76,9 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                   isSuperAdmin: userScope.isSuperAdmin),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
+                  return Center(
                       child: CircularProgressIndicator(
-                          color: _StockColors.primary));
+                          color: Theme.of(context).colorScheme.primary));
                 }
                 if (snapshot.hasError) {
                   return Center(
@@ -146,9 +139,9 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       BranchFilterService branchFilter, UserScopeService userScope) {
     return Container(
       padding: const EdgeInsets.fromLTRB(32, 16, 32, 24),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: _StockColors.border)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+        border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
       ),
       child: Column(
         children: [
@@ -165,12 +158,12 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: _StockColors.primary.withOpacity(0.1),
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(999),
                     ),
-                    child: const Text('Active Session',
+                    child: Text('Active Session',
                         style: TextStyle(
-                            color: _StockColors.primary,
+                            color: Theme.of(context).colorScheme.primary,
                             fontSize: 10,
                             fontWeight: FontWeight.bold)),
                   ),
@@ -185,12 +178,12 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                       onChanged: (v) => setState(() => _searchQuery = v),
                       decoration: InputDecoration(
                         hintText: 'Search ingredients...',
-                        hintStyle: const TextStyle(
-                            fontSize: 13, color: _StockColors.textMuted),
-                        prefixIcon: const Icon(Icons.search,
-                            size: 18, color: _StockColors.textMuted),
+                        hintStyle: TextStyle(
+                            fontSize: 13, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
+                        prefixIcon: Icon(Icons.search,
+                            size: 18, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                         filled: true,
-                        fillColor: _StockColors.surfaceLight,
+                        fillColor: (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)),
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: BorderSide.none),
@@ -217,18 +210,18 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('BRANCH',
+                      Text('BRANCH',
                           style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: _StockColors.textMuted,
+                              color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                               letterSpacing: 1)),
                       const SizedBox(height: 4),
                       Container(
                         width: 192,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                            color: _StockColors.surfaceLight,
+                            color: (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)),
                             borderRadius: BorderRadius.circular(8)),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
@@ -252,11 +245,11 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('CATEGORY',
+                      Text('CATEGORY',
                           style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: _StockColors.textMuted,
+                              color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                               letterSpacing: 1)),
                       const SizedBox(height: 4),
                       Row(
@@ -277,8 +270,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                                           horizontal: 12, vertical: 8),
                                       decoration: BoxDecoration(
                                         color: _selectedCategory == cat
-                                            ? _StockColors.primary
-                                            : _StockColors.surfaceLight,
+                                            ? Theme.of(context).colorScheme.primary
+                                            : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)),
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: Text(cat,
@@ -287,7 +280,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                                             fontWeight: FontWeight.bold,
                                             color: _selectedCategory == cat
                                                 ? Colors.white
-                                                : _StockColors.textMain,
+                                                : Theme.of(context).textTheme.bodyLarge?.color,
                                           )),
                                     ),
                                   ),
@@ -301,11 +294,11 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  const Text('Last sync',
+                  Text('Last sync',
                       style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
-                          color: _StockColors.textMuted)),
+                          color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
                   Text(DateFormat('MMM d, yyyy - h:mm a').format(_lastSync),
                       style: const TextStyle(
                           fontSize: 14, fontWeight: FontWeight.bold)),
@@ -320,24 +313,24 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
 
   Widget _buildNoBranchState() {
     return Container(
-      color: _StockColors.backgroundLight,
+      color: Theme.of(context).scaffoldBackgroundColor,
       alignment: Alignment.center,
       padding: const EdgeInsets.all(24),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 420),
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: _StockColors.border),
+          border: Border.all(color: Theme.of(context).dividerColor),
         ),
-        child: const Column(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               Icons.account_tree_outlined,
               size: 34,
-              color: _StockColors.primary,
+              color: Theme.of(context).colorScheme.primary,
             ),
             SizedBox(height: 14),
             Text(
@@ -346,7 +339,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: _StockColors.textMain,
+                color: Theme.of(context).textTheme.bodyLarge?.color,
               ),
             ),
           ],
@@ -359,9 +352,9 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     return Container(
       margin: const EdgeInsets.only(top: 24),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _StockColors.border),
+        border: Border.all(color: Theme.of(context).dividerColor),
         boxShadow: [
           BoxShadow(
               color: Colors.black.withOpacity(0.02),
@@ -384,7 +377,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
             // Header Row
             TableRow(
               decoration:
-                  BoxDecoration(color: _StockColors.primary.withOpacity(0.05)),
+                  BoxDecoration(color: Theme.of(context).colorScheme.primary.withOpacity(0.05)),
               children: [
                 _th('Ingredient Name / SKU'),
                 _th('Unit'),
@@ -401,9 +394,9 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
               final diff = actual - item.getStock(branchIds.first);
 
               return TableRow(
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   border:
-                      Border(bottom: BorderSide(color: _StockColors.border)),
+                      Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
                 ),
                 children: [
                   Padding(
@@ -416,8 +409,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                             style: const TextStyle(
                                 fontSize: 14, fontWeight: FontWeight.bold)),
                         Text(item.sku ?? '-',
-                            style: const TextStyle(
-                                fontSize: 10, color: _StockColors.textMuted)),
+                            style: TextStyle(
+                                fontSize: 10, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
                       ],
                     ),
                   ),
@@ -441,7 +434,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                               fontSize: 13, fontWeight: FontWeight.bold),
                           decoration: InputDecoration(
                             filled: true,
-                            fillColor: _StockColors.backgroundLight,
+                            fillColor: Theme.of(context).scaffoldBackgroundColor,
                             contentPadding: EdgeInsets.zero,
                             border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
@@ -449,8 +442,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                                     const BorderSide(color: Color(0x3317CF54))),
                             focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                    color: _StockColors.primary, width: 2)),
+                                borderSide: BorderSide(
+                                    color: Theme.of(context).colorScheme.primary, width: 2)),
                           ),
                         ),
                       ),
@@ -468,8 +461,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                           color: diff == 0
-                              ? _StockColors.primary
-                              : (diff < 0 ? Colors.red : _StockColors.primary),
+                              ? Theme.of(context).colorScheme.primary
+                              : (diff < 0 ? Colors.red : Theme.of(context).colorScheme.primary),
                         ),
                       ),
                     ),
@@ -490,8 +483,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                                   style: TextStyle(
                                       fontSize: 11,
                                       fontStyle: FontStyle.italic)),
-                              style: const TextStyle(
-                                  fontSize: 12, color: _StockColors.textMain),
+                              style: TextStyle(
+                                  fontSize: 12, color: Theme.of(context).textTheme.bodyLarge?.color),
                               items: [
                                 'Waste / Spoilage',
                                 'Unrecorded sale',
@@ -513,10 +506,10 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                             controller: _noteControllers[item.id],
                             style: const TextStyle(
                                 fontSize: 11, fontStyle: FontStyle.italic),
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               hintText: 'Add note...',
                               hintStyle: TextStyle(
-                                  fontSize: 11, color: _StockColors.textMuted),
+                                  fontSize: 11, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                               border: InputBorder.none,
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -566,13 +559,13 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                      color: _StockColors.primary.withOpacity(0.1),
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(999)),
-                  child: const Icon(Icons.info_outline,
-                      color: _StockColors.primary),
+                  child: Icon(Icons.info_outline,
+                      color: Theme.of(context).colorScheme.primary),
                 ),
                 const SizedBox(width: 16),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -584,7 +577,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                         'Any variance exceeding 5% of system stock or QAR 50 in value requires manager approval and a secondary recount. Please ensure all waste logs from the previous shift have been entered before submitting.',
                         style: TextStyle(
                             fontSize: 11,
-                            color: _StockColors.textMuted,
+                            color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                             height: 1.4),
                       ),
                     ],
@@ -604,8 +597,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                     color: totalVarianceValue < 0
                         ? Colors.red
                         : (totalVarianceValue > 0
-                            ? _StockColors.primary
-                            : _StockColors.textMain),
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).textTheme.bodyLarge?.color),
                     isBold: true),
                 const SizedBox(height: 12),
                 _summaryRow('Items with Variance', '$itemsWithVariance Items'),
@@ -617,17 +610,17 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                   borderRadius: BorderRadius.circular(999),
                   child: LinearProgressIndicator(
                     value: progress,
-                    backgroundColor: _StockColors.surfaceLight,
+                    backgroundColor: (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)),
                     valueColor:
-                        const AlwaysStoppedAnimation(_StockColors.primary),
+                        AlwaysStoppedAnimation(Theme.of(context).colorScheme.primary),
                     minHeight: 6,
                   ),
                 ),
               ],
             ),
             padding: const EdgeInsets.all(24),
-            borderColor: _StockColors.primary.withOpacity(0.2),
-            bgColor: _StockColors.primary.withOpacity(0.05),
+            borderColor: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+            bgColor: Theme.of(context).colorScheme.primary.withOpacity(0.05),
           ),
         ),
       ],
@@ -791,9 +784,9 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     return Container(
       height: 80,
       padding: const EdgeInsets.symmetric(horizontal: 32),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: _StockColors.border)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -840,14 +833,14 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                       borderRadius: BorderRadius.circular(8)),
                 ),
                 child: _isSavingDraft
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: _StockColors.primary))
-                    : const Text('Save Progress',
+                            strokeWidth: 2, color: Theme.of(context).colorScheme.primary))
+                    : Text('Save Progress',
                         style: TextStyle(
-                            color: _StockColors.primary,
+                            color: Theme.of(context).colorScheme.primary,
                             fontWeight: FontWeight.bold)),
               ),
               const SizedBox(width: 16),
@@ -863,19 +856,19 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                 style: ElevatedButton.styleFrom(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                  backgroundColor: _StockColors.primary,
+                  backgroundColor: Theme.of(context).colorScheme.primary,
                   elevation: 0,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8)),
                 ),
                 child: _isConfirming
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : const Text('Submit Stocktake',
-                        style: TextStyle(
+                            strokeWidth: 2, color: Theme.of(context).cardColor))
+                    : Text('Submit Stocktake',
+                        style: const TextStyle(
                             color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ],
@@ -888,10 +881,10 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
   Widget _th(String text) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         child: Text(text.toUpperCase(),
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
-                color: _StockColors.textMuted,
+                color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                 letterSpacing: 1)),
       );
 
@@ -910,7 +903,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(8)),
       child: Stack(
         children: [
-          Icon(icon, color: _StockColors.textMuted, size: 22),
+          Icon(icon, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6), size: 22),
           if (hasBadge)
             Positioned(
                 top: 2,
@@ -918,8 +911,8 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                 child: Container(
                     width: 8,
                     height: 8,
-                    decoration: const BoxDecoration(
-                        color: _StockColors.primary, shape: BoxShape.circle))),
+                    decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary, shape: BoxShape.circle))),
         ],
       ),
     );
@@ -933,17 +926,17 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
         decoration: BoxDecoration(
-            color: _StockColors.surfaceLight,
+            color: (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)),
             borderRadius: BorderRadius.circular(8)),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: _StockColors.textMain),
+            Icon(icon, size: 18, color: Theme.of(context).textTheme.bodyLarge?.color),
             const SizedBox(width: 8),
             Text(label,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
-                    color: _StockColors.textMain)),
+                    color: Theme.of(context).textTheme.bodyLarge?.color)),
           ],
         ),
       ),
@@ -955,9 +948,9 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     return Container(
       padding: padding ?? const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: bgColor ?? _StockColors.surfaceLight.withOpacity(0.5),
+        color: bgColor ?? (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)).withOpacity(0.5),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor ?? _StockColors.border),
+        border: Border.all(color: borderColor ?? Theme.of(context).dividerColor),
       ),
       child: child,
     );
@@ -969,16 +962,16 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: _StockColors.textMuted,
+                color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
                 letterSpacing: 0.5)),
         Text(value,
             style: TextStyle(
                 fontSize: isBold ? 18 : 13,
                 fontWeight: isBold ? FontWeight.w900 : FontWeight.bold,
-                color: color ?? _StockColors.textMain)),
+                color: color ?? Theme.of(context).textTheme.bodyLarge?.color)),
       ],
     );
   }
@@ -1037,9 +1030,9 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       await prefs.setString(key,
           jsonEncode({'counts': counts, 'reasons': reasons, 'notes': notes}));
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Progress saved'),
-            backgroundColor: _StockColors.primary));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: const Text('Progress saved'),
+            backgroundColor: Theme.of(context).colorScheme.primary));
       }
     } finally {
       if (mounted) setState(() => _isSavingDraft = false);
@@ -1085,7 +1078,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
               ElevatedButton(
                   onPressed: () => Navigator.pop(context, true),
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: _StockColors.primary),
+                      backgroundColor: Theme.of(context).colorScheme.primary),
                   child: const Text('Confirm')),
             ],
           ),
@@ -1109,7 +1102,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('Stocktake completed. $updatedCount items adjusted.'),
-            backgroundColor: _StockColors.primary));
+            backgroundColor: Theme.of(context).colorScheme.primary));
       }
     } catch (e) {
       if (context.mounted)

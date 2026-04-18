@@ -186,7 +186,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
         width: 980,
         height: 700,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
@@ -216,7 +216,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
               Positioned.fill(
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.95),
+                    color: Theme.of(context).cardColor.withValues(alpha: 0.95),
                     borderRadius: BorderRadius.circular(24),
                   ),
                   child: Center(
@@ -255,7 +255,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
     return Container(
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: Theme.of(context).scaffoldBackgroundColor,
         borderRadius: BorderRadius.horizontal(
           left: const Radius.circular(24),
           right: _showNumpad ? Radius.zero : const Radius.circular(24),
@@ -358,11 +358,11 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
                 elevation: 0,
               ),
               child: _isProcessing
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 24,
                       height: 24,
                       child: CircularProgressIndicator(
-                        color: Colors.white,
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                         strokeWidth: 2.5,
                       ),
                     )
@@ -396,7 +396,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
           ),
         ),
         const SizedBox(width: 16),
-        const Column(
+        Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
@@ -404,7 +404,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
-                color: Colors.black87,
+                color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
               ),
             ),
             Text(
@@ -435,8 +435,8 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Current Cart',
-                  style: TextStyle(color: Colors.black54)),
+              Text('Current Cart',
+                  style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.54))),
               Text(
                 '${AppConstants.currencySymbol}${widget.totalAmount.toStringAsFixed(2)}',
                 style: const TextStyle(fontWeight: FontWeight.w600),
@@ -447,8 +447,8 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Previous Orders',
-                  style: TextStyle(color: Colors.black54)),
+              Text('Previous Orders',
+                  style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.54))),
               Text(
                 '${AppConstants.currencySymbol}${widget.existingTableTotal.toStringAsFixed(2)}',
                 style: const TextStyle(fontWeight: FontWeight.w600),
@@ -475,10 +475,10 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Total Due',
             style: TextStyle(
-              color: Colors.white70,
+              color: Theme.of(context).cardColor.withOpacity(0.7),
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),
@@ -489,8 +489,8 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
             children: [
               Text(
                 '${AppConstants.currencySymbol}${_grandTotal.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
                 ),
@@ -500,13 +500,13 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
+                    color: Theme.of(context).cardColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Text(
                     '$_guestCount Guests',
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -566,7 +566,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
             duration: const Duration(milliseconds: 180),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: const Color(0xFF6C63FF).withValues(alpha: 0.3),
@@ -762,7 +762,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
@@ -771,12 +771,12 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
         children: [
           Row(
             children: [
-              const Text(
+              Text(
                 'Guest Split',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
-                  color: Colors.black87,
+                  color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                 ),
               ),
               const Spacer(),
@@ -803,7 +803,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        color: Theme.of(context).scaffoldBackgroundColor,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
@@ -834,7 +834,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
@@ -851,7 +851,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
           Container(
             width: 1,
             height: 42,
-            color: Colors.grey[200],
+            color: Theme.of(context).dividerColor,
           ),
           Expanded(
             child: _buildProgressMetric(
@@ -864,7 +864,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
           Container(
             width: 1,
             height: 42,
-            color: Colors.grey[200],
+            color: Theme.of(context).dividerColor,
           ),
           Expanded(
             child: _buildProgressMetric(
@@ -911,12 +911,12 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Guest Shares',
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,
-            color: Colors.black87,
+            color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
           ),
         ),
         const SizedBox(height: 12),
@@ -1114,7 +1114,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
@@ -1252,12 +1252,12 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         borderRadius: const BorderRadius.horizontal(
           right: Radius.circular(24),
         ),
         border: Border(
-          left: BorderSide(color: Colors.grey[200]!),
+          left: BorderSide(color: Theme.of(context).dividerColor),
         ),
       ),
       child: Column(
@@ -1279,17 +1279,17 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
             decoration: BoxDecoration(
-              color: Colors.grey[50],
+              color: Theme.of(context).scaffoldBackgroundColor,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey[200]!),
+              border: Border.all(color: Theme.of(context).dividerColor),
             ),
             child: Text(
               _inputAmount.isEmpty ? '0.00' : _inputAmount,
               textAlign: TextAlign.right,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
-                color: Colors.black87,
+                color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                 fontFamily: 'monospace',
               ),
             ),
@@ -1408,10 +1408,10 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
                       )
                     : Text(
                         key,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.w600,
-                          color: Colors.black87,
+                          color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                         ),
                       ),
               ),
@@ -1592,7 +1592,7 @@ class _PosPaymentDialogState extends State<PosPaymentDialog> {
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.error_outline, color: Colors.white),
+                Icon(Icons.error_outline, color: Theme.of(context).cardColor),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text('Payment failed: $errorMessage. You may safely retry (idempotent).'),

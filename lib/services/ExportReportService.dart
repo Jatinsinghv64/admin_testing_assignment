@@ -417,10 +417,24 @@ class ExportReportService {
         ? 'All Branches'
         : branchFilter.getBranchName(branchFilter.selectedBranchId!);
 
+    // Load fonts for universal support
+    pw.Font? regular;
+    pw.Font? bold;
+    pw.Font? arabic;
+
+    try {
+      regular = await PdfGoogleFonts.robotoRegular();
+      bold = await PdfGoogleFonts.robotoBold();
+      arabic = await PdfGoogleFonts.notoSansArabicRegular();
+    } catch (_) {
+      regular = pw.Font.helvetica();
+      bold = pw.Font.helveticaBold();
+    }
+
     // Load logo
     Uint8List? logoBytes;
     try {
-      final data = await rootBundle.load('assets/mitranlogo.jpg');
+      final data = await rootBundle.load('assets/Qore.JPG');
       logoBytes = data.buffer.asUint8List();
     } catch (_) {}
 
@@ -428,6 +442,14 @@ class ExportReportService {
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(40),
+        theme: pw.ThemeData.withFont(
+          base: regular,
+          bold: bold,
+        ).copyWith(
+          defaultTextStyle: pw.TextStyle(
+            fontFallback: arabic != null ? [arabic] : [],
+          ),
+        ),
         header: (ctx) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
@@ -435,21 +457,22 @@ class ExportReportService {
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
                 if (logoBytes != null)
-                  pw.Image(pw.MemoryImage(logoBytes), width: 50, height: 50)
+                  pw.Image(pw.MemoryImage(logoBytes), width: 70, height: 70)
                 else
-                  pw.Container(width: 50),
+                  pw.Container(width: 70),
                 pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
-                    pw.Text('Business Report', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: PdfColors.deepPurple)),
+                    pw.Text('Qore Operations Intelligence', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.deepPurple)),
                     pw.SizedBox(height: 4),
-                    pw.Text(dateStr, style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey700)),
-                    pw.Text('Branch: $branchLabel', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
+                    pw.Text('Business Performance Report', style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey800)),
+                    pw.Text(dateStr, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                    pw.Text('Branch: $branchLabel', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600)),
                   ],
                 ),
               ],
             ),
-            pw.Divider(color: PdfColors.deepPurple, thickness: 2),
+            pw.Divider(color: PdfColors.deepPurple, thickness: 1.5),
             pw.SizedBox(height: 8),
           ],
         ),
@@ -565,6 +588,7 @@ class ExportReportService {
         headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
         headerDecoration: const pw.BoxDecoration(color: PdfColors.deepPurple),
         cellPadding: const pw.EdgeInsets.all(8),
+        cellAlignment: pw.Alignment.center,
         headers: ['Metric', 'Value'],
         data: [
           ['Total Orders', '${stats['totalOrders']}'],
@@ -593,6 +617,7 @@ class ExportReportService {
         headerDecoration: const pw.BoxDecoration(color: PdfColors.deepPurple),
         cellPadding: const pw.EdgeInsets.all(6),
         cellStyle: const pw.TextStyle(fontSize: 9),
+        cellAlignment: pw.Alignment.center,
         headers: ['#', 'Date', 'Customer', 'Source', 'Items', 'Total', 'Status'],
         data: orders.take(100).toList().asMap().entries.map((e) {
           final o = e.value;
@@ -625,6 +650,7 @@ class ExportReportService {
         headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
         headerDecoration: const pw.BoxDecoration(color: PdfColors.deepPurple),
         cellPadding: const pw.EdgeInsets.all(8),
+        cellAlignment: pw.Alignment.center,
         headers: ['Source', 'Orders', 'Revenue', '% of Total'],
         data: revenueBySource.entries.map((e) {
           final total = stats['totalRevenue'] as double;
@@ -646,6 +672,7 @@ class ExportReportService {
         headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
         headerDecoration: const pw.BoxDecoration(color: PdfColors.deepPurple),
         cellPadding: const pw.EdgeInsets.all(8),
+        cellAlignment: pw.Alignment.center,
         headers: ['Branch', 'Orders', 'Revenue', '% of Total'],
         data: revenueByBranch.entries.map((e) {
           final total = stats['totalRevenue'] as double;
@@ -667,6 +694,7 @@ class ExportReportService {
         headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 10),
         headerDecoration: const pw.BoxDecoration(color: PdfColors.deepPurple),
         cellPadding: const pw.EdgeInsets.all(6),
+        cellAlignment: pw.Alignment.center,
         headers: ['#', 'Item', 'Qty Sold', 'Revenue'],
         data: items.take(30).toList().asMap().entries.map((e) {
           final item = e.value;
@@ -697,6 +725,7 @@ class ExportReportService {
         headerDecoration: const pw.BoxDecoration(color: PdfColors.deepPurple),
         cellPadding: const pw.EdgeInsets.all(6),
         cellStyle: const pw.TextStyle(fontSize: 9),
+        cellAlignment: pw.Alignment.center,
         headers: ['Item', 'Category', 'Price', 'Cost', 'Profit', 'Margin %'],
         data: marginData.take(50).map((m) {
           return [
@@ -752,6 +781,7 @@ class ExportReportService {
         headerDecoration: const pw.BoxDecoration(color: PdfColors.deepPurple),
         cellPadding: const pw.EdgeInsets.all(5),
         cellStyle: const pw.TextStyle(fontSize: 9),
+        cellAlignment: pw.Alignment.center,
         headers: ['Ingredient', 'Stock', 'Unit', 'Value', 'Status'],
         data: inventoryData.take(50).map((i) {
           return [

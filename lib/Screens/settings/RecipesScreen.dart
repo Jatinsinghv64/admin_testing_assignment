@@ -41,7 +41,7 @@ class _RecipesScreenState extends State<RecipesScreen> {
     final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
           _buildHeader(context, userScope, branchIds),
@@ -90,7 +90,7 @@ class _RecipesScreenState extends State<RecipesScreen> {
     List<String> branchIds,
   ) {
     return Container(
-      color: Colors.white,
+      color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.white,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(
         children: [
@@ -98,11 +98,11 @@ class _RecipesScreenState extends State<RecipesScreen> {
           TextField(
             decoration: InputDecoration(
               hintText: 'Search recipes…',
-              hintStyle: TextStyle(color: Colors.grey[400]),
+              hintStyle: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.4)),
               prefixIcon:
                   Icon(Icons.search_rounded, color: Colors.deepPurple.shade300),
               filled: true,
-              fillColor: Colors.grey[100],
+              fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: BorderSide.none),
@@ -263,14 +263,14 @@ class _RecipesScreenState extends State<RecipesScreen> {
             style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
-                color: Colors.grey[600]),
+                color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.8)),
           ),
           const SizedBox(height: 8),
           Text(
             _searchQuery.isNotEmpty
                 ? 'Try a different search.'
                 : 'Tap + to add your first recipe.',
-            style: TextStyle(color: Colors.grey[500], fontSize: 14),
+            style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5), fontSize: 14),
           ),
         ],
       ),
@@ -319,15 +319,16 @@ class _RecipeCard extends StatelessWidget {
     final r = recipe;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.deepPurple.withOpacity(0.06),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
         ],
+        border: Border.all(color: Theme.of(context).dividerColor),
       ),
       child: Material(
         color: Colors.transparent,
@@ -349,10 +350,10 @@ class _RecipeCard extends StatelessWidget {
                     children: [
                       Text(
                         r.name,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
-                            color: Colors.black87),
+                            color: Theme.of(context).textTheme.bodyLarge?.color),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -366,11 +367,11 @@ class _RecipeCard extends StatelessWidget {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(Icons.timer_outlined,
-                                    size: 13, color: Colors.grey[500]),
+                                    size: 13, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6)),
                                 const SizedBox(width: 3),
                                 Text('${r.prepTimeMinutes} min',
                                     style: TextStyle(
-                                        fontSize: 12, color: Colors.grey[600])),
+                                        fontSize: 12, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
                               ],
                             ),
                         ],
@@ -383,7 +384,7 @@ class _RecipeCard extends StatelessWidget {
                           const SizedBox(width: 3),
                           Text('${r.ingredients.length} ingredient(s)',
                               style: TextStyle(
-                                  fontSize: 12, color: Colors.grey[600])),
+                                  fontSize: 12, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6))),
                           const Spacer(),
                           // Total cost badge
                           Container(
@@ -667,9 +668,9 @@ class _RecipeFormSheetState extends State<_RecipeFormSheet> {
       maxChildSize: 0.97,
       minChildSize: 0.5,
       builder: (ctx, scrollCtrl) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF121212) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(
           children: [
@@ -703,10 +704,10 @@ class _RecipeFormSheetState extends State<_RecipeFormSheet> {
                       children: [
                         Text(
                           isEdit ? 'Edit Recipe' : 'Add Recipe',
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: Colors.black87),
+                              color: Theme.of(context).textTheme.bodyLarge?.color),
                         ),
                         Text(
                           'Total cost: QAR ${_liveCost.toStringAsFixed(2)}',

@@ -181,6 +181,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
     final branchIds = _effectiveBranchIds(userScope, branchFilter);
@@ -191,12 +192,12 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: widget.isDrawer
           ? null
           : AppBar(
               title: const Text('Create Purchase Order'),
-              backgroundColor: Colors.white,
+              backgroundColor: theme.cardColor,
               elevation: 0,
             ),
       body: Column(
@@ -205,22 +206,22 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+                color: theme.cardColor,
+                border: Border(bottom: BorderSide(color: theme.dividerColor)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    widget.editingPo != null
-                        ? 'Edit Purchase Order'
-                        : 'New Purchase Order',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.deepPurple,
+                    Text(
+                      widget.editingPo != null
+                          ? 'Edit Purchase Order'
+                          : 'New Purchase Order',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: theme.primaryColor,
+                      ),
                     ),
-                  ),
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.grey),
                     onPressed: () => Navigator.pop(context),
@@ -265,14 +266,14 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                             style: GoogleFonts.outfit(
                               fontSize: 24,
                               fontWeight: FontWeight.w700,
-                              color: Colors.deepPurple.shade800,
+                              color: theme.brightness == Brightness.dark ? Colors.white : theme.primaryColor,
                             ),
                           ),
                           const SizedBox(height: 8),
                           Text(
                             'Fill in the details below to generate a new PO.',
                             style: TextStyle(
-                                fontSize: 14, color: Colors.grey.shade600),
+                                fontSize: 14, color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7)),
                           ),
                           const SizedBox(height: 24),
                         ],
@@ -285,7 +286,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                 style: GoogleFonts.outfit(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.deepPurple.shade800,
+                                  color: theme.brightness == Brightness.dark ? Colors.white : theme.primaryColor,
                                 ),
                               ),
                               const SizedBox(height: 16),
@@ -293,11 +294,10 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 16, vertical: 12),
                                 decoration: BoxDecoration(
-                                  color: Colors.deepPurple.shade50
-                                      .withOpacity(0.5),
+                                  color: theme.primaryColor.withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                      color: Colors.deepPurple.shade100),
+                                      color: theme.primaryColor.withOpacity(0.2)),
                                 ),
                                 child: _kv(
                                   'PO Number',
@@ -336,18 +336,18 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                   Expanded(
                                     child: Container(
                                       decoration: BoxDecoration(
-                                        color: Colors.white,
+                                        color: theme.cardColor,
                                         borderRadius: BorderRadius.circular(14),
                                         border: Border.all(
-                                            color: Colors.grey.shade300),
+                                            color: theme.dividerColor),
                                       ),
                                       child: ListTile(
                                         shape: RoundedRectangleBorder(
                                             borderRadius:
                                                 BorderRadius.circular(14)),
-                                        leading: const Icon(
+                                        leading: Icon(
                                             Icons.event_outlined,
-                                            color: Colors.deepPurple),
+                                            color: theme.primaryColor),
                                         title: const Text('Expected delivery',
                                             style: TextStyle(fontSize: 14)),
                                         subtitle: Text(
@@ -360,17 +360,17 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                                   .first,
                                           style: TextStyle(
                                             color: _expectedDate == null
-                                                ? Colors.grey[500]
-                                                : Colors.black87,
+                                                ? theme.textTheme.bodyMedium?.color?.withOpacity(0.5)
+                                                : theme.textTheme.bodyLarge?.color,
                                             fontWeight: _expectedDate == null
                                                 ? FontWeight.normal
                                                 : FontWeight.w600,
                                           ),
                                         ),
                                         trailing: IconButton(
-                                          icon: const Icon(
+                                          icon: Icon(
                                               Icons.calendar_today_outlined,
-                                              color: Colors.deepPurple),
+                                              color: theme.primaryColor),
                                           onPressed: () async {
                                             final picked = await showDatePicker(
                                               context: context,
@@ -421,7 +421,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                         style: GoogleFonts.outfit(
                                           fontSize: 18,
                                           fontWeight: FontWeight.w600,
-                                          color: Colors.deepPurple.shade800,
+                                          color: theme.brightness == Brightness.dark ? Colors.white : theme.primaryColor,
                                         ),
                                       ),
                                       const Spacer(),
@@ -431,9 +431,9 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                         icon: const Icon(Icons.add, size: 18),
                                         label: const Text('Add Row'),
                                         style: TextButton.styleFrom(
-                                          foregroundColor: Colors.deepPurple,
+                                          foregroundColor: theme.primaryColor,
                                           backgroundColor:
-                                              Colors.deepPurple.shade50,
+                                              theme.primaryColor.withOpacity(0.1),
                                           padding: const EdgeInsets.symmetric(
                                               horizontal: 16, vertical: 8),
                                           shape: RoundedRectangleBorder(
@@ -467,14 +467,14 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                           margin:
                                               const EdgeInsets.only(bottom: 12),
                                           decoration: BoxDecoration(
-                                            color: Colors.white,
+                                            color: theme.cardColor,
                                             borderRadius:
                                                 BorderRadius.circular(12),
                                             border: Border.all(
-                                                color: Colors.grey.shade200),
+                                                color: theme.dividerColor),
                                             boxShadow: [
                                               BoxShadow(
-                                                color: Colors.deepPurple
+                                                color: theme.primaryColor
                                                     .withOpacity(0.03),
                                                 blurRadius: 8,
                                                 offset: const Offset(0, 2),
@@ -495,8 +495,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                                           const EdgeInsets.all(
                                                               8),
                                                       decoration: BoxDecoration(
-                                                        color: Colors
-                                                            .deepPurple.shade50,
+                                                        color: theme.primaryColor.withOpacity(0.1),
                                                         shape: BoxShape.circle,
                                                       ),
                                                       child: Text(
@@ -505,9 +504,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                                               fontWeight:
                                                                   FontWeight
                                                                       .bold,
-                                                              color: Colors
-                                                                  .deepPurple
-                                                                  .shade600)),
+                                                              color: theme.primaryColor)),
                                                     ),
                                                     const SizedBox(width: 12),
                                                     Expanded(
@@ -621,9 +618,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                                         '${qty.toStringAsFixed(qty.truncateToDouble() == qty ? 0 : 2)} ${line.unitCtrl.text.trim().isNotEmpty ? line.unitCtrl.text.trim() : 'units'}  ×  QAR ${cost.toStringAsFixed(2)}  =',
                                                         style: TextStyle(
                                                             fontSize: 12,
-                                                            color: Colors
-                                                                .deepPurple
-                                                                .shade500),
+                                                            color: theme.primaryColor),
                                                       ),
                                                       const Spacer(),
                                                       Container(
@@ -635,7 +630,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                                         decoration:
                                                             BoxDecoration(
                                                           color:
-                                                              Colors.deepPurple,
+                                                              theme.primaryColor,
                                                           borderRadius:
                                                               BorderRadius
                                                                   .circular(8),
@@ -718,8 +713,8 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
                                   colors: [
-                                    Colors.deepPurple.shade700,
-                                    Colors.deepPurple.shade500,
+                                    theme.primaryColor,
+                                    theme.primaryColor.withOpacity(0.8),
                                   ],
                                   begin: Alignment.centerLeft,
                                   end: Alignment.centerRight,
@@ -774,7 +769,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                 style: GoogleFonts.outfit(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.deepPurple.shade800,
+                                  color: theme.brightness == Brightness.dark ? Colors.white : theme.primaryColor,
                                 ),
                               ),
                               const SizedBox(height: 16),
@@ -825,7 +820,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                               style: ElevatedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 32, vertical: 16),
-                                backgroundColor: Colors.deepPurple,
+                                backgroundColor: theme.primaryColor,
                                 foregroundColor: Colors.white,
                                 elevation: 0,
                                 shape: RoundedRectangleBorder(
@@ -861,6 +856,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     List<Map<String, dynamic>> items,
     List<String> supplierIngredientIds,
   ) {
+    final theme = Theme.of(context);
     final hasSelection = line.ingredientIdCtrl.text.isNotEmpty;
     return InkWell(
       onTap: () {
@@ -892,7 +888,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
           filled: true,
           fillColor: Colors.white,
           prefixIcon: Icon(Icons.inventory_2_outlined,
-              size: 20, color: Colors.deepPurple.shade300),
+              size: 20, color: theme.primaryColor.withOpacity(0.6)),
           suffixIcon:
               Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey[400]),
           border: OutlineInputBorder(
@@ -905,7 +901,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Colors.deepPurple, width: 1.5),
+            borderSide: BorderSide(color: theme.primaryColor, width: 1.5),
           ),
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -914,13 +910,14 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
           hasSelection ? line.ingredientNameCtrl.text : 'Tap to select...',
           style: TextStyle(
               fontSize: 14,
-              color: hasSelection ? Colors.black87 : Colors.grey[600]),
+              color: hasSelection ? theme.textTheme.bodyLarge?.color ?? Colors.white : Colors.grey[600]),
         ),
       ),
     );
   }
 
   Widget _card({required Widget child}) {
+    final theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -928,7 +925,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.deepPurple.withOpacity(0.05),
+            color: theme.primaryColor.withOpacity(0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -955,6 +952,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     int maxLines = 1,
     bool required = false,
   }) {
+    final theme = Theme.of(context);
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
@@ -962,7 +960,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: icon != null
-            ? Icon(icon, color: Colors.deepPurple.shade300, size: 20)
+            ? Icon(icon, color: theme.primaryColor.withOpacity(0.6), size: 20)
             : null,
         filled: true,
         fillColor: Colors.white,
@@ -976,7 +974,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Colors.deepPurple, width: 1.5),
+          borderSide: BorderSide(color: theme.primaryColor, width: 1.5),
         ),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
@@ -995,6 +993,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     required void Function(String) onChanged,
     IconData? icon,
   }) {
+    final theme = Theme.of(context);
     return InkWell(
       onTap: () {
         showModalBottomSheet(
@@ -1043,14 +1042,14 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: selected
-                                  ? Colors.deepPurple.withOpacity(0.3)
+                                  ? theme.primaryColor.withOpacity(0.3)
                                   : Colors.grey.shade200,
                             ),
                           ),
                           child: Icon(icon ?? Icons.label_outline,
                               size: 18,
                               color: selected
-                                  ? Colors.deepPurple
+                                  ? theme.primaryColor
                                   : Colors.grey[600]),
                         ),
                         title: Text(item,
@@ -1060,11 +1059,11 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                   ? FontWeight.bold
                                   : FontWeight.normal,
                               color:
-                                  selected ? Colors.deepPurple : Colors.black87,
+                                  selected ? theme.primaryColor : theme.textTheme.bodyLarge?.color ?? Colors.white,
                             )),
                         trailing: selected
-                            ? const Icon(Icons.check_circle,
-                                color: Colors.deepPurple, size: 20)
+                            ? Icon(Icons.check_circle,
+                                color: theme.primaryColor, size: 20)
                             : null,
                       );
                     },
@@ -1083,7 +1082,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
           filled: true,
           fillColor: Colors.white,
           prefixIcon: Icon(icon ?? Icons.label_outline,
-              size: 20, color: Colors.deepPurple.shade300),
+              size: 20, color: theme.primaryColor.withOpacity(0.6)),
           suffixIcon:
               Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey[400]),
           border: OutlineInputBorder(
@@ -1096,14 +1095,14 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Colors.deepPurple, width: 1.5),
+            borderSide: BorderSide(color: theme.primaryColor, width: 1.5),
           ),
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         ),
         child: Text(
           value,
-          style: const TextStyle(fontSize: 14, color: Colors.black87),
+          style: TextStyle(fontSize: 14, color: theme.textTheme.bodyLarge?.color ?? Colors.white),
         ),
       ),
     );
@@ -1375,6 +1374,7 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final filtered = widget.items.where((m) {
       final name = m['name']?.toString().toLowerCase() ?? '';
       return _search.isEmpty || name.contains(_search);
@@ -1413,7 +1413,7 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
               decoration: InputDecoration(
                 hintText: 'Search ingredients…',
                 prefixIcon:
-                    Icon(Icons.search, color: Colors.deepPurple.shade300),
+                    Icon(Icons.search, color: theme.primaryColor.withOpacity(0.6)),
                 filled: true,
                 fillColor: Colors.white,
                 border: OutlineInputBorder(
@@ -1445,7 +1445,7 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
                           child: Text(
                             'Supplier Ingredients',
                             style: TextStyle(
-                              color: Colors.deepPurple.shade700,
+                              color: theme.primaryColor,
                               fontWeight: FontWeight.w700,
                               fontSize: 12,
                             ),
@@ -1478,6 +1478,7 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
   }
 
   Widget _itemTile(Map<String, dynamic> item) {
+    final theme = Theme.of(context);
     final id = item['id'].toString();
     final name = (item['name'] ?? '').toString();
     final selected = id == widget.currentId;
@@ -1494,14 +1495,14 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected
-                ? Colors.deepPurple.withOpacity(0.3)
+                ? theme.primaryColor.withOpacity(0.3)
                 : Colors.grey.shade200,
           ),
         ),
         child: Icon(
           Icons.eco_outlined,
           size: 18,
-          color: selected ? Colors.deepPurple : Colors.grey[500],
+          color: selected ? theme.primaryColor : Colors.grey[500],
         ),
       ),
       title: Text(
@@ -1509,14 +1510,14 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
         style: TextStyle(
           fontSize: 15,
           fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-          color: selected ? Colors.deepPurple : Colors.black87,
+          color: selected ? theme.primaryColor : theme.textTheme.bodyLarge?.color ?? Colors.white,
         ),
       ),
       subtitle: item['category'] != null
           ? Text(item['category'], style: const TextStyle(fontSize: 12))
           : null,
       trailing: selected
-          ? const Icon(Icons.check_circle, color: Colors.deepPurple, size: 20)
+          ? Icon(Icons.check_circle, color: theme.primaryColor, size: 20)
           : null,
     );
   }

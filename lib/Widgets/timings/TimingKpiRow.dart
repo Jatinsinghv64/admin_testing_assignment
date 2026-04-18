@@ -70,9 +70,9 @@ class TimingKpiRow extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.grey[200]!),
+          border: Border.all(color: Theme.of(context).dividerColor),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.02),
@@ -105,7 +105,7 @@ class TimingKpiRow extends StatelessWidget {
                   Text(
                     value,
                     style: textTheme.headlineSmall?.copyWith(
-                      color: Colors.black87,
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
                       fontWeight: FontWeight.w900,
                       letterSpacing: -0.5,
                     ),

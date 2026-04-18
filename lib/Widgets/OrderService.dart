@@ -306,6 +306,9 @@ class OrderService {
 
           await RiderAssignmentService.cancelAutoAssignment(sanitizedOrderId);
         } else {
+          bool needsInventoryDeduction = false;
+          List<String> deductionBranchIds = [];
+
           await _db.runTransaction((transaction) async {
             final snapshot = await transaction.get(orderRef);
             if (!snapshot.exists) throw Exception("Order does not exist!");
@@ -408,15 +411,11 @@ class OrderService {
               AppConstants.statusPaid,
               AppConstants.statusCollected,
             };
-            if (terminalForDeduction.contains(newStatus)) {
-              await InventoryService().performDeductionInTransaction(
-                transaction: transaction,
-                orderId: sanitizedOrderId,
-                branchIds: data['branchIds'] is List 
+            if (terminalForDeduction.contains(newStatus) && data['inventoryDeducted'] != true) {
+              needsInventoryDeduction = true;
+              deductionBranchIds = data['branchIds'] is List 
                     ? List<String>.from(data['branchIds']) 
-                    : [],
-                recordedBy: sanitizedEmail,
-              );
+                    : <String>[];
             }
 
             if (newStatus == AppConstants.statusDelivered) {
@@ -433,6 +432,41 @@ class OrderService {
               }
             }
           }).timeout(AppConstants.firestoreWriteTimeout);
+
+          if (needsInventoryDeduction) {
+            // Deduct inventory OUTSIDE the transaction to prevent 10-second timeout
+            // InventoryService handles its own internal transaction for atomicity.
+            InventoryService().deductForOrder(
+              orderId: sanitizedOrderId,
+              branchIds: deductionBranchIds,
+              recordedBy: sanitizedEmail,
+            ).catchError((e) {
+              debugPrint('⚠️ OrderService: Background inventory deduction failed: $e');
+            });
+          }
+
+          // ── New Table Clearing Logic for Dashboard Status Updates ──
+          try {
+            final finalSnap = await orderRef.get();
+            if (finalSnap.exists) {
+              final finalData = finalSnap.data() as Map<String, dynamic>;
+              final isDineIn = AppConstants.isDineInOrder(finalData['Order_type'] ?? finalData['orderType']);
+              final tableId = finalData['tableId']?.toString() ?? '';
+              
+              if (isDineIn && tableId.isNotEmpty) {
+                final branchIds = finalData['branchIds'] is List 
+                    ? List<String>.from(finalData['branchIds']) 
+                    : <String>[];
+                    
+                await PosService.cleanupTableIfEmpty(
+                  branchIds: branchIds,
+                  tableId: tableId,
+                );
+              }
+            }
+          } catch (e) {
+            debugPrint('⚠️ OrderService: Table cleanup after status update failed: $e');
+          }
 
         }
         break; // Success, exit retry loop
@@ -471,6 +505,9 @@ class OrderService {
 
     final orderRef = _db.collection(AppConstants.collectionOrders).doc(sanitizedOrderId);
 
+    bool needsInventoryDeduction = false;
+    List<String> deductionBranchIds = [];
+
     try {
       await _db.runTransaction((transaction) async {
         final snapshot = await transaction.get(orderRef);
@@ -505,22 +542,30 @@ class OrderService {
         // Add timestamp for paid status
         updateData['timestamps.paid'] = FieldValue.serverTimestamp();
 
-        // Perform inventory deduction if not already done
+        // Flag inventory deduction to happen after transaction
         if (data['inventoryDeducted'] != true) {
-          await InventoryService().performDeductionInTransaction(
-            transaction: transaction,
-            orderId: sanitizedOrderId,
-            branchIds: data['branchIds'] is List 
-                ? List<String>.from(data['branchIds']) 
-                : [],
-            recordedBy: sanitizedEmail,
-          );
+          needsInventoryDeduction = true;
+          deductionBranchIds = data['branchIds'] is List 
+              ? List<String>.from(data['branchIds']) 
+              : <String>[];
         }
 
         // IMPORTANT: Perform the primary order update LAST to satisfy Firestore Web transaction requirements
         // (All gets must happen before any writes)
         transaction.update(orderRef, updateData);
       }).timeout(AppConstants.firestoreWriteTimeout);
+
+      if (needsInventoryDeduction) {
+        // Industry Grade: Run heavy inventory deduction outside main order transaction
+        // to prevent timeout and ensure payment update goes through instantly.
+        InventoryService().deductForOrder(
+          orderId: sanitizedOrderId,
+          branchIds: deductionBranchIds,
+          recordedBy: sanitizedEmail,
+        ).catchError((e) {
+          debugPrint('⚠️ OrderService: Background inventory deduction failed: $e');
+        });
+      }
 
       // ── New Table Clearing Logic ──
       // Fetch fresh data for table cleanup

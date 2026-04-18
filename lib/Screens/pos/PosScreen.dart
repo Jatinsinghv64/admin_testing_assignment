@@ -187,7 +187,7 @@ class _PosScreenState extends State<PosScreen> {
     _scheduleKitchenCancellationWatcher(watcherBranchId);
 
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
           _buildPosHeader(context),
@@ -463,13 +463,13 @@ class _PosScreenState extends State<PosScreen> {
 
   Widget _buildBranchSelectionRequired() {
     return Container(
-      color: Colors.grey[100],
+      color: Theme.of(context).scaffoldBackgroundColor,
       child: Center(
         child: Container(
           width: 480,
           padding: const EdgeInsets.all(40),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
@@ -539,7 +539,7 @@ class _PosScreenState extends State<PosScreen> {
 
   Widget _buildRegisterCheckingLoader() {
     return Container(
-      color: Colors.grey[100],
+      color: Theme.of(context).scaffoldBackgroundColor,
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -569,13 +569,13 @@ class _PosScreenState extends State<PosScreen> {
 
   Widget _buildRegisterClosedOverlay() {
     return Container(
-      color: Colors.grey[100],
+      color: Theme.of(context).scaffoldBackgroundColor,
       child: Center(
         child: Container(
           width: 480,
           padding: const EdgeInsets.all(40),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
@@ -641,7 +641,7 @@ class _PosScreenState extends State<PosScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -654,6 +654,50 @@ class _PosScreenState extends State<PosScreen> {
         children: [
           // ── POS ↔ Delivery Toggle ──
           _buildViewToggle(),
+
+          const SizedBox(width: 20),
+
+          // ── Active Table Info & Duration ──
+          if (_viewMode == PosViewMode.pos)
+            Consumer<PosService>(
+              builder: (context, pos, child) {
+                if (pos.selectedTableId != null) {
+                  return Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: Colors.deepPurple.withValues(alpha: 0.1)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.table_bar,
+                            size: 16, color: Colors.deepPurple),
+                        const SizedBox(width: 8),
+                        Text(
+                          pos.selectedTableName ?? 'Table',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Colors.deepPurple,
+                          ),
+                        ),
+                        if (pos.tableOccupiedAt != null)
+                          _OccupancyDurationWidget(
+                            occupiedAt: pos.tableOccupiedAt!,
+                            color: Colors.red[700],
+                            fontSize: 13,
+                          ),
+                      ],
+                    ),
+                  );
+                }
+                return const SizedBox.shrink();
+              },
+            ),
 
           const Spacer(),
 
@@ -685,7 +729,7 @@ class _PosScreenState extends State<PosScreen> {
                         )
                       : null,
                   filled: true,
-                  fillColor: Colors.grey[100],
+                  fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
                   contentPadding: const EdgeInsets.symmetric(vertical: 0),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -693,7 +737,7 @@ class _PosScreenState extends State<PosScreen> {
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[200]!),
+                    borderSide: BorderSide(color: Theme.of(context).dividerColor),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -856,7 +900,7 @@ class _PosScreenState extends State<PosScreen> {
     late final OverlayEntry loadingOverlay;
     loadingOverlay = OverlayEntry(
       builder: (_) => Container(
-        color: Colors.black54,
+        color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.54),
         child: const Center(child: CircularProgressIndicator(color: Colors.white)),
       ),
     );
@@ -912,7 +956,7 @@ class _PosScreenState extends State<PosScreen> {
   Widget _buildViewToggle() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        color: Theme.of(context).scaffoldBackgroundColor,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
@@ -1042,7 +1086,7 @@ class _PosScreenState extends State<PosScreen> {
       List<QueryDocumentSnapshot> categories, String activeBranchId) {
     return Container(
       width: 130,
-      color: Colors.white,
+      color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
       child: Column(
         children: [
           // "All" category
@@ -1592,9 +1636,9 @@ class _PosScreenState extends State<PosScreen> {
                               Expanded(
                                 child: Text(
                                   issue.ingredientName,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontWeight: FontWeight.w700,
-                                    color: Colors.black87,
+                                    color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                                   ),
                                 ),
                               ),
@@ -1921,6 +1965,38 @@ class _KitchenCancellationAlert {
       orderId: orderId,
       orderLabel: labelBuffer.toString(),
       reason: reason,
+    );
+  }
+}
+
+class _OccupancyDurationWidget extends StatelessWidget {
+  final DateTime occupiedAt;
+  final Color? color;
+  final double? fontSize;
+
+  const _OccupancyDurationWidget(
+      {required this.occupiedAt, this.color, this.fontSize});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: Stream.periodic(const Duration(seconds: 30)),
+      builder: (context, _) {
+        final duration = DateTime.now().difference(occupiedAt);
+        final minutes = duration.inMinutes;
+        final hours = duration.inHours;
+        final remainingMinutes = minutes % 60;
+        final text =
+            hours > 0 ? '${hours}h ${remainingMinutes}m' : '${minutes}m';
+        return Text(
+          ' ($text)',
+          style: TextStyle(
+            fontSize: fontSize ?? 12,
+            fontWeight: FontWeight.bold,
+            color: color ?? Colors.red,
+          ),
+        );
+      },
     );
   }
 }

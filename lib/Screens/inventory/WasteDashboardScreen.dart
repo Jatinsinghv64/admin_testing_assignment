@@ -11,13 +11,12 @@ import 'WasteLoggingScannerScreen.dart';
 
 // ─── Theme Colors (deepPurple-based to match app theme) ─────────────────────
 class _WColors {
-  static final Color bgDark       = Colors.grey.shade50;
-  static const Color surfaceDark  = Colors.white;
-  static final Color borderDark   = Colors.grey.shade200;
-  static final Color primary      = Colors.deepPurple;
-  static final Color primaryLight = Colors.deepPurple.shade300;
-  static const Color textMain     = Color(0xFF1E293B);
-  static const Color textMuted    = Color(0xFF64748B);
+  static Color background(BuildContext context) => Theme.of(context).scaffoldBackgroundColor;
+  static Color surface(BuildContext context) => Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor;
+  static Color border(BuildContext context) => Theme.of(context).dividerColor;
+  static Color primary(BuildContext context) => Theme.of(context).colorScheme.primary;
+  static Color textMain(BuildContext context) => Theme.of(context).textTheme.bodyLarge?.color ?? const Color(0xFF1E293B);
+  static Color textMuted(BuildContext context) => Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6) ?? const Color(0xFF64748B);
 }
 
 class WasteDashboardScreen extends StatefulWidget {
@@ -108,7 +107,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(
-            child: CircularProgressIndicator(color: _WColors.primary),
+            child: CircularProgressIndicator(color: _WColors.primary(context)),
           );
         }
         if (snapshot.hasError) {
@@ -174,27 +173,27 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: _WColors.surfaceDark,
+                    color: _WColors.surface(context),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(Icons.analytics_outlined, color: _WColors.primary, size: 22),
+                  child: Icon(Icons.analytics_outlined, color: _WColors.primary(context), size: 22),
                 ),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         'Waste Management & Analytics',
                         style: TextStyle(
-                          fontSize: 22, fontWeight: FontWeight.w900, color: _WColors.textMain,
+                          fontSize: 22, fontWeight: FontWeight.w900, color: _WColors.textMain(context),
                           letterSpacing: -0.3,
                         ),
                       ),
                       SizedBox(height: 2),
                       Text(
                         'Track food waste, monitor costs, and optimize kitchen efficiency.',
-                        style: TextStyle(fontSize: 12, color: _WColors.textMuted),
+                        style: TextStyle(fontSize: 12, color: _WColors.textMuted(context)),
                       ),
                     ],
                   ),
@@ -204,9 +203,9 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                   width: 170,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.white,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _WColors.borderDark),
+                    border: Border.all(color: _WColors.border(context)),
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: DropdownButtonHideUnderline(
@@ -214,7 +213,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                       value: _datePreset,
                       isExpanded: true,
                       icon: const Icon(Icons.calendar_today, size: 16),
-                      style: const TextStyle(fontSize: 13, color: _WColors.textMain, fontWeight: FontWeight.w500),
+                      style: TextStyle(fontSize: 13, color: _WColors.textMain(context), fontWeight: FontWeight.w500),
                       items: const [
                         DropdownMenuItem(value: 'this_month', child: Text('This Month')),
                         DropdownMenuItem(value: 'today', child: Text('Today')),
@@ -250,12 +249,12 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                 onPressed: () => Navigator.of(context, rootNavigator: true).push(
                   MaterialPageRoute(builder: (_) => const WasteHistoryScreen()),
                 ),
-                child: Text('View All History', style: TextStyle(color: _WColors.primary, fontWeight: FontWeight.w600, fontSize: 13)),
+                child: Text('View All History', style: TextStyle(color: _WColors.primary(context), fontWeight: FontWeight.w600, fontSize: 13)),
               ),
               child: recent.isEmpty
-                  ? const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('No recent waste entries.', style: TextStyle(color: _WColors.textMuted)),
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Text('No recent waste entries.', style: TextStyle(color: _WColors.textMuted(context))),
                     )
                   : Column(
                       children: recent.map((e) {
@@ -267,7 +266,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           decoration: BoxDecoration(
                             border: Border(
-                              bottom: BorderSide(color: _WColors.borderDark.withOpacity(0.6)),
+                              bottom: BorderSide(color: _WColors.border(context).withOpacity(0.6)),
                             ),
                           ),
                           child: Row(
@@ -279,14 +278,14 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                                   children: [
                                     Text(
                                       (e['itemName'] ?? '').toString(),
-                                      style: const TextStyle(
-                                        fontSize: 13, fontWeight: FontWeight.w600, color: _WColors.textMain,
+                                      style: TextStyle(
+                                        fontSize: 13, fontWeight: FontWeight.w600, color: _WColors.textMain(context),
                                       ),
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
                                       dt?.toLocal().toString().split('.').first ?? '-',
-                                      style: const TextStyle(fontSize: 11, color: _WColors.textMuted),
+                                      style: TextStyle(fontSize: 11, color: _WColors.textMuted(context)),
                                     ),
                                   ],
                                 ),
@@ -295,7 +294,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                                 flex: 1,
                                 child: Text(
                                   '${qty.toStringAsFixed(1)}',
-                                  style: const TextStyle(fontSize: 13, color: _WColors.textMain),
+                                  style: TextStyle(fontSize: 13, color: _WColors.textMain(context)),
                                 ),
                               ),
                               Expanded(
@@ -307,8 +306,8 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                                 child: Text(
                                   'QAR ${loss.toStringAsFixed(2)}',
                                   textAlign: TextAlign.right,
-                                  style: const TextStyle(
-                                    fontSize: 13, fontWeight: FontWeight.bold, color: _WColors.textMain,
+                                  style: TextStyle(
+                                    fontSize: 13, fontWeight: FontWeight.bold, color: _WColors.textMain(context),
                                   ),
                                 ),
                               ),
@@ -327,23 +326,23 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                 title: 'Waste Trend Analysis',
                 trailing: _trendModePills(),
                 child: trendPoints.isEmpty
-                    ? const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        child: Text('No trend data.', style: TextStyle(color: _WColors.textMuted)),
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Text('No trend data.', style: TextStyle(color: _WColors.textMuted(context))),
                       )
                     : SizedBox(
                         height: 240,
                         child: SfCartesianChart(
                           plotAreaBorderWidth: 0,
                           primaryXAxis: CategoryAxis(
-                            labelStyle: const TextStyle(color: _WColors.textMuted, fontSize: 10),
+                            labelStyle: TextStyle(color: _WColors.textMuted(context), fontSize: 10),
                             majorGridLines: const MajorGridLines(width: 0),
-                            axisLine: AxisLine(color: _WColors.borderDark),
+                            axisLine: AxisLine(color: _WColors.border(context)),
                           ),
                           primaryYAxis: NumericAxis(
-                            labelStyle: const TextStyle(color: _WColors.textMuted, fontSize: 10),
+                            labelStyle: TextStyle(color: _WColors.textMuted(context), fontSize: 10),
                             majorGridLines: MajorGridLines(
-                              color: _WColors.borderDark.withOpacity(0.5),
+                              color: _WColors.border(context).withOpacity(0.5),
                               dashArray: const [4, 4],
                             ),
                             axisLine: const AxisLine(width: 0),
@@ -353,7 +352,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                               dataSource: trendPoints,
                               xValueMapper: (p, _) => p.label,
                               yValueMapper: (p, _) => p.value,
-                              color: _WColors.primary,
+                              color: _WColors.primary(context),
                               borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
                               width: 0.6,
                             ),
@@ -365,9 +364,9 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
               final reasonChart = _card(
                 title: 'Waste Reasons',
                 child: reasonBreakdown.isEmpty
-                    ? const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        child: Text('No data this month.', style: TextStyle(color: _WColors.textMuted)),
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Text('No data this month.', style: TextStyle(color: _WColors.textMuted(context))),
                       )
                     : Column(
                         children: [
@@ -378,7 +377,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                               legend: Legend(
                                 isVisible: true,
                                 position: LegendPosition.bottom,
-                                textStyle: const TextStyle(color: _WColors.textMuted, fontSize: 11),
+                                textStyle: TextStyle(color: _WColors.textMuted(context), fontSize: 11),
                               ),
                               series: <CircularSeries>[
                                 DoughnutSeries<_ReasonPoint, String>(
@@ -392,7 +391,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                                     textStyle: const TextStyle(color: Colors.white, fontSize: 10),
                                     labelPosition: ChartDataLabelPosition.outside,
                                     connectorLineSettings: ConnectorLineSettings(
-                                      color: _WColors.borderDark,
+                                      color: _WColors.border(context),
                                     ),
                                   ),
                                 ),
@@ -423,9 +422,9 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
             _card(
               title: 'Top Wasted Items',
               child: topItems.isEmpty
-                  ? const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('No items this month.', style: TextStyle(color: _WColors.textMuted)),
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Text('No items this month.', style: TextStyle(color: _WColors.textMuted(context))),
                     )
                   : Column(
                       children: topItems.asMap().entries.map((entry) {
@@ -435,7 +434,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           decoration: BoxDecoration(
                             border: idx < topItems.length - 1
-                                ? Border(bottom: BorderSide(color: _WColors.borderDark.withOpacity(0.5)))
+                                ? Border(bottom: BorderSide(color: _WColors.border(context).withOpacity(0.5)))
                                 : null,
                           ),
                           child: Row(
@@ -444,13 +443,13 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                                 width: 28, height: 28,
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: _WColors.primary.withOpacity(0.12),
+                                  color: _WColors.primary(context).withOpacity(0.12),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Text(
                                   '${idx + 1}',
                                   style: TextStyle(
-                                    color: _WColors.primary, fontWeight: FontWeight.bold, fontSize: 12,
+                                    color: _WColors.primary(context), fontWeight: FontWeight.bold, fontSize: 12,
                                   ),
                                 ),
                               ),
@@ -458,12 +457,12 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                               Expanded(
                                 child: Text(
                                   e.itemName,
-                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _WColors.textMain),
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _WColors.textMain(context)),
                                 ),
                               ),
                               Text(
                                 '${e.quantity.toStringAsFixed(1)}',
-                                style: const TextStyle(fontSize: 12, color: _WColors.textMuted),
+                                style: TextStyle(fontSize: 12, color: _WColors.textMuted(context)),
                               ),
                               const SizedBox(width: 14),
                               Text(
@@ -493,14 +492,14 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: _WColors.borderDark),
+                          border: Border.all(color: _WColors.border(context)),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.history, size: 18, color: _WColors.textMain),
-                            SizedBox(width: 8),
-                            Text('View History', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _WColors.textMain)),
+                            Icon(Icons.history, size: 18, color: _WColors.textMain(context)),
+                            const SizedBox(width: 8),
+                            Text('View History', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _WColors.textMain(context))),
                           ],
                         ),
                       ),
@@ -519,16 +518,16 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         decoration: BoxDecoration(
-                          color: _WColors.primary,
+                          color: _WColors.primary(context),
                           borderRadius: BorderRadius.circular(10),
-                          boxShadow: [BoxShadow(color: _WColors.primary.withOpacity(0.3), blurRadius: 12)],
+                          boxShadow: [BoxShadow(color: _WColors.primary(context).withOpacity(0.3), blurRadius: 12)],
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.add_rounded, size: 18, color: _WColors.bgDark),
+                            Icon(Icons.add_rounded, size: 18, color: _WColors.background(context)),
                             SizedBox(width: 8),
-                            Text('Log Waste', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _WColors.bgDark)),
+                            Text('Log Waste', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _WColors.background(context))),
                           ],
                         ),
                       ),
@@ -579,6 +578,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
       mainAxisSize: MainAxisSize.min,
       children: ['daily', 'weekly', 'monthly'].map((mode) {
         final sel = _trendMode == mode;
+        final isDark = Theme.of(context).brightness == Brightness.dark;
         return Padding(
           padding: const EdgeInsets.only(left: 4),
           child: GestureDetector(
@@ -586,17 +586,17 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: sel ? _WColors.primary.withOpacity(0.15) : _WColors.bgDark,
+                color: sel ? _WColors.primary(context).withOpacity(0.15) : (isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: sel ? _WColors.primary.withOpacity(0.4) : _WColors.borderDark,
+                  color: sel ? _WColors.primary(context).withOpacity(0.4) : _WColors.border(context),
                 ),
               ),
               child: Text(
                 mode[0].toUpperCase() + mode.substring(1),
                 style: TextStyle(
                   fontSize: 11,
-                  color: sel ? _WColors.primary : _WColors.textMuted,
+                  color: sel ? _WColors.primary(context) : _WColors.textMuted(context),
                   fontWeight: sel ? FontWeight.bold : FontWeight.w500,
                 ),
               ),
@@ -627,7 +627,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
         color = Colors.amber;
         break;
       default:
-        color = _WColors.textMuted;
+        color = _WColors.textMuted(context);
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -672,7 +672,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
             title: 'Waste Count',
             value: '$count',
             subtitle: 'Entries this month',
-            color: _WColors.primary,
+            color: _WColors.primary(context),
             icon: Icons.delete_outline,
           ),
         ),
@@ -690,9 +690,9 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _WColors.surfaceDark,
+        color: _WColors.surface(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _WColors.borderDark),
+        border: Border.all(color: _WColors.border(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -711,14 +711,14 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          Text(title, style: const TextStyle(color: _WColors.textMuted, fontSize: 12, fontWeight: FontWeight.w500)),
+          Text(title, style: TextStyle(color: _WColors.textMuted(context), fontSize: 12, fontWeight: FontWeight.w500)),
           const SizedBox(height: 4),
           Text(
             value,
             style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 20),
           ),
           const SizedBox(height: 4),
-          Text(subtitle, style: const TextStyle(color: _WColors.textMuted, fontSize: 11)),
+          Text(subtitle, style: TextStyle(color: _WColors.textMuted(context), fontSize: 11)),
         ],
       ),
     );
@@ -732,9 +732,9 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: _WColors.surfaceDark,
+        color: _WColors.surface(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _WColors.borderDark),
+        border: Border.all(color: _WColors.border(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -744,7 +744,7 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _WColors.textMain),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _WColors.textMain(context)),
                 ),
               ),
               if (trailing != null) trailing,

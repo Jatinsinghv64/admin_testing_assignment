@@ -43,7 +43,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
     return Stack(
       children: [
         Container(
-          color: Colors.white,
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
           child: Column(
             children: [
               // ── Order Type Selector ──
@@ -76,7 +76,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
         if (widget.isSubmittingOrder || _isProcessingDeletion)
           Positioned.fill(
             child: Container(
-              color: Colors.white.withValues(alpha: 0.7),
+              color: Theme.of(context).cardColor.withValues(alpha: 0.7),
               child: Center(
                 child: CircularProgressIndicator(
                   color:
@@ -142,7 +142,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Adding to existing order on ${pos.selectedTableName ?? 'table'}',
+                    'Adding to existing order on ${pos.selectedTableName ?? 'Table'}',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -180,7 +180,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
           ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          color: Colors.grey[50],
+          color: Theme.of(context).scaffoldBackgroundColor,
           child: Row(
             children: [
               Text(
@@ -282,7 +282,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
                   borderRadius: BorderRadius.circular(10)),
             ),
             child:
-                const Text('Clear All', style: TextStyle(color: Colors.white)),
+                Text('Clear All', style: TextStyle(color: Theme.of(context).cardColor)),
           ),
         ],
       ),
@@ -344,18 +344,25 @@ class _PosCartPanelState extends State<PosCartPanel> {
                       ),
                       const SizedBox(width: 6),
                       Flexible(
-                        child: Text(
-                          pos.selectedTableName != null
-                              ? 'Taking Order for ${pos.selectedTableName}${pos.guestCount != null && pos.guestCount! > 0 ? ' (${pos.guestCount} Guests)' : ''}'
-                              : 'Select Table',
-                          style: TextStyle(
-                            fontSize: pos.selectedTableId != null ? 14 : 12,
-                            fontWeight: FontWeight.bold,
-                            color: pos.selectedTableId != null
-                                ? Colors.red
-                                : Colors.orange,
-                          ),
-                          overflow: TextOverflow.ellipsis,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                pos.selectedTableName != null
+                                    ? 'Taking Order for ${pos.selectedTableName}${pos.guestCount != null && pos.guestCount! > 0 ? ' (${pos.guestCount} Guests)' : ''}'
+                                    : 'Select Table',
+                                style: TextStyle(
+                                  fontSize: pos.selectedTableId != null ? 14 : 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: pos.selectedTableId != null
+                                      ? Colors.red
+                                      : Colors.orange,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -504,7 +511,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
       itemCount: pos.cartItems.length,
       separatorBuilder: (_, __) => Divider(
         height: 1,
-        color: Colors.grey[100],
+        color: Theme.of(context).scaffoldBackgroundColor,
         indent: 16,
         endIndent: 16,
       ),
@@ -525,9 +532,9 @@ class _PosCartPanelState extends State<PosCartPanel> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: Theme.of(context).scaffoldBackgroundColor,
         border: Border(
-          top: BorderSide(color: Colors.grey[200]!),
+          top: BorderSide(color: Theme.of(context).dividerColor),
         ),
       ),
       child: Column(
@@ -548,12 +555,12 @@ class _PosCartPanelState extends State<PosCartPanel> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'Total',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Colors.black87,
+                  color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                 ),
               ),
               Text(
@@ -604,7 +611,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -634,7 +641,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Select a table before placing a dine-in order',
+                      'Select a Table before placing a dine-in order',
                       style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -804,7 +811,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
             ),
-            child: const Text('Save', style: TextStyle(color: Colors.white)),
+            child: Text('Save', style: TextStyle(color: Theme.of(context).cardColor)),
           ),
         ],
       ),
@@ -830,7 +837,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
     if (activeBranchId == null || activeBranchId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Select a branch before choosing a table.'),
+          content: Text('Select a branch before choosing a Table.'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -913,7 +920,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('Could not load table order: $e'),
+                  content: Text('Could not load Table order: $e'),
                   backgroundColor: Colors.red,
                 ),
               );
@@ -1016,7 +1023,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
               shrinkWrap: true,
               itemCount: availableTables.length,
               separatorBuilder: (_, __) =>
-                  Divider(height: 1, color: Colors.grey[200]),
+                  Divider(height: 1, color: Theme.of(context).dividerColor),
               itemBuilder: (ctx, i) {
                 final t = availableTables[i];
                 final tName =
@@ -1303,7 +1310,7 @@ class _PosCartPanelState extends State<PosCartPanel> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
             ),
-            child: const Text('OK', style: TextStyle(color: Colors.white)),
+            child: Text('OK', style: TextStyle(color: Theme.of(context).cardColor)),
           ),
         ],
       ),
@@ -1388,7 +1395,7 @@ class _OngoingOrderItemTile extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: Colors.grey[100],
+              color: Theme.of(context).scaffoldBackgroundColor,
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
@@ -1540,7 +1547,7 @@ class _CartItemTile extends StatelessWidget {
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
         color: Colors.red,
-        child: const Icon(Icons.delete_outline, color: Colors.white),
+        child: Icon(Icons.delete_outline, color: Theme.of(context).cardColor),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1740,7 +1747,7 @@ class _CartItemTile extends StatelessWidget {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
             ),
-            child: const Text('Save', style: TextStyle(color: Colors.white)),
+            child: Text('Save', style: TextStyle(color: Theme.of(context).cardColor)),
           ),
         ],
       ),
@@ -2074,6 +2081,7 @@ class _FloorPlanDialogState extends State<_FloorPlanDialog> {
   }
 }
 
+
 // ── Individual Floor Plan Table Shape ───────────────────────────
 class _FloorPlanTable extends StatelessWidget {
   final String tableId;
@@ -2098,19 +2106,29 @@ class _FloorPlanTable extends StatelessWidget {
         seatsRaw != null ? int.tryParse(seatsRaw.toString()) : null;
     final shape = (tableData['shape'] ?? 'rectangle').toString().toLowerCase();
 
-    // Determine real-time status by checking active orders
+    final tableStatus = (tableData['status'] ?? 'available').toString().toLowerCase();
     final bool isOccupiedByOrder = occupiedTableIds.contains(tableId);
-    final staticStatus =
-        (tableData['status'] ?? 'available').toString().toLowerCase();
-    final isReserved = staticStatus == 'reserved';
-    final isAvailable =
-        !isOccupiedByOrder && !isReserved && staticStatus != 'occupied';
+    final bool isReserved = tableStatus == 'reserved';
+    final bool isDirty   = tableStatus == 'dirty';
+    final bool isOccupied = isOccupiedByOrder && !isReserved && !isDirty;
+    final bool isAvailable = !isOccupiedByOrder && !isReserved && !isDirty
+        && tableStatus != 'occupied';
+
+    DateTime? occupiedAt;
+    if (tableData['occupiedAt'] is Timestamp) {
+      occupiedAt = (tableData['occupiedAt'] as Timestamp).toDate();
+    }
 
     // Color coding
     Color borderColor;
     Color bgColor;
     Color textColor;
-    if (isAvailable) {
+
+    if (isDirty) {
+      borderColor = Colors.brown;
+      bgColor = Colors.brown.withValues(alpha: 0.08);
+      textColor = Colors.brown[800]!;
+    } else if (isAvailable) {
       borderColor = Colors.green;
       bgColor = Colors.green.withValues(alpha: 0.08);
       textColor = Colors.green[800]!;
@@ -2127,19 +2145,94 @@ class _FloorPlanTable extends StatelessWidget {
     final isRound = shape == 'circle' || shape == 'round';
 
     return Tooltip(
-      message: isAvailable
-          ? 'Tap to select'
-          : isReserved
-              ? 'Reserved'
-              : 'Occupied',
+      message: isDirty
+          ? 'Needs Bussing — tap to clean'
+          : isAvailable
+              ? 'Tap to select'
+              : isReserved
+                  ? 'Reserved'
+                  : 'Occupied',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: isAvailable
-              ? () => onSelect(tableId, tableName)
-              : (isOccupiedByOrder && !isReserved)
-                  ? () => onOccupiedTap(tableId, tableName)
-                  : null,
+          onTap: () async {
+            if (isDirty) {
+              final clean = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Row(
+                    children: [
+                      Icon(Icons.cleaning_services, color: Colors.brown[800]),
+                      const SizedBox(width: 8),
+                      const Text('Table Needs Cleaning'),
+                    ],
+                  ),
+                  content: Text('Table $tableName needs bussing.\n\nMark it as clean and make it available?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('No'),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.brown, foregroundColor: Colors.white),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Yes, Mark Clean'),
+                    ),
+                  ],
+                ),
+              );
+              if (clean == true && context.mounted) {
+                final pos = context.read<PosService>();
+                final userScope = context.read<UserScopeService>();
+                final branchFilter = context.read<BranchFilterService>();
+                final effectiveBranchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
+                await pos.markTableClean(
+                  branchIds: effectiveBranchIds,
+                  tableId: tableId,
+                );
+              }
+            } else if (isAvailable) {
+              onSelect(tableId, tableName);
+            } else if (isReserved) {
+              final proceed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded,
+                          color: Colors.orange[800]),
+                      const SizedBox(width: 8),
+                      const Text('Table Reserved'),
+                    ],
+                  ),
+                  content: Text(
+                      'Table $tableName is marked as reserved.\n\nUse anyway?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Use Table'),
+                    ),
+                  ],
+                ),
+              );
+              if (proceed == true) {
+                if (isOccupiedByOrder) {
+                  onOccupiedTap(tableId, tableName);
+                } else {
+                  onSelect(tableId, tableName);
+                }
+              }
+            } else if (isOccupiedByOrder) {
+              onOccupiedTap(tableId, tableName);
+            }
+          },
           borderRadius: BorderRadius.circular(isRound ? 100 : 16),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),

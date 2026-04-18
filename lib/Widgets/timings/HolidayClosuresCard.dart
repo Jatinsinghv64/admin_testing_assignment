@@ -21,9 +21,9 @@ class HolidayClosuresCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).dividerColor),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -46,7 +46,7 @@ class HolidayClosuresCard extends StatelessWidget {
                   Text(
                     'HOLIDAY CLOSURES',
                     style: textTheme.labelSmall?.copyWith(
-                      color: Colors.black87,
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 1.2,
                     ),
@@ -100,9 +100,9 @@ class HolidayClosuresCard extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.grey[50],
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.grey[50],
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey[200]!),
+                    border: Border.all(color: Theme.of(context).dividerColor),
                   ),
                   child: Row(
                     children: [
@@ -110,9 +110,9 @@ class HolidayClosuresCard extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 4),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.white,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey[200]!),
+                          border: Border.all(color: Theme.of(context).dividerColor),
                         ),
                         child: Column(
                           children: [
@@ -127,7 +127,7 @@ class HolidayClosuresCard extends StatelessWidget {
                             Text(
                               DateFormat('dd').format(date),
                               style: textTheme.titleMedium?.copyWith(
-                                color: Colors.black87,
+                                color: Theme.of(context).textTheme.bodyLarge?.color,
                                 fontWeight: FontWeight.w900,
                               ),
                             ),
@@ -142,7 +142,7 @@ class HolidayClosuresCard extends StatelessWidget {
                             Text(
                               holiday['name'] ?? 'Holiday',
                               style: textTheme.bodySmall?.copyWith(
-                                color: Colors.black87,
+                                color: Theme.of(context).textTheme.bodyLarge?.color,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -194,7 +194,7 @@ class HolidayClosuresCard extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                    color: Colors.grey[200]!,
+                    color: Theme.of(context).dividerColor,
                     style: BorderStyle.solid,
                     width: 2),
               ),

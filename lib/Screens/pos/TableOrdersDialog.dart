@@ -77,10 +77,10 @@ class TableOrdersDialog extends StatelessWidget {
                   tableName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: Colors.black87,
+                    color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -335,8 +335,8 @@ class TableOrdersDialog extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
-        border: Border(top: BorderSide(color: Colors.grey[200]!)),
+        color: Theme.of(context).scaffoldBackgroundColor,
+        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20)),
       ),
       child: Wrap(
@@ -356,10 +356,10 @@ class TableOrdersDialog extends StatelessWidget {
                 ),
                 Text(
                   '${AppConstants.currencySymbol}${outstandingTotal.toStringAsFixed(2)}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: Colors.black87,
+                    color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
                   ),
                 ),
                 Text(
@@ -509,7 +509,7 @@ class TableOrdersDialog extends StatelessWidget {
     late final OverlayEntry loadingOverlay;
     loadingOverlay = OverlayEntry(
       builder: (_) => Container(
-        color: Colors.black54,
+        color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.54),
         child: const Center(child: CircularProgressIndicator(color: Colors.deepPurple)),
       ),
     );
@@ -524,6 +524,18 @@ class TableOrdersDialog extends StatelessWidget {
         payment: result,
         existingOrders: orders,
       );
+
+      // ✅ FIX: Explicitly trigger table cleanup after Pay All.
+      // submitOrderWithPayment may not fire cleanup if orders aren't in 'served'
+      // state yet. This guarantees the dirty state is always set.
+      try {
+        await PosService.cleanupTableIfEmpty(
+          branchIds: branchIds,
+          tableId: tableId,
+        );
+      } catch (cleanupError) {
+        debugPrint('⚠️ TableOrdersDialog: Cleanup after Pay All failed: $cleanupError');
+      }
 
       if (context.mounted) {
         Navigator.pop(context); // close table orders dialog
@@ -605,9 +617,12 @@ class TableOrdersDialog extends StatelessWidget {
                   }
 
                   // Update floor plan statuses
+                  // ✅ FIX: use lowercase 'tables.' to match pos_service field paths
+                  // ✅ FIX: source table goes to 'dirty' not 'available' — staff must clear it
                   batch.update(snap.reference, {
-                    'Tables.${t.key}.status': 'occupied',
-                    'Tables.$tableId.status': 'available', // old table goes back
+                    'tables.${t.key}.status': 'occupied',
+                    'tables.$tableId.status': 'dirty',
+                    'tables.$tableId.dirtyAt': FieldValue.serverTimestamp(),
                   });
 
                   await batch.commit();
@@ -685,7 +700,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
       children: [
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: Colors.grey.withValues(alpha: 0.12)),
             boxShadow: [
@@ -712,7 +727,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.7),
+                color: Theme.of(context).cardColor.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: const Center(
@@ -757,10 +772,10 @@ class _TableOrderCardState extends State<_TableOrderCard> {
           // Order number
           Text(
             'Order #$orderNumber',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
-              color: Colors.black87,
+              color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
             ),
           ),
           const Spacer(),
@@ -854,7 +869,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
                   width: 22,
                   height: 22,
                   decoration: BoxDecoration(
-                    color: Colors.grey[100],
+                    color: Theme.of(context).scaffoldBackgroundColor,
                     borderRadius: BorderRadius.circular(5),
                   ),
                   child: Center(
@@ -974,18 +989,18 @@ class _TableOrderCardState extends State<_TableOrderCard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: Theme.of(context).scaffoldBackgroundColor,
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
-        border: Border(top: BorderSide(color: Colors.grey[200]!)),
+        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
       ),
       child: Row(
         children: [
           Text(
             '${AppConstants.currencySymbol}${totalAmount.toStringAsFixed(2)}',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: Colors.black87,
+              color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87),
             ),
           ),
           const Spacer(),
@@ -1165,7 +1180,7 @@ class _TableOrderCardState extends State<_TableOrderCard> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
             ),
-            child: const Text('OK', style: TextStyle(color: Colors.white)),
+            child: Text('OK', style: TextStyle(color: Theme.of(context).cardColor)),
           ),
         ],
       ),

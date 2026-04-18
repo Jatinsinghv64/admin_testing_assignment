@@ -172,7 +172,7 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
         : (userScope.userEmail.isNotEmpty ? userScope.userEmail : 'system');
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
           // ── Header bar ──────────────────────────────────────
@@ -242,7 +242,7 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
+        border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor!)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -294,7 +294,7 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
                   'Branches: ${branchIds.join(", ")}  •  Recording as: $recorderId',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[500],
+                    color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5),
                   ),
                 ),
               ],
@@ -464,7 +464,7 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
                   size: 20,
                   color: Colors.deepPurple.shade300),
               suffixIcon: Icon(Icons.keyboard_arrow_down_rounded,
-                  color: Colors.grey[400]),
+                  color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.4)),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide(color: Colors.grey.shade300),
@@ -700,7 +700,7 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
                       size: 32, color: Colors.grey.shade400),
                   const SizedBox(height: 8),
                   Text('No photos added',
-                      style: TextStyle(color: Colors.grey.shade500)),
+                      style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.5))),
                 ],
               ),
             )
@@ -814,7 +814,7 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).dividerColor!),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.03),
@@ -903,7 +903,7 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
           prefixIcon: Icon(valueIcon,
               size: 20, color: Colors.deepPurple.shade300),
           suffixIcon:
-              Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey[400]),
+              Icon(Icons.keyboard_arrow_down_rounded, color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.4)),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
             borderSide: BorderSide(color: Colors.grey.shade300),
@@ -921,7 +921,7 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
         ),
         child: Text(
           labelFn(value),
-          style: const TextStyle(fontSize: 14, color: Colors.black87),
+          style: TextStyle(fontSize: 14, color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87)),
         ),
       ),
     );
@@ -1098,7 +1098,7 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
                         borderSide: BorderSide.none,
                       ),
                       filled: true,
-                      fillColor: Colors.grey[100],
+                      fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
                       contentPadding: EdgeInsets.zero,
                     ),
                     onChanged: (v) => setState(() => _search = v),
@@ -1135,7 +1135,7 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
                           ? 'Stock: ${item['currentStock']} ${item['unit']} | Cost: QAR ${item['costPerUnit']}'
                           : 'Price: QAR ${item['price']}',
                       style:
-                          TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                          TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6), fontSize: 13)),
                   trailing: isSelected
                       ? const Icon(Icons.check, color: Colors.deepPurple)
                       : const Icon(Icons.chevron_right, color: Colors.grey),

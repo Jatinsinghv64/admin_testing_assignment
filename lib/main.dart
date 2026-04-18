@@ -217,16 +217,31 @@ class MyApp extends StatelessWidget {
           ),
         ),
       ],
-      child: MaterialApp(
-        navigatorKey: navigatorKey,
-        title: 'Branch Admin App',
+      builder: (context, child) {
+        final themeService = context.watch<DashboardThemeService>();
+        return MaterialApp(
+          themeMode: themeService.isDarkMode ? ThemeMode.dark : ThemeMode.light,
         theme: ThemeData(
+          useMaterial3: true,
+          brightness: Brightness.light,
           primarySwatch: Colors.deepPurple,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.deepPurple,
+            brightness: Brightness.light,
+          ),
           visualDensity: VisualDensity.adaptivePlatformDensity,
           scaffoldBackgroundColor: Colors.grey[50],
+          cardTheme: CardThemeData(
+            color: Colors.white,
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
           appBarTheme: const AppBarTheme(
             backgroundColor: Colors.white,
             elevation: 0,
+            centerTitle: true,
             iconTheme: IconThemeData(color: Colors.deepPurple),
             titleTextStyle: TextStyle(
               color: Colors.deepPurple,
@@ -251,6 +266,8 @@ class MyApp extends StatelessWidget {
             ),
           ),
           inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: Colors.white,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(color: Colors.grey[300]!),
@@ -265,12 +282,82 @@ class MyApp extends StatelessWidget {
             ),
           ),
         ),
+        darkTheme: ThemeData(
+          useMaterial3: true,
+          brightness: Brightness.dark,
+          scaffoldBackgroundColor: Colors.black,
+          primarySwatch: Colors.deepPurple,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.deepPurple,
+            brightness: Brightness.dark,
+            surface: const Color(0xFF121212),
+            onSurface: Colors.white,
+          ),
+          cardTheme: CardThemeData(
+            color: const Color(0xFF1E1E1E),
+            elevation: 4,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Colors.black,
+            elevation: 0,
+            centerTitle: true,
+            iconTheme: IconThemeData(color: Color(0xFFB39DDB)), // Lighter purple
+            titleTextStyle: TextStyle(
+              color: Color(0xFFB39DDB),
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+            backgroundColor: Color(0xFF121212),
+            selectedItemColor: Color(0xFFB39DDB),
+            unselectedItemColor: Colors.grey,
+            elevation: 10,
+          ),
+          drawerTheme: const DrawerThemeData(
+            backgroundColor: Color(0xFF121212),
+          ),
+          dividerTheme: DividerThemeData(
+            color: Colors.grey[800],
+            thickness: 1,
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: const Color(0xFF1E1E1E),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.grey[800]!),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.grey[800]!),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFFB39DDB), width: 2),
+            ),
+          ),
+        ),
         builder: (context, child) {
           return OfflineBanner(child: child!);
         },
         home: const SplashScreen(),
         debugShowCheckedModeBanner: false,
-      ),
+        );
+      },
     );
   }
 }

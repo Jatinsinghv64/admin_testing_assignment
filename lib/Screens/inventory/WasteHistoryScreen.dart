@@ -95,13 +95,13 @@ class _WasteHistoryScreenState extends State<WasteHistoryScreen> {
     final branchIds = branchFilter.getFilterBranchIds(userScope.branchIds);
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text('Waste History',
-            style: TextStyle(color: Colors.black87)),
-        backgroundColor: Colors.white,
+        title: Text('Waste History',
+            style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87))),
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black87),
+        iconTheme: IconThemeData(color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87)),
         actions: [
           IconButton(
             icon: const Icon(Icons.download, color: Colors.deepPurple),
@@ -168,7 +168,7 @@ class _WasteHistoryScreenState extends State<WasteHistoryScreen> {
               hintText: 'Search item name...',
               prefixIcon: Icon(Icons.search, color: Colors.deepPurple.shade300),
               filled: true,
-              fillColor: Colors.grey[100],
+              fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,

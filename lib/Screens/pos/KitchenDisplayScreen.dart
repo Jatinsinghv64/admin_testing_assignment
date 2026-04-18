@@ -218,17 +218,17 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     if (globalBranchId == null ||
         globalBranchId == BranchFilterService.allBranchesValue) {
       return Scaffold(
-        backgroundColor: Colors.grey[100],
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Center(
           child: Container(
             width: 480,
             padding: const EdgeInsets.all(40),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
+                  color: Colors.black.withOpacity(0.05),
                   blurRadius: 20,
                   offset: const Offset(0, 10),
                 ),
@@ -240,7 +240,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.1),
+                    color: Colors.orange.withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
                   child:
@@ -263,10 +263,10 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   decoration: BoxDecoration(
-                    color: Colors.deepPurple.withValues(alpha: 0.05),
+                    color: Colors.deepPurple.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                        color: Colors.deepPurple.withValues(alpha: 0.15)),
+                        color: Colors.deepPurple.withOpacity(0.15)),
                   ),
                   child: Row(
                     children: [
@@ -293,7 +293,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF888888), // Odoo medium grey background
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor, // Odoo medium grey background
       body: _ordersStream == null
           ? const Center(child: CircularProgressIndicator(color: Colors.white))
           : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -411,7 +411,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
         width: 420,
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
         ),
         child: Column(
@@ -452,7 +452,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
   }) {
     return Container(
       height: 52,
-      color: Colors.white,
+      color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
       child: Row(
         children: [
           const SizedBox(width: 12),
@@ -490,9 +490,9 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF0F0F0),
+                  color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.1) : const Color(0xFFF0F0F0),
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: const Color(0xFFDDDDDD)),
+                  border: Border.all(color: Theme.of(context).dividerColor),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -502,12 +502,12 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                             ? Icons.grid_view_rounded
                             : Icons.view_column_rounded,
                         size: 16,
-                        color: const Color(0xFF555555)),
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF555555)),
                     const SizedBox(width: 5),
                     Text(_isListView ? 'Grid' : 'List',
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 12,
-                            color: Color(0xFF555555),
+                            color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF555555),
                             fontWeight: FontWeight.w600)),
                   ],
                 ),
@@ -549,10 +549,10 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
         height: 52,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
-          color: isActive ? const Color(0xFFE8E8E8) : Colors.white,
+          color: isActive ? (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.1) : const Color(0xFFE8E8E8)) : Colors.transparent,
           border: Border(
             bottom: BorderSide(
-              color: isActive ? const Color(0xFF555555) : Colors.transparent,
+              color: isActive ? (Theme.of(context).brightness == Brightness.dark ? Theme.of(context).primaryColor : const Color(0xFF555555)) : Colors.transparent,
               width: 2.5,
             ),
           ),
@@ -566,8 +566,8 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                 fontSize: 14,
                 fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
                 color: isActive
-                    ? const Color(0xFF222222)
-                    : const Color(0xFF666666),
+                    ? (Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF222222))
+                    : (Theme.of(context).brightness == Brightness.dark ? Colors.white60 : const Color(0xFF666666)),
               ),
             ),
             if (countColor != null) ...[
@@ -602,7 +602,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
         height: 52,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
-          color: isActive ? const Color(0xFFE8E8E8) : Colors.white,
+          color: isActive ? (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Color(0xFFE8E8E8)) : Theme.of(context).cardColor,
           border: Border(
             bottom: BorderSide(
               color: isActive ? const Color(0xFF555555) : Colors.transparent,
@@ -839,7 +839,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: const Color(0xFFDDDDDD)),
             ),
@@ -859,8 +859,8 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
                   decoration: BoxDecoration(
                       color: color, borderRadius: BorderRadius.circular(12)),
                   child: Text(docs.length.toString(),
-                      style: const TextStyle(
-                          color: Colors.white,
+                      style: TextStyle(
+                          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                           fontWeight: FontWeight.bold,
                           fontSize: 13)),
                 ),
@@ -924,7 +924,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     return Column(
       children: [
         Container(
-          color: Colors.white.withValues(alpha: 0.1),
+          color: Colors.white.withOpacity(0.1),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
@@ -974,7 +974,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 450, maxHeight: 600),
@@ -1307,24 +1307,25 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     }
 
     // Header BG color
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
     final Color headerBg;
     if (isCancelled) {
-      headerBg = Colors.red.shade50;
+      headerBg = isDark ? Colors.red.withOpacity(0.2) : Colors.red.shade50;
     } else if (isNew) {
-      headerBg = const Color(0xFFE3F2FD); // Light blue tint for new
+      headerBg = isDark ? Colors.blue.withOpacity(0.2) : const Color(0xFFE3F2FD);
     } else if (widget.isDuplicate || hasActiveAddOns) {
-      headerBg = const Color(0xFFFCE4F0); // light pink tint
+      headerBg = isDark ? const Color(0xFFE91E8C).withOpacity(0.2) : const Color(0xFFFCE4F0);
     } else if (isFresh) {
-      headerBg = const Color(0xFFE6F4EA); // light green tint
+      headerBg = isDark ? Colors.green.withOpacity(0.2) : const Color(0xFFE6F4EA);
     } else {
-      headerBg = const Color(0xFFF8F8F8);
+      headerBg = isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF8F8F8);
     }
 
     return GestureDetector(
       onTap: widget.onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: borderColor, width: borderWidth),
           boxShadow: const [
@@ -1346,7 +1347,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                 ),
                 border: Border(
                     bottom: BorderSide(
-                        color: borderColor.withValues(alpha: 0.4), width: 0.5)),
+                        color: borderColor.withOpacity(0.4), width: 0.5)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1381,7 +1382,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color:
-                                const Color(0xFF2196F3).withValues(alpha: 0.15),
+                                const Color(0xFF2196F3).withOpacity(0.15),
                             border: Border.all(
                                 color: const Color(0xFF2196F3), width: 1.5),
                             borderRadius: BorderRadius.circular(4),
@@ -1404,7 +1405,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: KDSConfig.getSourceColor(source)
-                                .withValues(alpha: 0.12),
+                                .withOpacity(0.12),
                             border: Border.all(
                                 color: KDSConfig.getSourceColor(source),
                                 width: 1),
@@ -1456,10 +1457,10 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.1),
+                              color: Colors.green.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(
-                                  color: Colors.green.withValues(alpha: 0.2)),
+                                  color: Colors.green.withOpacity(0.2)),
                             ),
                             child: const Icon(Icons.print,
                                 size: 16, color: Colors.green),
@@ -1539,7 +1540,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE91E8C).withValues(alpha: 0.12),
+                        color: const Color(0xFFE91E8C).withOpacity(0.12),
                         border: Border.all(color: const Color(0xFFE91E8C)),
                         borderRadius: BorderRadius.circular(10),
                       ),
@@ -1624,8 +1625,8 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                       color: isCut
-                          ? const Color(0xFFBBBBBB)
-                          : const Color(0xFF444444),
+                          ? (Theme.of(context).brightness == Brightness.dark ? Colors.white30 : const Color(0xFFBBBBBB))
+                          : (Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF444444)),
                     ),
                   ),
                 ),
@@ -1644,10 +1645,10 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                           color: (isCancelled || isItemCancelled)
                               ? Colors.red.shade400
                               : isCut
-                                  ? const Color(0xFFBBBBBB)
+                                  ? (Theme.of(context).brightness == Brightness.dark ? Colors.white30 : const Color(0xFFBBBBBB))
                                   : isCurrentAddOn
                                       ? const Color(0xFFE91E8C)
-                                      : const Color(0xFF333333),
+                                      : (Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF333333)),
                           decoration: (isCut || isCancelled || isItemCancelled)
                               ? TextDecoration.lineThrough
                               : null,
@@ -1691,10 +1692,10 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                                     Expanded(
                                       child: Text(
                                         addon['name']?.toString() ?? '',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600,
-                                          color: Color(0xFF555555),
+                                          color: Theme.of(context).brightness == Brightness.dark ? Colors.white60 : const Color(0xFF555555),
                                         ),
                                       ),
                                     ),
@@ -1720,7 +1721,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE91E8C).withValues(alpha: 0.1),
+                      color: const Color(0xFFE91E8C).withOpacity(0.1),
                       border: Border.all(color: const Color(0xFFE91E8C)),
                       borderRadius: BorderRadius.circular(4),
                     ),
@@ -1764,9 +1765,9 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
       decoration:
           BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
       child: Text(label,
-          style: const TextStyle(
+          style: TextStyle(
               fontSize: 12,
-              color: Color(0xFF444444),
+              color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF444444),
               fontWeight: FontWeight.w500)),
     );
   }
@@ -1784,9 +1785,9 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
             const Icon(Icons.schedule, size: 12, color: Colors.white),
             const SizedBox(width: 4),
             Text("$elapsed'",
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 12,
-                    color: Colors.white,
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
                     fontWeight: FontWeight.bold)),
           ],
         ),
@@ -1817,7 +1818,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: const Color(0xFF2196F3).withValues(alpha: 0.12),
+        color: const Color(0xFF2196F3).withOpacity(0.12),
         border: Border.all(color: const Color(0xFF2196F3)),
         borderRadius: BorderRadius.circular(10),
       ),
@@ -1968,16 +1969,16 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
           height: 42,
           child: Center(
             child: widget.isProcessing
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 2),
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor, strokeWidth: 2),
                   )
                 : Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(icon, size: 18, color: Colors.white),
+                      const Icon(Icons.check_rounded, size: 18, color: Colors.white),
                       const SizedBox(width: 6),
                       Text(
                         label,

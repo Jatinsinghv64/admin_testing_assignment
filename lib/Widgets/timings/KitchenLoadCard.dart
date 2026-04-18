@@ -51,9 +51,9 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).dividerColor),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -87,7 +87,7 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
                   Text(
                     'Kitchen Load',
                     style: textTheme.titleMedium?.copyWith(
-                      color: Colors.black87,
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
@@ -179,7 +179,7 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
               SliderTheme(
                 data: SliderTheme.of(context).copyWith(
                   activeTrackColor: Colors.deepPurple,
-                  inactiveTrackColor: Colors.grey[200],
+                  inactiveTrackColor: Theme.of(context).dividerColor,
                   thumbColor: Colors.deepPurple,
                   overlayColor: Colors.deepPurple.withOpacity(0.2),
                   trackHeight: 2,
@@ -254,9 +254,9 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.white,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey[200]!),
+                        border: Border.all(color: Theme.of(context).dividerColor),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -269,7 +269,7 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
                               ),
                                 Text(
                                   '${rule['orderCount']}',
-                                  style: textTheme.labelSmall?.copyWith(color: Colors.black87, fontWeight: FontWeight.bold),
+                                  style: textTheme.labelSmall?.copyWith(color: Theme.of(context).textTheme.bodyLarge?.color, fontWeight: FontWeight.bold),
                                 ),
                               const SizedBox(width: 8),
                               const Icon(Icons.arrow_forward, color: const Color(0xFF64748b), size: 10),
@@ -306,9 +306,9 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.grey[50],
+              color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.grey[50],
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey[200]!),
+              border: Border.all(color: Theme.of(context).dividerColor),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -319,7 +319,7 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
                     Text(
                       'Rush Mode Override',
                       style: textTheme.titleSmall?.copyWith(
-                        color: Colors.black87,
+                        color: Theme.of(context).textTheme.bodyLarge?.color,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
