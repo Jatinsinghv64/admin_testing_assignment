@@ -264,12 +264,12 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(color: Colors.grey.shade200),
+          color: Theme.of(context).cardColor,
+          border: Border.all(color: Theme.of(context).dividerColor),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.02),
+              color: Colors.black.withValues(alpha: 0.02),
               blurRadius: 10,
               offset: const Offset(0, 4),
             )
@@ -298,7 +298,11 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
             const SizedBox(height: 16),
             Text(
               value, 
-              style: const TextStyle(color: Colors.black87, fontSize: 32, fontWeight: FontWeight.bold)
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodyLarge?.color, 
+                fontSize: 32, 
+                fontWeight: FontWeight.bold
+              )
             ),
           ],
         ),

@@ -20,7 +20,8 @@ class BranchFilterSelector extends StatelessWidget {
     final userScope = context.watch<UserScopeService>();
     final branchFilter = context.watch<BranchFilterService>();
     final theme = Theme.of(context);
-    final primaryColor = color ?? theme.primaryColor;
+    final isDark = theme.brightness == Brightness.dark;
+    final primaryColor = color ?? (isDark ? theme.colorScheme.primary : theme.primaryColor);
 
     final showSelector = userScope.isSuperAdmin && userScope.branchIds.length > 1;
 
@@ -38,10 +39,10 @@ class BranchFilterSelector extends StatelessWidget {
         child: Container(
           padding: padding,
           decoration: BoxDecoration(
-            color: primaryColor.withOpacity(0.08),
+            color: primaryColor.withOpacity(isDark ? 0.15 : 0.08),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: primaryColor.withOpacity(0.2),
+              color: primaryColor.withOpacity(isDark ? 0.3 : 0.2),
             ),
           ),
           child: Row(
@@ -82,7 +83,7 @@ class BranchFilterSelector extends StatelessWidget {
                   size: 18,
                   color: branchFilter.selectedBranchId == null
                       ? primaryColor
-                      : Colors.grey,
+                      : theme.hintColor,
                 ),
                 const SizedBox(width: 10),
                 const Text('All Branches', style: TextStyle(fontWeight: FontWeight.w500)),
@@ -101,7 +102,7 @@ class BranchFilterSelector extends StatelessWidget {
                       size: 18,
                       color: branchFilter.selectedBranchId == branchId
                           ? primaryColor
-                          : Colors.grey,
+                          : theme.hintColor,
                     ),
                     const SizedBox(width: 10),
                     Flexible(

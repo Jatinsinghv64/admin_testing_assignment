@@ -271,8 +271,13 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                                       decoration: BoxDecoration(
                                         color: _selectedCategory == cat
                                             ? Theme.of(context).colorScheme.primary
-                                            : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)),
+                                            : Theme.of(context).colorScheme.primary.withOpacity(0.2),
                                         borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: _selectedCategory == cat
+                                              ? Theme.of(context).colorScheme.primary
+                                              : Theme.of(context).colorScheme.primary.withOpacity(0.4),
+                                        ),
                                       ),
                                       child: Text(cat,
                                           style: TextStyle(
@@ -280,7 +285,7 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
                                             fontWeight: FontWeight.bold,
                                             color: _selectedCategory == cat
                                                 ? Colors.white
-                                                : Theme.of(context).textTheme.bodyLarge?.color,
+                                                : Theme.of(context).colorScheme.primary,
                                           )),
                                     ),
                                   ),
@@ -918,25 +923,28 @@ class _StocktakeScreenState extends State<StocktakeScreen> {
     );
   }
 
-  Widget _actionBtn(String label, IconData icon,
-      {required VoidCallback onTap}) {
+  Widget _actionBtn(String label, IconData icon, {required VoidCallback onTap, bool isPrimary = false}) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-            color: (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)),
-            borderRadius: BorderRadius.circular(8)),
+            color: isPrimary ? primary : primary.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: primary.withOpacity(0.2)),
+        ),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: Theme.of(context).textTheme.bodyLarge?.color),
+            Icon(icon, size: 18, color: isPrimary ? Colors.white : primary),
             const SizedBox(width: 8),
             Text(label,
                 style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
-                    color: Theme.of(context).textTheme.bodyLarge?.color)),
+                    color: isPrimary ? Colors.white : primary)),
           ],
         ),
       ),

@@ -545,12 +545,12 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                           decoration: BoxDecoration(
                             color: selected
                                 ? Theme.of(context).colorScheme.primary
-                                : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.white),
+                                : Theme.of(context).colorScheme.primary.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: selected
                                   ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).dividerColor,
+                                  : Theme.of(context).colorScheme.primary.withOpacity(0.2),
                               width: 1.2,
                             ),
                             boxShadow: selected
@@ -571,7 +571,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                                 size: 16,
                                 color: selected
                                     ? Colors.white
-                                    : Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
+                                    : Theme.of(context).colorScheme.primary,
                               ),
                               const SizedBox(width: 8),
                               Text(
@@ -583,7 +583,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                                       : FontWeight.w600,
                                   color: selected
                                       ? Colors.white
-                                      : Theme.of(context).textTheme.bodyLarge?.color,
+                                      : Theme.of(context).colorScheme.primary,
                                 ),
                               ),
                             ],
@@ -617,7 +617,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
           decoration: BoxDecoration(
             color: filled ? Theme.of(context).colorScheme.primary : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor),
             borderRadius: BorderRadius.circular(10),
-            border: filled ? null : Border.all(color: Theme.of(context).dividerColor),
+            border: filled ? null : Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.2)),
             boxShadow: filled
                 ? [
                     BoxShadow(
@@ -631,14 +631,14 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
             children: [
               Icon(icon,
                   size: 18,
-                  color: filled ? Theme.of(context).scaffoldBackgroundColor : Theme.of(context).textTheme.bodyLarge?.color),
+                  color: filled ? Colors.white : Theme.of(context).colorScheme.primary),
               const SizedBox(width: 6),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: filled ? Theme.of(context).colorScheme.onPrimary : Theme.of(context).textTheme.bodyLarge?.color,
+                  color: filled ? Colors.white : Theme.of(context).colorScheme.primary,
                 ),
               ),
             ],

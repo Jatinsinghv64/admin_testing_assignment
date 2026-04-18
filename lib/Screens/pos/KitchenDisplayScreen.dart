@@ -457,7 +457,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
         children: [
           const SizedBox(width: 12),
           // ── KDS icon / title ──────────────────────────
-          const Icon(Icons.restaurant, size: 20, color: Color(0xFF888888)),
+          Icon(Icons.restaurant, size: 20, color: Theme.of(context).brightness == Brightness.dark ? Colors.white54 : const Color(0xFF888888)),
           const SizedBox(width: 8),
           // ── Tabs ──────────────────────────────────────
           _buildTab(
@@ -469,7 +469,7 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
               label: 'To Cook',
               tab: _KdsTab.toCook,
               count: toCookCount,
-              countColor: const Color(0xFF888888)),
+              countColor: Theme.of(context).brightness == Brightness.dark ? Colors.white54 : const Color(0xFF888888)),
           _buildTab(
               label: 'Ready',
               tab: _KdsTab.ready,
@@ -637,18 +637,18 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
       margin: const EdgeInsets.symmetric(horizontal: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F5F5),
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF5F5F5),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFDDDDDD)),
+        border: Border.all(color: Theme.of(context).brightness == Brightness.dark ? Colors.white10 : const Color(0xFFDDDDDD)),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: _dateRange,
           isDense: true,
-          style: const TextStyle(fontSize: 12, color: Color(0xFF555555)),
-          dropdownColor: Colors.white,
-          icon: const Icon(Icons.keyboard_arrow_down,
-              size: 16, color: Color(0xFF888888)),
+          style: TextStyle(fontSize: 12, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF555555)),
+          dropdownColor: Theme.of(context).cardColor,
+          icon: Icon(Icons.keyboard_arrow_down,
+              size: 16, color: Theme.of(context).brightness == Brightness.dark ? Colors.white54 : const Color(0xFF888888)),
           items: const [
             DropdownMenuItem(value: 'today', child: Text('Today')),
             DropdownMenuItem(value: 'yesterday', child: Text('Yesterday')),
@@ -682,20 +682,20 @@ class _KitchenDisplayScreenState extends State<KitchenDisplayScreen>
           height: 36,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            color: const Color(0xFFF5F5F5),
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF5F5F5),
             borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: const Color(0xFFDDDDDD)),
+            border: Border.all(color: Theme.of(context).brightness == Brightness.dark ? Colors.white10 : const Color(0xFFDDDDDD)),
           ),
-          child: const Row(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('Close',
                   style: TextStyle(
                       fontSize: 13,
-                      color: Color(0xFF555555),
+                      color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF555555),
                       fontWeight: FontWeight.w500)),
-              SizedBox(width: 6),
-              Icon(Icons.logout, size: 16, color: Color(0xFF555555)),
+              const SizedBox(width: 6),
+              Icon(Icons.logout, size: 16, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF555555)),
             ],
           ),
         ),
@@ -1325,7 +1325,9 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
       onTap: widget.onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+          color: Theme.of(context).brightness == Brightness.dark
+              ? Colors.white.withOpacity(0.02)
+              : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: borderColor, width: borderWidth),
           boxShadow: const [
@@ -1369,7 +1371,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                                 ? Colors.red
                                 : (isNew
                                     ? const Color(0xFF1976D2)
-                                    : const Color(0xFF222222)),
+                                    : (Theme.of(context).brightness == Brightness.dark ? Colors.white : const Color(0xFF222222))),
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1425,13 +1427,20 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.group_outlined,
-                              size: 14, color: Color(0xFF888888)),
+                          Icon(Icons.group_outlined,
+                              size: 14,
+                              color: Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.white54
+                                  : const Color(0xFF888888)),
                           const SizedBox(width: 2),
                           Text('$guestCount',
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontSize: 12,
-                                  color: Color(0xFF666666),
+                                  color: Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white38
+                                      : const Color(0xFF666666),
                                   fontWeight: FontWeight.w600)),
                         ],
                       ),
@@ -1473,23 +1482,33 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                   // Row 2: Staff name + order type
                   Row(
                     children: [
-                      const Icon(Icons.person_outline,
-                          size: 12, color: Color(0xFF999999)),
+                      Icon(Icons.person_outline,
+                          size: 12,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.white38
+                              : const Color(0xFF999999)),
                       const SizedBox(width: 3),
                       Expanded(
                         child: Text(
                           createdBy,
-                          style: const TextStyle(
-                              fontSize: 11, color: Color(0xFF777777)),
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.white54
+                                  : const Color(0xFF777777)),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       if (orderType.isNotEmpty)
                         Text(
                           _orderTypeLabel(orderType),
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 10,
-                              color: Color(0xFF999999),
+                              color: Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.white38
+                                  : const Color(0xFF999999),
                               fontWeight: FontWeight.w500),
                         ),
                     ],
@@ -1519,7 +1538,6 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                       ),
                     ),
                 ],
-
               ),
             ),
 
@@ -1683,8 +1701,8 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                                     Container(
                                       width: 3,
                                       height: 3,
-                                      decoration: const BoxDecoration(
-                                        color: Color(0xFF666666),
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white38 : const Color(0xFF666666),
                                         shape: BoxShape.circle,
                                       ),
                                     ),
@@ -1787,7 +1805,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
             Text("$elapsed'",
                 style: TextStyle(
                     fontSize: 12,
-                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).cardColor,
                     fontWeight: FontWeight.bold)),
           ],
         ),
@@ -1973,7 +1991,7 @@ class _OdooKdsCardState extends State<OdooKdsCard> {
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
-                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor, strokeWidth: 2),
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).cardColor, strokeWidth: 2),
                   )
                 : Row(
                     mainAxisAlignment: MainAxisAlignment.center,

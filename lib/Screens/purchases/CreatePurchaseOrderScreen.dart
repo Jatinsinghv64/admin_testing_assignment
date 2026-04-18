@@ -63,6 +63,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
   final DateTime _orderDate = DateTime.now();
   DateTime? _expectedDate;
   bool _isSaving = false;
+  String? _selectedBranchIdForPo;
 
   UserScopeService get userScope =>
       Provider.of<UserScopeService>(context, listen: false);
@@ -73,6 +74,10 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
     UserScopeService userScope,
     BranchFilterService branchFilter,
   ) {
+    if (_selectedBranchIdForPo != null) {
+      return [_selectedBranchIdForPo!];
+    }
+    
     final override = widget.branchIdsOverride
         ?.where((id) => id.trim().isNotEmpty)
         .toSet()
@@ -136,6 +141,13 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
       _servicesInitialized = true;
       _service = Provider.of<PurchaseOrderService>(context, listen: false);
       _inventoryService = Provider.of<InventoryService>(context, listen: false);
+
+      // Initialize branch ID from provider
+      final bp = Provider.of<BranchFilterService>(context, listen: false);
+      if (bp.selectedBranchId != null) {
+        _selectedBranchIdForPo = bp.selectedBranchId;
+      }
+      
       _preparePoNumber();
     }
   }
@@ -204,27 +216,44 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         children: [
           if (widget.isDrawer)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               decoration: BoxDecoration(
                 color: theme.cardColor,
-                border: Border(bottom: BorderSide(color: theme.dividerColor)),
+                border: Border(bottom: BorderSide(color: theme.dividerColor.withOpacity(0.1))),
               ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                    Text(
-                      widget.editingPo != null
-                          ? 'Edit Purchase Order'
-                          : 'New Purchase Order',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: theme.primaryColor,
-                      ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.editingPo != null
+                              ? 'Edit Purchase Order'
+                              : 'New Purchase Order',
+                          style: GoogleFonts.outfit(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: theme.brightness == Brightness.dark ? Colors.white : theme.primaryColor,
+                          ),
+                        ),
+                        Text(
+                          'Fill in the details to continue',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5),
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
                   IconButton(
-                    icon: const Icon(Icons.close, color: Colors.grey),
+                    icon: Icon(Icons.close_rounded, color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6)),
                     onPressed: () => Navigator.pop(context),
+                    style: IconButton.styleFrom(
+                      backgroundColor: theme.dividerColor.withOpacity(0.05),
+                      padding: const EdgeInsets.all(8),
+                    ),
                   ),
                 ],
               ),
@@ -307,6 +336,29 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                 ),
                               ),
                               const SizedBox(height: 16),
+                              if (branchFilter.selectedBranchId == null) ...[
+                                _buildSelector(
+                                  label: 'Branch *',
+                                  value: _selectedBranchIdForPo == null
+                                      ? 'Select Branch'
+                                      : branchFilter.getBranchName(_selectedBranchIdForPo!),
+                                  items: userScope.branchIds
+                                      .map((id) => branchFilter.getBranchName(id))
+                                      .toList(),
+                                  onChanged: (selectedName) {
+                                    final id = userScope.branchIds.firstWhere(
+                                      (bid) => branchFilter.getBranchName(bid) == selectedName,
+                                    );
+                                    setState(() {
+                                      _selectedBranchIdForPo = id;
+                                      _poNumber = 'Generating...';
+                                    });
+                                    _preparePoNumber();
+                                  },
+                                  icon: Icons.storefront_outlined,
+                                ),
+                                const SizedBox(height: 16),
+                              ],
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -342,6 +394,33 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                             color: theme.dividerColor),
                                       ),
                                       child: ListTile(
+                                        onTap: () async {
+                                          final picked = await showDatePicker(
+                                            context: context,
+                                            initialDate: DateTime.now(),
+                                            firstDate: DateTime.now()
+                                                .subtract(
+                                                    const Duration(days: 1)),
+                                            lastDate: DateTime.now().add(
+                                                const Duration(days: 365)),
+                                            builder: (context, child) {
+                                              return Theme(
+                                                data: theme.copyWith(
+                                                  colorScheme: theme.colorScheme.copyWith(
+                                                    primary: theme.primaryColor,
+                                                    surface: theme.cardColor,
+                                                    onSurface: theme.textTheme.bodyLarge?.color,
+                                                  ),
+                                                ),
+                                                child: child!,
+                                              );
+                                            },
+                                          );
+                                          if (picked != null) {
+                                            setState(
+                                                () => _expectedDate = picked);
+                                          }
+                                        },
                                         shape: RoundedRectangleBorder(
                                             borderRadius:
                                                 BorderRadius.circular(14)),
@@ -367,26 +446,10 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                                 : FontWeight.w600,
                                           ),
                                         ),
-                                        trailing: IconButton(
-                                          icon: Icon(
-                                              Icons.calendar_today_outlined,
-                                              color: theme.primaryColor),
-                                          onPressed: () async {
-                                            final picked = await showDatePicker(
-                                              context: context,
-                                              initialDate: DateTime.now(),
-                                              firstDate: DateTime.now()
-                                                  .subtract(
-                                                      const Duration(days: 1)),
-                                              lastDate: DateTime.now().add(
-                                                  const Duration(days: 365)),
-                                            );
-                                            if (picked != null) {
-                                              setState(
-                                                  () => _expectedDate = picked);
-                                            }
-                                          },
-                                        ),
+                                        trailing: Icon(
+                                            Icons.calendar_today_outlined,
+                                            size: 20,
+                                            color: theme.primaryColor),
                                       ),
                                     ),
                                   ),
@@ -590,19 +653,16 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                                       horizontal: 16,
                                                       vertical: 10),
                                                   decoration: BoxDecoration(
-                                                    color: Colors
-                                                        .deepPurple.shade50,
+                                                    color: theme.primaryColor.withOpacity(0.05),
                                                     borderRadius:
                                                         const BorderRadius
                                                             .vertical(
                                                             bottom:
-                                                                Radius.circular(
+                                                                 Radius.circular(
                                                                     12)),
                                                     border: Border(
                                                         top: BorderSide(
-                                                            color: Colors
-                                                                .deepPurple
-                                                                .shade100)),
+                                                            color: theme.primaryColor.withOpacity(0.1))),
                                                   ),
                                                   child: Row(
                                                     children: [
@@ -610,15 +670,13 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                                           Icons
                                                               .calculate_outlined,
                                                           size: 14,
-                                                          color: Colors
-                                                              .deepPurple
-                                                              .shade400),
+                                                          color: theme.primaryColor.withOpacity(0.6)),
                                                       const SizedBox(width: 8),
                                                       Text(
                                                         '${qty.toStringAsFixed(qty.truncateToDouble() == qty ? 0 : 2)} ${line.unitCtrl.text.trim().isNotEmpty ? line.unitCtrl.text.trim() : 'units'}  ×  QAR ${cost.toStringAsFixed(2)}  =',
                                                         style: TextStyle(
                                                             fontSize: 12,
-                                                            color: theme.primaryColor),
+                                                            color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7)),
                                                       ),
                                                       const Spacer(),
                                                       Container(
@@ -658,24 +716,22 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                                       horizontal: 16,
                                                       vertical: 8),
                                                   decoration: BoxDecoration(
-                                                    color: Colors.grey.shade50,
+                                                    color: theme.dividerColor.withOpacity(0.03),
                                                     borderRadius:
                                                         const BorderRadius
                                                             .vertical(
                                                             bottom:
-                                                                Radius.circular(
+                                                                 Radius.circular(
                                                                     12)),
                                                     border: Border(
                                                         top: BorderSide(
-                                                            color: Colors.grey
-                                                                .shade200)),
+                                                            color: theme.dividerColor.withOpacity(0.05))),
                                                   ),
                                                   child: Text(
                                                     'Enter qty & cost to see Total Value',
                                                     style: TextStyle(
                                                         fontSize: 11,
-                                                        color: Colors
-                                                            .grey.shade400),
+                                                        color: theme.textTheme.bodyMedium?.color?.withOpacity(0.4)),
                                                   ),
                                                 ),
                                             ],
@@ -886,18 +942,18 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         decoration: InputDecoration(
           labelText: 'Ingredient *',
           filled: true,
-          fillColor: Colors.white,
+          fillColor: theme.brightness == Brightness.dark ? theme.cardColor : Colors.white,
           prefixIcon: Icon(Icons.inventory_2_outlined,
               size: 20, color: theme.primaryColor.withOpacity(0.6)),
           suffixIcon:
-              Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey[400]),
+              Icon(Icons.keyboard_arrow_down_rounded, color: theme.textTheme.bodyMedium?.color?.withOpacity(0.4)),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: Colors.grey.shade300),
+            borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: Colors.grey.shade300),
+            borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
@@ -910,7 +966,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
           hasSelection ? line.ingredientNameCtrl.text : 'Tap to select...',
           style: TextStyle(
               fontSize: 14,
-              color: hasSelection ? theme.textTheme.bodyLarge?.color ?? Colors.white : Colors.grey[600]),
+              color: hasSelection ? theme.textTheme.bodyLarge?.color : theme.textTheme.bodyMedium?.color?.withOpacity(0.5)),
         ),
       ),
     );
@@ -919,13 +975,18 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
   Widget _card({required Widget child}) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: theme.cardColor,
         borderRadius: BorderRadius.circular(16),
+        border: theme.brightness == Brightness.dark 
+          ? Border.all(color: theme.dividerColor.withOpacity(0.05))
+          : null,
         boxShadow: [
           BoxShadow(
-            color: theme.primaryColor.withOpacity(0.05),
+            color: theme.brightness == Brightness.dark 
+              ? Colors.black.withOpacity(0.2)
+              : theme.primaryColor.withOpacity(0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -936,10 +997,11 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
   }
 
   Widget _kv(String k, String v) {
+    final theme = Theme.of(context);
     return Row(
       children: [
-        Text('$k: ', style: const TextStyle(fontWeight: FontWeight.w600)),
-        Expanded(child: Text(v)),
+        Text('$k: ', style: TextStyle(fontWeight: FontWeight.w600, color: theme.textTheme.bodyLarge?.color)),
+        Expanded(child: Text(v, style: TextStyle(color: theme.textTheme.bodyLarge?.color))),
       ],
     );
   }
@@ -957,20 +1019,21 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
       controller: controller,
       keyboardType: keyboardType,
       maxLines: maxLines,
+      style: TextStyle(color: theme.textTheme.bodyLarge?.color),
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: icon != null
             ? Icon(icon, color: theme.primaryColor.withOpacity(0.6), size: 20)
             : null,
         filled: true,
-        fillColor: Colors.white,
+        fillColor: theme.brightness == Brightness.dark ? theme.cardColor : Colors.white,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -978,7 +1041,8 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         ),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        labelStyle: TextStyle(color: Colors.grey[700], fontSize: 14),
+        labelStyle: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6), fontSize: 14),
+        hintStyle: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.4)),
       ),
       validator: required
           ? (v) => (v == null || v.trim().isEmpty) ? 'Required' : null
@@ -1003,9 +1067,9 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
           ),
           builder: (ctx) => Container(
             padding: const EdgeInsets.symmetric(vertical: 20),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            decoration: BoxDecoration(
+              color: theme.cardColor,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1015,7 +1079,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 20),
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: theme.dividerColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -1038,19 +1102,19 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                         leading: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: theme.dividerColor.withOpacity(0.05),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: selected
                                   ? theme.primaryColor.withOpacity(0.3)
-                                  : Colors.grey.shade200,
+                                  : theme.dividerColor.withOpacity(0.1),
                             ),
                           ),
                           child: Icon(icon ?? Icons.label_outline,
                               size: 18,
                               color: selected
                                   ? theme.primaryColor
-                                  : Colors.grey[600]),
+                                  : theme.textTheme.bodyMedium?.color?.withOpacity(0.5)),
                         ),
                         title: Text(item,
                             style: TextStyle(
@@ -1059,7 +1123,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
                                   ? FontWeight.bold
                                   : FontWeight.normal,
                               color:
-                                  selected ? theme.primaryColor : theme.textTheme.bodyLarge?.color ?? Colors.white,
+                                  selected ? theme.primaryColor : theme.textTheme.bodyLarge?.color,
                             )),
                         trailing: selected
                             ? Icon(Icons.check_circle,
@@ -1080,18 +1144,18 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         decoration: InputDecoration(
           labelText: label,
           filled: true,
-          fillColor: Colors.white,
+          fillColor: theme.brightness == Brightness.dark ? theme.cardColor : Colors.white,
           prefixIcon: Icon(icon ?? Icons.label_outline,
               size: 20, color: theme.primaryColor.withOpacity(0.6)),
           suffixIcon:
-              Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey[400]),
+              Icon(Icons.keyboard_arrow_down_rounded, color: theme.textTheme.bodyMedium?.color?.withOpacity(0.4)),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: Colors.grey.shade300),
+            borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: Colors.grey.shade300),
+            borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
@@ -1102,7 +1166,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         ),
         child: Text(
           value,
-          style: TextStyle(fontSize: 14, color: theme.textTheme.bodyLarge?.color ?? Colors.white),
+          style: TextStyle(fontSize: 14, color: theme.textTheme.bodyLarge?.color),
         ),
       ),
     );
@@ -1152,6 +1216,15 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
   }
 
   Future<void> _save(List<String> branchIds, {required String status}) async {
+    if (branchIds.isEmpty || (branchIds.length > 1 && widget.editingPo == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a specific branch'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
     if (_supplierId == null || _supplierId!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1389,9 +1462,9 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 20),
       height: MediaQuery.of(context).size.height * 0.7,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
         children: [
@@ -1400,7 +1473,7 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
             height: 4,
             margin: const EdgeInsets.only(bottom: 20),
             decoration: BoxDecoration(
-              color: Colors.grey[300],
+              color: theme.dividerColor.withOpacity(0.1),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -1415,14 +1488,14 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
                 prefixIcon:
                     Icon(Icons.search, color: theme.primaryColor.withOpacity(0.6)),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: theme.brightness == Brightness.dark ? theme.scaffoldBackgroundColor : Colors.white,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey[300]!),
+                  borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey[300]!),
+                  borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
                 ),
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -1433,9 +1506,9 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
           const SizedBox(height: 12),
           Expanded(
             child: filtered.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text('No items found',
-                        style: TextStyle(color: Colors.grey)))
+                        style: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.4))))
                 : ListView(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     children: [
@@ -1461,7 +1534,7 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
                                 ? 'Ingredients'
                                 : 'Other Ingredients',
                             style: TextStyle(
-                              color: Colors.grey[700],
+                              color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
                               fontWeight: FontWeight.w700,
                               fontSize: 12,
                             ),
@@ -1491,18 +1564,18 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
       leading: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: theme.dividerColor.withOpacity(0.05),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected
                 ? theme.primaryColor.withOpacity(0.3)
-                : Colors.grey.shade200,
+                : theme.dividerColor.withOpacity(0.1),
           ),
         ),
         child: Icon(
           Icons.eco_outlined,
           size: 18,
-          color: selected ? theme.primaryColor : Colors.grey[500],
+          color: selected ? theme.primaryColor : theme.textTheme.bodyMedium?.color?.withOpacity(0.5),
         ),
       ),
       title: Text(
@@ -1510,7 +1583,7 @@ class _ItemPickerSheetState extends State<_ItemPickerSheet> {
         style: TextStyle(
           fontSize: 15,
           fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-          color: selected ? theme.primaryColor : theme.textTheme.bodyLarge?.color ?? Colors.white,
+          color: selected ? theme.primaryColor : theme.textTheme.bodyLarge?.color,
         ),
       ),
       subtitle: item['category'] != null

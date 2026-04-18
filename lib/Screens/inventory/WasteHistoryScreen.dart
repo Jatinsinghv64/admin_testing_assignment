@@ -99,9 +99,9 @@ class _WasteHistoryScreenState extends State<WasteHistoryScreen> {
       appBar: AppBar(
         title: Text('Waste History',
             style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87))),
-        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.white,
         elevation: 0,
-        iconTheme: IconThemeData(color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.87)),
+        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.primary),
         actions: [
           IconButton(
             icon: const Icon(Icons.download, color: Colors.deepPurple),
@@ -168,10 +168,10 @@ class _WasteHistoryScreenState extends State<WasteHistoryScreen> {
               hintText: 'Search item name...',
               prefixIcon: Icon(Icons.search, color: Colors.deepPurple.shade300),
               filled: true,
-              fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
+              fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.deepPurple.withOpacity(0.05),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+                borderSide: BorderSide(color: Theme.of(context).colorScheme.primary.withOpacity(0.2)),
               ),
             ),
             onChanged: (_) => setState(() {}),
@@ -283,11 +283,12 @@ class _WasteHistoryScreenState extends State<WasteHistoryScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.white,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.deepPurple.withOpacity(0.05),
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),

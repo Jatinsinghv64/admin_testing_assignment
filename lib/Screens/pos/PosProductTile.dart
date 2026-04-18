@@ -115,7 +115,7 @@ class PosProductTile extends StatelessWidget {
                         child: Text(
                           unavailableLabel,
                           style: TextStyle(
-                            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor,
+                          color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).cardColor,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                           ),
