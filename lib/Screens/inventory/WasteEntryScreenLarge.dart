@@ -241,14 +241,15 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor!)),
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.white,
+        border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            offset: const Offset(0, 2),
-            blurRadius: 6,
-          ),
+          if (Theme.of(context).brightness == Brightness.light)
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              offset: const Offset(0, 2),
+              blurRadius: 6,
+            ),
         ],
       ),
       child: Row(
@@ -303,7 +304,8 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
           OutlinedButton(
             onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
             style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.grey[700],
+              foregroundColor: Theme.of(context).colorScheme.primary,
+              side: BorderSide(color: Theme.of(context).colorScheme.primary.withOpacity(0.3)),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
@@ -326,12 +328,12 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
                 : const Icon(Icons.save_rounded, size: 18),
             label: const Text('Save Entry'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.deepPurple,
+              backgroundColor: Theme.of(context).colorScheme.primary,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
-              elevation: 2,
+              elevation: 0,
             ),
           ),
         ],
@@ -380,19 +382,20 @@ class _WasteEntryScreenLargeState extends State<WasteEntryScreenLarge> {
                     backgroundColor: WidgetStateProperty.resolveWith<Color?>(
                       (Set<WidgetState> states) {
                         if (states.contains(WidgetState.selected)) {
-                          return Colors.deepPurple.shade50;
+                          return Theme.of(context).colorScheme.primary;
                         }
-                        return Colors.white;
+                        return Theme.of(context).colorScheme.primary.withOpacity(0.08);
                       },
                     ),
                     foregroundColor: WidgetStateProperty.resolveWith<Color?>(
                       (Set<WidgetState> states) {
                         if (states.contains(WidgetState.selected)) {
-                          return Colors.deepPurple;
+                          return Colors.white;
                         }
-                        return Colors.grey.shade700;
+                        return Theme.of(context).colorScheme.primary;
                       },
                     ),
+                    side: WidgetStateProperty.all(BorderSide(color: Theme.of(context).colorScheme.primary.withOpacity(0.2))),
                   ),
                 ),
               ),

@@ -46,7 +46,7 @@ class _PosScreenState extends State<PosScreen> {
       Queue<_KitchenCancellationAlert>();
   final Set<String> _shownKitchenCancellationAlertIds = <String>{};
   String? _kitchenCancellationBranchId;
-  bool _isKitchenCancellationWatcherPrimed = false;
+
   bool _isKitchenCancellationDialogOpen = false;
   bool _isProductTapping = false; // Guard to prevent duplicate popups on fast taps
   bool _isRegisterDialogOpen = false; // Guard to prevent duplicate register dialogs (open OR close)
@@ -224,7 +224,7 @@ class _PosScreenState extends State<PosScreen> {
     _kitchenCancellationSubscription?.cancel();
     _kitchenCancellationSubscription = null;
     _kitchenCancellationBranchId = activeBranchId;
-    _isKitchenCancellationWatcherPrimed = false;
+
     _shownKitchenCancellationAlertIds.clear();
     _kitchenCancellationQueue.clear();
 
@@ -254,15 +254,9 @@ class _PosScreenState extends State<PosScreen> {
       final data = doc.data();
       return PosService.isKitchenRejected(data) &&
           data['status'] == AppConstants.statusCancelled &&
-          data['cancelledAt'] is Timestamp;
+          data['cancelledAt'] is Timestamp &&
+          data['isAcknowledged'] != true;
     }).toList();
-
-    if (!_isKitchenCancellationWatcherPrimed) {
-      _shownKitchenCancellationAlertIds
-          .addAll(matchingDocs.map((doc) => doc.id));
-      _isKitchenCancellationWatcherPrimed = true;
-      return;
-    }
 
     for (final doc in matchingDocs) {
       if (_shownKitchenCancellationAlertIds.contains(doc.id)) continue;
@@ -314,7 +308,18 @@ class _PosScreenState extends State<PosScreen> {
         ),
         actions: [
           ElevatedButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
+            onPressed: () async {
+              // Persist acknowledgement to Firestore so it doesn't show again
+              FirebaseFirestore.instance
+                  .collection(AppConstants.collectionOrders)
+                  .doc(alert.orderId)
+                  .update({
+                'isAcknowledged': true,
+                'acknowledgedAt': FieldValue.serverTimestamp(),
+              }).catchError((e) => debugPrint('⚠️ Failed to acknowledge order: $e'));
+
+              Navigator.of(dialogContext).pop();
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red[700],
               foregroundColor: Colors.white,

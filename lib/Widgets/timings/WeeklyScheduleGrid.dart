@@ -137,7 +137,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.grey[50],
+        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.grey[50],
         border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
       ),
       child: Row(
@@ -161,8 +161,8 @@ class WeeklyScheduleGrid extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       decoration: BoxDecoration(
-        color: isToday ? Colors.deepPurple.withOpacity(0.02) : (isClosed ? Colors.red.withOpacity(0.02) : Colors.transparent),
-        border: isClosed ? Border(left: BorderSide(color: Colors.red.withOpacity(0.2), width: 4)) : null,
+        color: isToday ? Colors.deepPurple.withOpacity(0.05) : (isClosed ? Colors.red.withOpacity(0.05) : Colors.transparent),
+        border: isToday ? const Border(left: BorderSide(color: Colors.deepPurple, width: 4)) : (isClosed ? Border(left: BorderSide(color: Colors.red.withOpacity(0.5), width: 4)) : null),
       ),
       child: Row(
         children: [
@@ -228,7 +228,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
               alignment: Alignment.centerRight,
               child: IconButton(
                 onPressed: () {},
-                icon: const Icon(Icons.settings_backup_restore, color: Colors.grey, size: 18),
+                icon: Icon(Icons.settings_backup_restore, color: Theme.of(context).hintColor, size: 18),
                 tooltip: 'Reset to default',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
@@ -271,10 +271,10 @@ class WeeklyScheduleGrid extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.grey[50],
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.grey[50],
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isUnderstaffed ? Colors.red.withOpacity(0.3) : (hasConflict ? Colors.orange.withOpacity(0.3) : Theme.of(context).dividerColor),
+              color: isUnderstaffed ? Colors.red.withOpacity(0.5) : (hasConflict ? Colors.orange.withOpacity(0.5) : Theme.of(context).dividerColor),
               width: 1,
             ),
           ),
@@ -325,7 +325,7 @@ class WeeklyScheduleGrid extends StatelessWidget {
       children: [
         Text(
           label,
-          style: textTheme.labelSmall?.copyWith(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 8),
+          style: textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor, fontWeight: FontWeight.bold, fontSize: 8),
         ),
         Text(
           value,
@@ -374,12 +374,12 @@ class WeeklyScheduleGrid extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.add, color: Colors.grey, size: 16),
+            Icon(Icons.add, color: Theme.of(context).hintColor, size: 16),
             const SizedBox(width: 8),
             Text(
               'ADD SHIFT',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Colors.grey,
+                color: Theme.of(context).hintColor,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 1.0,
               ),

@@ -497,9 +497,9 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.history, size: 18, color: _WColors.textMain(context)),
+                            Icon(Icons.history, size: 18, color: _WColors.primary(context)),
                             const SizedBox(width: 8),
-                            Text('View History', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _WColors.textMain(context))),
+                            Text('View History', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _WColors.primary(context))),
                           ],
                         ),
                       ),
@@ -525,9 +525,9 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.add_rounded, size: 18, color: _WColors.background(context)),
-                            SizedBox(width: 8),
-                            Text('Log Waste', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _WColors.background(context))),
+                            const Icon(Icons.add_rounded, size: 18, color: Colors.white),
+                            const SizedBox(width: 8),
+                            const Text('Log Waste', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
                           ],
                         ),
                       ),
@@ -578,7 +578,6 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
       mainAxisSize: MainAxisSize.min,
       children: ['daily', 'weekly', 'monthly'].map((mode) {
         final sel = _trendMode == mode;
-        final isDark = Theme.of(context).brightness == Brightness.dark;
         return Padding(
           padding: const EdgeInsets.only(left: 4),
           child: GestureDetector(
@@ -586,17 +585,17 @@ class _WasteDashboardScreenState extends State<WasteDashboardScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: sel ? _WColors.primary(context).withOpacity(0.15) : (isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)),
+                color: sel ? _WColors.primary(context) : _WColors.primary(context).withOpacity(0.2),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: sel ? _WColors.primary(context).withOpacity(0.4) : _WColors.border(context),
+                  color: sel ? _WColors.primary(context) : _WColors.primary(context).withOpacity(0.2),
                 ),
               ),
               child: Text(
                 mode[0].toUpperCase() + mode.substring(1),
                 style: TextStyle(
                   fontSize: 11,
-                  color: sel ? _WColors.primary(context) : _WColors.textMuted(context),
+                  color: sel ? Colors.white : _WColors.primary(context),
                   fontWeight: sel ? FontWeight.bold : FontWeight.w500,
                 ),
               ),

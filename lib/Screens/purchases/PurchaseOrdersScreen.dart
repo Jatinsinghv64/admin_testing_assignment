@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../Widgets/BranchFilterService.dart';
 import '../../main.dart';
 import '../../services/inventory/PurchaseOrderService.dart';
@@ -122,7 +123,7 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
       key: _scaffoldKey,
       backgroundColor: theme.scaffoldBackgroundColor,
       endDrawer: Drawer(
-        width: 450,
+        width: MediaQuery.of(context).size.width > 1200 ? 550 : 450,
         backgroundColor: theme.scaffoldBackgroundColor,
         child: CreatePurchaseOrderScreen(
           key: ValueKey(_drawerSessionKey),
@@ -208,7 +209,11 @@ class _PurchaseOrdersScreenState extends State<PurchaseOrdersScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Suppliers & Purchase Orders', 
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color)),
+                style: GoogleFonts.outfit(
+                  fontSize: 30, 
+                  fontWeight: FontWeight.bold, 
+                  color: theme.brightness == Brightness.dark ? Colors.white : theme.primaryColor
+                )),
               const SizedBox(height: 4),
               Text('Track inventory orders and manage supplier relationships.', 
                 style: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6))),
@@ -356,22 +361,22 @@ class _SearchField extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       width: 300,
-      decoration: BoxDecoration(
-        color: theme.brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.dividerColor),
-      ),
-      child: TextField(
-        onChanged: onChanged,
-        style: TextStyle(color: theme.textTheme.bodyLarge?.color),
-        decoration: InputDecoration(
-          hintText: 'Search orders, suppliers...',
-          hintStyle: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5)),
-          prefixIcon: Icon(Icons.search, size: 20, color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5)),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: theme.brightness == Brightness.dark ? theme.cardColor : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: theme.dividerColor.withOpacity(0.1)),
         ),
-      ),
+        child: TextField(
+          onChanged: onChanged,
+          style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+          decoration: InputDecoration(
+            hintText: 'Search orders, suppliers...',
+            hintStyle: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.4)),
+            prefixIcon: Icon(Icons.search, size: 20, color: theme.textTheme.bodyMedium?.color?.withOpacity(0.4)),
+            border: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+        ),
     );
   }
 }

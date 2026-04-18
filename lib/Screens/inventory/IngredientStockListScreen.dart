@@ -1300,6 +1300,8 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
   }
 
   Widget _filterChip(String value, String label) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
     final selected = _filter == value;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
@@ -1310,11 +1312,17 @@ class _IngredientStockListScreenState extends State<IngredientStockListScreen> {
         label: Text(label, style: const TextStyle(fontSize: 12)),
         color: WidgetStateProperty.resolveWith((states) {
           return states.contains(WidgetState.selected)
-              ? Colors.deepPurple
-              : Colors.grey[100];
+              ? primary
+              : primary.withOpacity(0.2);
         }),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(
+            color: selected ? primary : primary.withOpacity(0.4),
+          ),
+        ),
         labelStyle: TextStyle(
-          color: selected ? Colors.white : Colors.grey[700],
+          color: selected ? Colors.white : primary,
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
         ),
       ),
@@ -2149,8 +2157,8 @@ class _RestockPurchaseOrderScreen extends StatelessWidget {
                                     fontWeight: FontWeight.bold,
                                     color: ingredient
                                             .isOutOfStockForBranches(branchIds)
-                                        ? Colors.red.shade800
-                                        : Colors.orange.shade800,
+                                        ? Colors.redAccent
+                                        : Colors.orangeAccent,
                                   ),
                                 ),
                                 const SizedBox(height: 4),
@@ -2161,10 +2169,7 @@ class _RestockPurchaseOrderScreen extends StatelessWidget {
                                   'Suggested restock: ${restockQty.toStringAsFixed(1)} ${ingredient.unit}',
                                   style: TextStyle(
                                     fontSize: 13,
-                                    color: ingredient
-                                            .isOutOfStockForBranches(branchIds)
-                                        ? Colors.red.shade700
-                                        : Colors.orange.shade700,
+                                    color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[400] : Colors.grey[600],
                                   ),
                                 ),
                               ],
