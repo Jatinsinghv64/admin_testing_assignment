@@ -12,6 +12,7 @@ class PosProductTile extends StatelessWidget {
   final String unavailableLabel;
   final Color? chinColor;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   const PosProductTile({
     super.key,
@@ -23,14 +24,19 @@ class PosProductTile extends StatelessWidget {
     this.unavailableLabel = 'Unavailable',
     this.chinColor,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    return Tooltip(
+      message: isAvailable && onLongPress != null ? 'Hold for bulk order' : '',
+      waitDuration: const Duration(seconds: 1),
+      child: Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: (isAvailable || !disableTapWhenUnavailable) ? onTap : null,
+        onLongPress: isAvailable ? onLongPress : null,
         borderRadius: BorderRadius.circular(16),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
@@ -127,6 +133,7 @@ class PosProductTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }

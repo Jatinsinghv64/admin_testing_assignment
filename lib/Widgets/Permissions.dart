@@ -33,7 +33,6 @@ class AppScreen {
     required this.navItem,
   });
 }
-
 // --- ADDED AppTab ---
 enum AppTab {
   dashboard,

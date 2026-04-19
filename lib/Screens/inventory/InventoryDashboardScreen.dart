@@ -615,7 +615,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: filled ? Theme.of(context).colorScheme.primary : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Theme.of(context).cardColor),
+            color: filled ? Theme.of(context).colorScheme.primary : (Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : const Color(0xFFF1F5F9)),
             borderRadius: BorderRadius.circular(10),
             border: filled ? null : Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.2)),
             boxShadow: filled

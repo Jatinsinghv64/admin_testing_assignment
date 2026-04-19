@@ -14,10 +14,12 @@ class ExportReportDialog extends StatefulWidget {
   const ExportReportDialog({super.key, this.preSelectedSections});
 
   /// Show the export report dialog with optional context-aware pre-selections
-  static Future<void> show(BuildContext context, {Set<String>? preSelectedSections}) {
+  static Future<void> show(BuildContext context,
+      {Set<String>? preSelectedSections}) {
     return showDialog(
       context: context,
-      builder: (_) => ExportReportDialog(preSelectedSections: preSelectedSections),
+      builder: (_) =>
+          ExportReportDialog(preSelectedSections: preSelectedSections),
     );
   }
 
@@ -40,16 +42,66 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
   String? _error;
 
   static const List<Map<String, dynamic>> _allSections = [
-    {'key': 'sales_summary', 'label': 'Sales Summary', 'icon': Icons.summarize, 'desc': 'Orders, revenue, AOV'},
-    {'key': 'order_details', 'label': 'Order Details', 'icon': Icons.list_alt, 'desc': 'Line-by-line order listing'},
-    {'key': 'revenue_by_source', 'label': 'Revenue by Source', 'icon': Icons.pie_chart, 'desc': 'App, POS, Web breakdown'},
-    {'key': 'revenue_by_branch', 'label': 'Revenue by Branch', 'icon': Icons.business, 'desc': 'Branch-wise split'},
-    {'key': 'item_wise_sales', 'label': 'Item-wise Sales', 'icon': Icons.restaurant, 'desc': 'Top selling items'},
-    {'key': 'profit_margin', 'label': 'Profit & Margin', 'icon': Icons.trending_up, 'desc': 'Item-level cost & margin'},
-    {'key': 'inventory_stock', 'label': 'Inventory & Stock', 'icon': Icons.inventory_2, 'desc': 'Stock levels, low alerts'},
-    {'key': 'staff_summary', 'label': 'Staff Summary', 'icon': Icons.groups, 'desc': 'Team count & attendance'},
-    {'key': 'promotions_performance', 'label': 'Promotions', 'icon': Icons.campaign, 'desc': 'Active deals & usage'},
-    {'key': 'expense_summary', 'label': 'Expense Summary', 'icon': Icons.receipt_long, 'desc': 'Paid expenses list'},
+    {
+      'key': 'sales_summary',
+      'label': 'Sales Summary',
+      'icon': Icons.summarize,
+      'desc': 'Orders, revenue, AOV'
+    },
+    {
+      'key': 'order_details',
+      'label': 'Order Details',
+      'icon': Icons.list_alt,
+      'desc': 'Line-by-line order listing'
+    },
+    {
+      'key': 'revenue_by_source',
+      'label': 'Revenue by Source',
+      'icon': Icons.pie_chart,
+      'desc': 'App, POS, Web breakdown'
+    },
+    {
+      'key': 'revenue_by_branch',
+      'label': 'Revenue by Branch',
+      'icon': Icons.business,
+      'desc': 'Branch-wise split'
+    },
+    {
+      'key': 'item_wise_sales',
+      'label': 'Item-wise Sales',
+      'icon': Icons.restaurant,
+      'desc': 'Top selling items'
+    },
+    {
+      'key': 'profit_margin',
+      'label': 'Profit & Margin',
+      'icon': Icons.trending_up,
+      'desc': 'Item-level cost & margin'
+    },
+    {
+      'key': 'inventory_stock',
+      'label': 'Inventory & Stock',
+      'icon': Icons.inventory_2,
+      'desc': 'Stock levels, low alerts'
+    },
+    {
+      'key': 'staff_summary',
+      'label': 'Staff Summary',
+      'icon': Icons.groups,
+      'desc': 'Team count & attendance'
+    },
+    {
+      'key': 'promotions_performance',
+      'label': 'Promotions',
+      'icon': Icons.campaign,
+      'desc': 'Active deals & usage'
+    },
+    {
+      'key': 'expense_summary',
+      'label': 'Expense Summary',
+      'icon': Icons.receipt_long,
+      'desc': 'Paid expenses list'
+    },
   ];
 
   @override
@@ -67,7 +119,8 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
     switch (_datePreset) {
       case 'yesterday':
         final yesterday = today.subtract(const Duration(days: 1));
-        return DateTimeRange(start: yesterday, end: today.subtract(const Duration(seconds: 1)));
+        return DateTimeRange(
+            start: yesterday, end: today.subtract(const Duration(seconds: 1)));
       case 'this_week':
         final startOfWeek = today.subtract(Duration(days: today.weekday - 1));
         return DateTimeRange(start: startOfWeek, end: now);
@@ -123,11 +176,14 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
                           color: Colors.deepPurple.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: const Icon(Icons.file_download_outlined, color: Colors.deepPurple),
+                        child: const Icon(Icons.file_download_outlined,
+                            color: Colors.deepPurple),
                       ),
                       const SizedBox(width: 14),
                       const Expanded(
-                        child: Text('Export Report', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                        child: Text('Export Report',
+                            style: TextStyle(
+                                fontSize: 22, fontWeight: FontWeight.bold)),
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(context),
@@ -138,7 +194,8 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
                   const SizedBox(height: 8),
                   // Branch scope indicator
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.deepPurple.withOpacity(0.05),
                       borderRadius: BorderRadius.circular(8),
@@ -146,9 +203,14 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.store, size: 16, color: Colors.deepPurple),
+                        const Icon(Icons.store,
+                            size: 16, color: Colors.deepPurple),
                         const SizedBox(width: 8),
-                        Text(branchLabel, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.deepPurple)),
+                        Text(branchLabel,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                color: Colors.deepPurple)),
                       ],
                     ),
                   ),
@@ -164,7 +226,9 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Date range
-                    const Text('Date Range', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    const Text('Date Range',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -185,11 +249,13 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
                           onPressed: () async {
                             final range = await showDateRangePicker(
                               context: context,
-                              firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                              firstDate: DateTime.now()
+                                  .subtract(const Duration(days: 365)),
                               lastDate: DateTime.now(),
                               initialDateRange: _customRange,
                             );
-                            if (range != null) setState(() => _customRange = range);
+                            if (range != null)
+                              setState(() => _customRange = range);
                           },
                           icon: const Icon(Icons.calendar_today, size: 16),
                           label: Text(
@@ -206,7 +272,9 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Report Sections', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                        const Text('Report Sections',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 14)),
                         TextButton.icon(
                           onPressed: _toggleAll,
                           icon: Icon(
@@ -247,7 +315,9 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
                     const SizedBox(height: 18),
 
                     // Format toggle
-                    const Text('Format', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    const Text('Format',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -269,21 +339,30 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+                      child: Text(_error!,
+                          style:
+                              const TextStyle(color: Colors.red, fontSize: 13)),
                     ),
                   SizedBox(
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton.icon(
-                      onPressed: (_isGenerating || _selectedSections.isEmpty) ? null : _generate,
+                      onPressed: (_isGenerating || _selectedSections.isEmpty)
+                          ? null
+                          : _generate,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.deepPurple,
                         foregroundColor: Colors.white,
                         disabledBackgroundColor: Colors.grey[300],
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
                       ),
                       icon: _isGenerating
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2))
                           : const Icon(Icons.download_rounded),
                       label: Text(
                         _isGenerating
@@ -327,10 +406,14 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
           margin: const EdgeInsets.only(bottom: 4),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: isSelected ? Colors.deepPurple.withOpacity(0.06) : Colors.transparent,
+            color: isSelected
+                ? Colors.deepPurple.withOpacity(0.06)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isSelected ? Colors.deepPurple.withOpacity(0.3) : Colors.grey[200]!,
+              color: isSelected
+                  ? Colors.deepPurple.withOpacity(0.3)
+                  : Colors.grey[200]!,
             ),
           ),
           child: Row(
@@ -349,25 +432,32 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
                       }
                     });
                   },
-                  activeColor: Colors.deepPurple,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                  activeColor: Theme.of(context).colorScheme.primary,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(4)),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   visualDensity: VisualDensity.compact,
                 ),
               ),
               const SizedBox(width: 12),
-              Icon(icon, size: 18, color: isSelected ? Colors.deepPurple : Colors.grey[600]),
+              Icon(icon,
+                  size: 18,
+                  color: isSelected ? Colors.deepPurple : Colors.grey[600]),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(label, style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: isSelected ? Colors.deepPurple : Colors.black87,
-                    )),
-                    Text(desc, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                    Text(label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color:
+                              isSelected ? Colors.deepPurple : Colors.black87,
+                        )),
+                    Text(desc,
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.grey[500])),
                   ],
                 ),
               ),
@@ -387,13 +477,15 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
         decoration: BoxDecoration(
           color: selected ? Colors.deepPurple : Colors.grey[100],
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? Colors.deepPurple : Colors.grey[300]!),
+          border: Border.all(
+              color: selected ? Colors.deepPurple : Colors.grey[300]!),
         ),
-        child: Text(label, style: TextStyle(
-          fontSize: 12,
-          fontWeight: selected ? FontWeight.bold : FontWeight.w500,
-          color: selected ? Colors.white : Colors.black87,
-        )),
+        child: Text(label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+              color: selected ? Colors.white : Colors.black87,
+            )),
       ),
     );
   }
@@ -406,7 +498,8 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: selected ? Colors.deepPurple.withOpacity(0.1) : Colors.grey[50],
+            color:
+                selected ? Colors.deepPurple.withOpacity(0.1) : Colors.grey[50],
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: selected ? Colors.deepPurple : Colors.grey[300]!,
@@ -416,12 +509,14 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 18, color: selected ? Colors.deepPurple : Colors.grey),
+              Icon(icon,
+                  size: 18, color: selected ? Colors.deepPurple : Colors.grey),
               const SizedBox(width: 8),
-              Text(label, style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: selected ? Colors.deepPurple : Colors.grey[700],
-              )),
+              Text(label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: selected ? Colors.deepPurple : Colors.grey[700],
+                  )),
             ],
           ),
         ),
@@ -442,7 +537,10 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
       return;
     }
 
-    setState(() { _isGenerating = true; _error = null; });
+    setState(() {
+      _isGenerating = true;
+      _error = null;
+    });
 
     try {
       final userScope = context.read<UserScopeService>();

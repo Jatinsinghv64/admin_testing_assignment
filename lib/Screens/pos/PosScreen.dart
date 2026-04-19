@@ -21,9 +21,12 @@ import 'pos_register_dialog.dart';
 import 'DeliveryOrdersPanel.dart';
 import 'DineInFloorPlanPanel.dart';
 import 'components/VariantSelectionDialog.dart';
+import 'components/BulkOrderDialog.dart';
+import 'TableReservationPanel.dart';
+import 'BulkOrderPanel.dart';
 import '../../services/pos/pos_register_service.dart';
 
-enum PosViewMode { pos, delivery, dineIn }
+enum PosViewMode { pos, delivery, dineIn, reservation }
 
 class PosScreen extends StatefulWidget {
   const PosScreen({super.key});
@@ -348,6 +351,8 @@ class _PosScreenState extends State<PosScreen> {
             setState(() => _viewMode = PosViewMode.pos);
           },
         );
+      case PosViewMode.reservation:
+        return const BulkOrderPanel(key: ValueKey('reservation'));
       case PosViewMode.pos:
         return _buildPosBody(context, activeBranchId);
     }
@@ -752,6 +757,45 @@ class _PosScreenState extends State<PosScreen> {
                 ),
               ),
             ),
+          // ── Table Reservation Button (Dine In mode) ──
+          if (_viewMode == PosViewMode.dineIn && isSpecificBranchSelected) ...[
+            const SizedBox(width: 12),
+            ElevatedButton.icon(
+              onPressed: () {
+                final branchFilter = context.read<BranchFilterService>();
+                final branchId = branchFilter.selectedBranchId ?? '';
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TableReservationPanel(
+                      onSeatReservation: (tableId, tableName, partySize) {
+                        setState(() => _viewMode = PosViewMode.pos);
+                        final pos = context.read<PosService>();
+                        pos.loadTableContext(
+                          tableId, tableName,
+                          guestCount: partySize,
+                          branchIds: [branchId],
+                        );
+                      },
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.event_available_rounded, size: 18),
+              label: const Text(
+                'Table Reservations',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                elevation: 0,
+              ),
+            ),
+          ],
           // ── Register Button ──
           if (_viewMode == PosViewMode.pos && isSpecificBranchSelected) ...[
             const SizedBox(width: 12),
@@ -957,7 +1001,7 @@ class _PosScreenState extends State<PosScreen> {
     _isRegisterDialogOpen = false;
   }
 
-  // ── Animated POS / Delivery / Dine In Toggle ───────────────────────────────
+  // ── Animated POS / Delivery / Dine In / Reservations Toggle ─────────────────
   Widget _buildViewToggle() {
     return Container(
       decoration: BoxDecoration(
@@ -976,7 +1020,7 @@ class _PosScreenState extends State<PosScreen> {
             onTap: () => setState(() => _viewMode = PosViewMode.pos),
           ),
           _buildToggleButton(
-            label: 'Order',
+            label: 'Orders',
             icon: Icons.receipt_long,
             isSelected: _viewMode == PosViewMode.delivery,
             color: const Color(0xFFFF6F00),
@@ -988,6 +1032,13 @@ class _PosScreenState extends State<PosScreen> {
             isSelected: _viewMode == PosViewMode.dineIn,
             color: Colors.teal,
             onTap: () => setState(() => _viewMode = PosViewMode.dineIn),
+          ),
+          _buildToggleButton(
+            label: 'Events',
+            icon: Icons.celebration_rounded,
+            isSelected: _viewMode == PosViewMode.reservation,
+            color: const Color(0xFFAB47BC),
+            onTap: () => setState(() => _viewMode = PosViewMode.reservation),
           ),
         ],
       ),
@@ -1349,6 +1400,37 @@ class _PosScreenState extends State<PosScreen> {
               unavailableLabel:
                   (isMarkedOutOfStock || isIngredientOutOfStock) ? 'Out of Stock' : 'Unavailable',
               chinColor: chinColor,
+              onLongPress: (isAvailable && !isMarkedOutOfStock && !isIngredientOutOfStock)
+                  ? () async {
+                      if (_isProductTapping) return;
+                      setState(() => _isProductTapping = true);
+                      try {
+                        final result = await showBulkOrderDialog(
+                          context,
+                          productId: doc.id,
+                          productName: name,
+                          price: price,
+                          imageUrl: imageUrl,
+                          categoryName: catName,
+                        );
+                        if (result == null || !mounted) return;
+                        final pos = this.context.read<PosService>();
+                        pos.addItem(PosCartItem(
+                          productId: doc.id,
+                          name: name,
+                          nameAr: (data['name_ar'] ?? data['nameAr'])?.toString(),
+                          price: price,
+                          imageUrl: imageUrl,
+                          categoryId: catId,
+                          categoryName: catName,
+                          quantity: result.quantity,
+                          notes: result.notes,
+                        ));
+                      } finally {
+                        if (mounted) setState(() => _isProductTapping = false);
+                      }
+                    }
+                  : null,
                 onTap: () async {
                   if (_isProductTapping) return;
                   setState(() => _isProductTapping = true);

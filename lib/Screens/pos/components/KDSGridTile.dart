@@ -191,7 +191,10 @@ class KDSGridTile extends StatelessWidget {
                               Text(
                                 '${elapsed}m',
                                 style: TextStyle(
-                                color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).cardColor,
+                                  color: Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white
+                                      : Theme.of(context).cardColor,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 11,
                                 ),
@@ -244,7 +247,7 @@ class KDSGridTile extends StatelessWidget {
                   ),
                   const Spacer(),
                   // Quick action button
-                  _buildQuickAction(status),
+                  _buildQuickAction(context, status),
                 ],
               ),
             ),
@@ -254,7 +257,7 @@ class KDSGridTile extends StatelessWidget {
     );
   }
 
-  Widget _buildQuickAction(String status) {
+  Widget _buildQuickAction(BuildContext context, String status) {
     String? nextStatus;
     IconData icon;
     Color color;
@@ -286,12 +289,19 @@ class KDSGridTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           onTap: isProcessing ? null : () => onStatusUpdate(nextStatus!),
           child: isProcessing
-              ? const Padding(
-                  padding: EdgeInsets.all(6),
+              ? Padding(
+                  padding: const EdgeInsets.all(6),
                   child: CircularProgressIndicator(
-                      color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).cardColor, strokeWidth: 2),
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Theme.of(context).cardColor,
+                      strokeWidth: 2),
                 )
-              : Icon(icon, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).cardColor, size: 18),
+              : Icon(icon,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white
+                      : Theme.of(context).cardColor,
+                  size: 18),
         ),
       ),
     );

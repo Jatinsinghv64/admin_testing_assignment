@@ -12,6 +12,7 @@ import '../../services/pos/pos_models.dart';
 import '../../Widgets/PrintingService.dart';
 import 'TableOrdersDialog.dart';
 import 'pos_payment_dialog.dart';
+import 'components/BulkOrderDialog.dart';
 
 class PosCartPanel extends StatefulWidget {
   final VoidCallback onOrderSubmit;
@@ -519,10 +520,12 @@ class _PosCartPanelState extends State<PosCartPanel> {
         final item = pos.cartItems[index];
         return _CartItemTile(
           item: item,
+          itemIndex: index,
           onIncrement: () => pos.updateQuantity(index, item.quantity + 1),
           onDecrement: () => pos.updateQuantity(index, item.quantity - 1),
           onRemove: () => pos.removeItem(index),
           onNotesChanged: (notes) => pos.updateItemNotes(index, notes),
+          onSetQty: (qty) => pos.updateQuantity(index, qty),
         );
       },
     );
@@ -1524,17 +1527,21 @@ class _OngoingOrderItemTile extends StatelessWidget {
 // ── Cart Item Tile ────────────────────────────────────────────
 class _CartItemTile extends StatelessWidget {
   final PosCartItem item;
+  final int itemIndex;
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
   final VoidCallback onRemove;
   final ValueChanged<String> onNotesChanged;
+  final ValueChanged<int>? onSetQty;
 
   const _CartItemTile({
     required this.item,
+    required this.itemIndex,
     required this.onIncrement,
     required this.onDecrement,
     required this.onRemove,
     required this.onNotesChanged,
+    this.onSetQty,
   });
 
   @override
@@ -1682,28 +1689,81 @@ class _CartItemTile extends StatelessWidget {
                 ),
               ],
             ),
-            // Add note button
-            if (item.notes.isEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: InkWell(
-                  onTap: () => _showNotesDialog(context),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.edit_note, size: 14, color: Colors.grey[400]),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Add note',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey[400],
+            // Bottom row: Add note + Set Qty
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  // Add note
+                  if (item.notes.isEmpty)
+                    InkWell(
+                      onTap: () => _showNotesDialog(context),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.edit_note, size: 14, color: Colors.grey[400]),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Add note',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[400],
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    const SizedBox.shrink(),
+                  const Spacer(),
+                  // Set Qty button for bulk re-quantity
+                  if (onSetQty != null)
+                    InkWell(
+                      onTap: () async {
+                        final result = await showBulkOrderDialog(
+                          context,
+                          productId: item.productId,
+                          productName: item.name,
+                          price: item.price,
+                          addons: item.addons,
+                          initialQuantity: item.quantity,
+                          initialNotes: item.notes,
+                        );
+                        if (result != null) {
+                          onSetQty!(result.quantity);
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: Colors.deepPurple.withOpacity(0.2),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.format_list_numbered_rounded,
+                                size: 11, color: Colors.deepPurple[400]),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Set Qty',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.deepPurple[400],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
+                    ),
+                ],
               ),
+            ),
           ],
         ),
       ),

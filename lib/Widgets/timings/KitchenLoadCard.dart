@@ -40,7 +40,8 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
   @override
   void didUpdateWidget(KitchenLoadCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.preparationTime != widget.preparationTime && !widget.isUpdatingPrepTime) {
+    if (oldWidget.preparationTime != widget.preparationTime &&
+        !widget.isUpdatingPrepTime) {
       _localPrepTime = widget.preparationTime;
     }
   }
@@ -94,7 +95,8 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
                 ],
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.deepPurple.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(20),
@@ -157,7 +159,8 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
                     text: TextSpan(
                       children: [
                         TextSpan(
-                          text: '+${widget.isUpdatingPrepTime ? widget.preparationTime : _localPrepTime}',
+                          text:
+                              '+${widget.isUpdatingPrepTime ? widget.preparationTime : _localPrepTime}',
                           style: textTheme.headlineSmall?.copyWith(
                             color: Colors.deepPurple,
                             fontWeight: FontWeight.w900,
@@ -183,8 +186,10 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
                   thumbColor: Colors.deepPurple,
                   overlayColor: Colors.deepPurple.withOpacity(0.2),
                   trackHeight: 2,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+                  thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 8),
+                  overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 16),
                 ),
                 child: Slider(
                   value: _localPrepTime.toDouble().clamp(0, 60),
@@ -203,9 +208,18 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                   Text('0m', style: textTheme.labelSmall?.copyWith(color: const Color(0xFF64748b), fontWeight: FontWeight.w900)),
-                   Text('30m', style: textTheme.labelSmall?.copyWith(color: const Color(0xFF64748b), fontWeight: FontWeight.w900)),
-                   Text('60m', style: textTheme.labelSmall?.copyWith(color: const Color(0xFF64748b), fontWeight: FontWeight.w900)),
+                  Text('0m',
+                      style: textTheme.labelSmall?.copyWith(
+                          color: const Color(0xFF64748b),
+                          fontWeight: FontWeight.w900)),
+                  Text('30m',
+                      style: textTheme.labelSmall?.copyWith(
+                          color: const Color(0xFF64748b),
+                          fontWeight: FontWeight.w900)),
+                  Text('60m',
+                      style: textTheme.labelSmall?.copyWith(
+                          color: const Color(0xFF64748b),
+                          fontWeight: FontWeight.w900)),
                 ],
               ),
             ],
@@ -254,9 +268,12 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.white,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white.withOpacity(0.02)
+                            : Colors.white,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Theme.of(context).dividerColor),
+                        border:
+                            Border.all(color: Theme.of(context).dividerColor),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -265,31 +282,42 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
                             children: [
                               Text(
                                 'If orders > ',
-                                style: textTheme.labelSmall?.copyWith(color: const Color(0xFF94a3b8)),
+                                style: textTheme.labelSmall
+                                    ?.copyWith(color: const Color(0xFF94a3b8)),
                               ),
-                                Text(
-                                  '${rule['orderCount']}',
-                                  style: textTheme.labelSmall?.copyWith(color: Theme.of(context).textTheme.bodyLarge?.color, fontWeight: FontWeight.bold),
-                                ),
+                              Text(
+                                '${rule['orderCount']}',
+                                style: textTheme.labelSmall?.copyWith(
+                                    color: Theme.of(context)
+                                        .textTheme
+                                        .bodyLarge
+                                        ?.color,
+                                    fontWeight: FontWeight.bold),
+                              ),
                               const SizedBox(width: 8),
-                              const Icon(Icons.arrow_forward, color: const Color(0xFF64748b), size: 10),
+                              const Icon(Icons.arrow_forward,
+                                  color: const Color(0xFF64748b), size: 10),
                               const SizedBox(width: 8),
-                                Text(
-                                  '+${rule['extraTime']} min',
-                                  style: textTheme.labelSmall?.copyWith(color: Colors.deepPurple, fontWeight: FontWeight.bold),
-                                ),
+                              Text(
+                                '+${rule['extraTime']} min',
+                                style: textTheme.labelSmall?.copyWith(
+                                    color: Colors.deepPurple,
+                                    fontWeight: FontWeight.bold),
+                              ),
                             ],
                           ),
                           Row(
                             children: [
                               GestureDetector(
                                 onTap: () => widget.onEditRule(index),
-                                child: const Icon(Icons.edit, color: Color(0xFF64748b), size: 14),
+                                child: const Icon(Icons.edit,
+                                    color: Color(0xFF64748b), size: 14),
                               ),
                               const SizedBox(width: 12),
                               GestureDetector(
                                 onTap: () => widget.onDeleteRule(index),
-                                child: const Icon(Icons.close, color: Color(0xFF64748b), size: 14),
+                                child: const Icon(Icons.close,
+                                    color: Color(0xFF64748b), size: 14),
                               ),
                             ],
                           ),
@@ -306,7 +334,9 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Theme.of(context).brightness == Brightness.dark ? Colors.white.withOpacity(0.02) : Colors.grey[50],
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white.withOpacity(0.02)
+                  : Colors.grey[50],
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Theme.of(context).dividerColor),
             ),
@@ -336,8 +366,9 @@ class _KitchenLoadCardState extends State<KitchenLoadCard> {
                 Switch(
                   value: widget.rushModeOverride,
                   onChanged: widget.onRushModeChanged,
-                  activeColor: Colors.deepPurple,
-                  activeTrackColor: Colors.deepPurple.withOpacity(0.2),
+                  activeColor: Theme.of(context).colorScheme.primary,
+                  activeTrackColor:
+                      Theme.of(context).colorScheme.primary.withOpacity(0.2),
                 ),
               ],
             ),

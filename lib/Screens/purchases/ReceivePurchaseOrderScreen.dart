@@ -170,10 +170,9 @@ class _ReceivePurchaseOrderScreenState
       body: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth > 950;
-          
           if (isWide) {
             return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Left Column: Scrollable Line Items
                 Expanded(
@@ -190,7 +189,6 @@ class _ReceivePurchaseOrderScreenState
                 // Right Column: Fixed Sidebar
                 Container(
                   width: 380,
-                  height: double.infinity,
                   decoration: BoxDecoration(
                     color: Colors.white,
                     border: Border(left: BorderSide(color: Colors.grey.shade200)),

@@ -10,6 +10,7 @@ import 'TableOrdersDialog.dart';
 import '../../../../Widgets/PrintingService.dart';
 import '../management/TableManagement.dart';
 import '../management/TableDialogHelper.dart';
+import 'TableReservationPanel.dart';
 
 class DineInFloorPlanPanel extends StatefulWidget {
   final VoidCallback onSwitchToPos;
@@ -106,6 +107,37 @@ class _DineInFloorPlanPanelState extends State<DineInFloorPlanPanel> {
                 ],
               ),
               const Spacer(),
+              // ── Reservations Button ──
+              ElevatedButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TableReservationPanel(
+                      onSeatReservation: (tableId, tableName, partySize) {
+                        widget.onSwitchToPos();
+                        final pos = context.read<PosService>();
+                        pos.loadTableContext(
+                          tableId,
+                          tableName,
+                          guestCount: partySize,
+                          branchIds: [_currentBranchId],
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.event_available_rounded, size: 18),
+                label: const Text('Reservations'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepPurple.withOpacity(0.1),
+                  foregroundColor: Colors.deepPurple,
+                  elevation: 0,
+                  side: const BorderSide(color: Colors.deepPurple, width: 1),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(width: 12),
               // Super Admin Controls
               if (isSuperAdmin) ...[
                 if (_isEditMode)

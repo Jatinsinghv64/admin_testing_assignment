@@ -329,7 +329,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       selected: selected,
       onSelected: (_) => setState(() => _categoryFilter = label),
       selectedColor: theme.colorScheme.primary,
-      backgroundColor: theme.cardColor,
+      backgroundColor: theme.brightness == Brightness.dark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9),
       labelStyle: TextStyle(
         color: selected ? Colors.white : theme.textTheme.bodyMedium?.color?.withOpacity(0.8),
         fontWeight: selected ? FontWeight.bold : FontWeight.normal,

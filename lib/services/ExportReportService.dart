@@ -85,17 +85,28 @@ class ExportReportService {
 
   static Future<List<Map<String, dynamic>>> _fetchExpenseData(DateTimeRange dateRange, List<String> branchIds) async {
     try {
-      Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection(AppConstants.collectionExpenses);
-      
-      if (branchIds.isNotEmpty) {
-        query = query.where('branchIds', arrayContainsAny: branchIds);
-      }
-
-      final snap = await query.get();
+      final snap = await FirebaseFirestore.instance.collection(AppConstants.collectionExpenses).get();
       final List<Map<String, dynamic>> result = [];
 
       for (var doc in snap.docs) {
         final data = doc.data();
+        
+        // Branch filtering in memory (handles branchIds, branchids, branchId)
+        bool branchMatch = branchIds.isEmpty;
+        if (!branchMatch) {
+          List<String> docBranches = [];
+          if (data['branchIds'] is List) {
+            docBranches = List<String>.from(data['branchIds']);
+          } else if (data['branchids'] is List) {
+            docBranches = List<String>.from(data['branchids']);
+          } else if (data['branchId'] is String && (data['branchId'] as String).isNotEmpty) {
+            docBranches = [data['branchId'] as String];
+          }
+          branchMatch = docBranches.any((id) => branchIds.contains(id));
+        }
+
+        if (!branchMatch) continue;
+
         final payments = data['paymentHistory'] as List? ?? [];
         
         for (var p in payments) {
@@ -107,7 +118,7 @@ class ExportReportService {
                 result.add({
                   'title': data['title'] ?? 'Unknown',
                   'category': data['category'] ?? '-',
-                  'amount': (p['amount'] as num?)?.toDouble() ?? 0,
+                  'amount': (p['amount'] as num?)?.toDouble() ?? 0.0,
                   'date': paidAt,
                   'vendor': data['vendorName'] ?? '-',
                 });
@@ -129,6 +140,13 @@ class ExportReportService {
       final menuSnap = await FirebaseFirestore.instance.collection('menu_items').get();
       // Fetch recipes for cost data
       final recipeSnap = await FirebaseFirestore.instance.collection(AppConstants.collectionRecipes).get();
+      // Fetch categories for name mapping
+      final catSnap = await FirebaseFirestore.instance.collection(AppConstants.collectionMenuCategories).get();
+      
+      final Map<String, String> catMap = {};
+      for (final doc in catSnap.docs) {
+        catMap[doc.id] = doc.data()['name']?.toString() ?? 'Unknown';
+      }
 
       // Build recipe cost map: menuItemId -> costPerServing
       final Map<String, double> recipeCostMap = {};
@@ -149,13 +167,16 @@ class ExportReportService {
         final margin = price > 0 ? ((price - cost) / price * 100) : 0.0;
         final profit = price - cost;
 
+        final catId = data['categoryId']?.toString() ?? '';
+        final categoryName = catMap[catId] ?? data['category']?.toString() ?? '-';
+
         result.add({
           'name': data['name'] ?? 'Unknown',
           'price': price,
           'cost': cost,
           'margin': margin,
           'profit': profit,
-          'category': data['category'] ?? '-',
+          'category': categoryName,
         });
       }
 

@@ -55,24 +55,23 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
     final e = widget.existing;
     _nameCtr.text = e?.name ?? '';
     _costCtr.text = e != null ? e.costPerUnit.toString() : '';
-    final targetBranch = widget.branchIds.isNotEmpty ? widget.branchIds.first : "default";
+    final targetBranch =
+        widget.branchIds.isNotEmpty ? widget.branchIds.first : "default";
     _stockCtr.text = e != null ? e.getStock(targetBranch).toString() : '';
-    _minThresholdCtr.text = e != null ? e.getMinThreshold(targetBranch).toString() : '';
+    _minThresholdCtr.text =
+        e != null ? e.getMinThreshold(targetBranch).toString() : '';
     _shelfLifeCtr.text = e?.shelfLifeDays?.toString() ?? '';
     _skuCtr.text = e?.sku ?? '';
     _barcodeCtr.text = e?.barcode ?? widget.prefilledBarcode ?? '';
 
-    // Fix for assertion error: value must be in items. 
+    // Fix for assertion error: value must be in items.
     // If the database has an unknown value like "Burger", we fallback to "other".
     final catValue = e?.category ?? IngredientModel.categories.first;
-    _category = IngredientModel.categories.contains(catValue) 
-        ? catValue 
-        : 'other';
+    _category =
+        IngredientModel.categories.contains(catValue) ? catValue : 'other';
 
     final unitValue = e?.unit ?? IngredientModel.units.first;
-    _unit = IngredientModel.units.contains(unitValue) 
-        ? unitValue 
-        : 'pieces';
+    _unit = IngredientModel.units.contains(unitValue) ? unitValue : 'pieces';
 
     _allergenTags = List.from(e?.allergenTags ?? []);
     _isPerishable = e?.isPerishable ?? false;
@@ -119,14 +118,17 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
 
       final now = DateTime.now();
 
-      final targetBranch = widget.branchIds.isNotEmpty ? widget.branchIds.first : "default";
+      final targetBranch =
+          widget.branchIds.isNotEmpty ? widget.branchIds.first : "default";
       final parsedStock = double.parse(_stockCtr.text.trim());
       final parsedMin = double.parse(_minThresholdCtr.text.trim());
-      
-      final existingStocks = Map<String, double>.from(widget.existing?.branchStocks ?? {});
+
+      final existingStocks =
+          Map<String, double>.from(widget.existing?.branchStocks ?? {});
       existingStocks[targetBranch] = parsedStock;
-      
-      final existingMins = Map<String, double>.from(widget.existing?.branchMinThresholds ?? {});
+
+      final existingMins =
+          Map<String, double>.from(widget.existing?.branchMinThresholds ?? {});
       existingMins[targetBranch] = parsedMin;
 
       final i = IngredientModel(
@@ -156,14 +158,18 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
         await widget.service.addIngredient(i);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ingredient Added'), backgroundColor: Colors.green),
+            const SnackBar(
+                content: Text('Ingredient Added'),
+                backgroundColor: Colors.green),
           );
         }
       } else {
         await widget.service.updateIngredient(i, _previousSupplierIds);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ingredient Updated'), backgroundColor: Colors.green),
+            const SnackBar(
+                content: Text('Ingredient Updated'),
+                backgroundColor: Colors.green),
           );
         }
       }
@@ -171,7 +177,8 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error saving: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -188,9 +195,12 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
           backgroundColor: Colors.deepPurple.shade50,
           backgroundImage: _pickedImage != null
               ? FileImage(_pickedImage!)
-              : (_existingImageUrl != null ? NetworkImage(_existingImageUrl!) : null) as ImageProvider?,
+              : (_existingImageUrl != null
+                  ? NetworkImage(_existingImageUrl!)
+                  : null) as ImageProvider?,
           child: _pickedImage == null && _existingImageUrl == null
-              ? Icon(Icons.add_a_photo, size: 30, color: Colors.deepPurple.shade300)
+              ? Icon(Icons.add_a_photo,
+                  size: 30, color: Colors.deepPurple.shade300)
               : null,
         ),
       ),
@@ -212,12 +222,15 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
     return BarcodeScannerListener(
       onBarcodeScanned: (barcode) async {
         if (!mounted) return;
-        final existingIngredient = await widget.service.findByBarcode(barcode, widget.branchIds);
-        if (existingIngredient != null && existingIngredient.id != widget.existing?.id) {
+        final existingIngredient =
+            await widget.service.findByBarcode(barcode, widget.branchIds);
+        if (existingIngredient != null &&
+            existingIngredient.id != widget.existing?.id) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Barcode already assigned to: ${existingIngredient.name}'),
+                content: Text(
+                    'Barcode already assigned to: ${existingIngredient.name}'),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -239,249 +252,289 @@ class _IngredientFormSheetState extends State<IngredientFormSheet> {
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-      child: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                widget.existing == null ? 'Add Ingredient' : 'Edit Ingredient',
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-
-              _buildPhotoField(),
-              const SizedBox(height: 16),
-
-              // Active Toggle (Only on Edit)
-              if (widget.existing != null)
-                SwitchListTile(
-                  title: const Text('Active Ingredient', style: TextStyle(fontWeight: FontWeight.w600)),
-                  value: _isActive,
-                  activeColor: Colors.deepPurple,
-                  onChanged: (v) => setState(() => _isActive = v),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  widget.existing == null
+                      ? 'Add Ingredient'
+                      : 'Edit Ingredient',
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
                 ),
+                const SizedBox(height: 24),
 
-              // Name
-              TextFormField(
-                controller: _nameCtr,
-                decoration: InputDecoration(
-                  labelText: 'Ingredient Name *',
-                  prefixIcon: const Icon(Icons.egg_alt_outlined),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                validator: (v) => v!.trim().isEmpty ? 'Required' : null,
-              ),
-              const SizedBox(height: 16),
-              
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _skuCtr,
-                      decoration: InputDecoration(
-                        labelText: 'SKU (Optional)',
-                        prefixIcon: const Icon(Icons.code),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _barcodeCtr,
-                      readOnly: widget.prefilledBarcode != null,
-                      decoration: InputDecoration(
-                        labelText: 'Barcode (Optional)',
-                        prefixIcon: const Icon(Icons.qr_code_2),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
+                _buildPhotoField(),
+                const SizedBox(height: 16),
 
-              // Category & Unit Row
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _category,
-                      decoration: InputDecoration(
-                        labelText: 'Category *',
-                        prefixIcon: const Icon(Icons.category_outlined),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      items: IngredientModel.categories.map((c) {
-                        return DropdownMenuItem(
-                          value: c,
-                          child: Text(IngredientModel.categoryLabel(c)),
-                        );
-                      }).toList(),
-                      onChanged: (v) => setState(() => _category = v!),
-                    ),
+                // Active Toggle (Only on Edit)
+                if (widget.existing != null)
+                  SwitchListTile(
+                    title: const Text('Active Ingredient',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    value: _isActive,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    onChanged: (v) => setState(() => _isActive = v),
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _unit,
-                      decoration: InputDecoration(
-                        labelText: 'Unit *',
-                        prefixIcon: const Icon(Icons.scale_outlined),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      items: IngredientModel.units.map((u) {
-                        return DropdownMenuItem(value: u, child: Text(u));
-                      }).toList(),
-                      onChanged: (v) => setState(() => _unit = v!),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
 
-              // Cost & Initial Stock & Min Threshold
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _costCtr,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-                      decoration: InputDecoration(
-                        labelText: 'Cost/Unit *',
-                        prefixIcon: const Icon(Icons.attach_money),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      validator: (v) => v!.trim().isEmpty ? 'Required' : null,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _stockCtr,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-                      decoration: InputDecoration(
-                        labelText: widget.existing == null ? 'Initial Stock' : 'Current Stock',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      validator: (v) => v!.trim().isEmpty ? 'Required' : null,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _minThresholdCtr,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-                      decoration: InputDecoration(
-                        labelText: 'Min Alert',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      validator: (v) => v!.trim().isEmpty ? 'Required' : null,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // Perishable handling
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Is Perishable?', style: TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: const Text('Requires expiration tracking (FIFO)'),
-                value: _isPerishable,
-                activeColor: Colors.orange,
-                onChanged: (v) {
-                  setState(() {
-                    _isPerishable = v;
-                    if (!v) _shelfLifeCtr.clear();
-                  });
-                },
-              ),
-
-              if (_isPerishable) ...[
-                const SizedBox(height: 8),
+                // Name
                 TextFormField(
-                  controller: _shelfLifeCtr,
-                  keyboardType: TextInputType.number,
+                  controller: _nameCtr,
                   decoration: InputDecoration(
-                    labelText: 'Expected Shelf Life (Days) *',
-                    prefixIcon: const Icon(Icons.timer_outlined),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    labelText: 'Ingredient Name *',
+                    prefixIcon: const Icon(Icons.egg_alt_outlined),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
-                  validator: (v) {
-                    if (_isPerishable && v!.trim().isEmpty) return 'Required for perishable';
-                    return null;
+                  validator: (v) => v!.trim().isEmpty ? 'Required' : null,
+                ),
+                const SizedBox(height: 16),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _skuCtr,
+                        decoration: InputDecoration(
+                          labelText: 'SKU (Optional)',
+                          prefixIcon: const Icon(Icons.code),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _barcodeCtr,
+                        readOnly: widget.prefilledBarcode != null,
+                        decoration: InputDecoration(
+                          labelText: 'Barcode (Optional)',
+                          prefixIcon: const Icon(Icons.qr_code_2),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Category & Unit Row
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: _category,
+                        decoration: InputDecoration(
+                          labelText: 'Category *',
+                          prefixIcon: const Icon(Icons.category_outlined),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        items: IngredientModel.categories.map((c) {
+                          return DropdownMenuItem(
+                            value: c,
+                            child: Text(IngredientModel.categoryLabel(c)),
+                          );
+                        }).toList(),
+                        onChanged: (v) => setState(() => _category = v!),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: _unit,
+                        decoration: InputDecoration(
+                          labelText: 'Unit *',
+                          prefixIcon: const Icon(Icons.scale_outlined),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        items: IngredientModel.units.map((u) {
+                          return DropdownMenuItem(value: u, child: Text(u));
+                        }).toList(),
+                        onChanged: (v) => setState(() => _unit = v!),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Cost & Initial Stock & Min Threshold
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _costCtr,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                        ],
+                        decoration: InputDecoration(
+                          labelText: 'Cost/Unit *',
+                          prefixIcon: const Icon(Icons.attach_money),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        validator: (v) => v!.trim().isEmpty ? 'Required' : null,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _stockCtr,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                        ],
+                        decoration: InputDecoration(
+                          labelText: widget.existing == null
+                              ? 'Initial Stock'
+                              : 'Current Stock',
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        validator: (v) => v!.trim().isEmpty ? 'Required' : null,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _minThresholdCtr,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                        ],
+                        decoration: InputDecoration(
+                          labelText: 'Min Alert',
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        validator: (v) => v!.trim().isEmpty ? 'Required' : null,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Perishable handling
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Is Perishable?',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: const Text('Requires expiration tracking (FIFO)'),
+                  value: _isPerishable,
+                  activeColor: Theme.of(context).colorScheme.primary,
+                  onChanged: (v) {
+                    setState(() {
+                      _isPerishable = v;
+                      if (!v) _shelfLifeCtr.clear();
+                    });
                   },
                 ),
+
+                if (_isPerishable) ...[
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _shelfLifeCtr,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: 'Expected Shelf Life (Days) *',
+                      prefixIcon: const Icon(Icons.timer_outlined),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    validator: (v) {
+                      if (_isPerishable && v!.trim().isEmpty)
+                        return 'Required for perishable';
+                      return null;
+                    },
+                  ),
+                ],
+                const SizedBox(height: 24),
+
+                // Allergens Selection
+                const Text('Allergen Tags',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: IngredientModel.allergens.map((tag) {
+                    final isSelected = _allergenTags.contains(tag);
+                    return ChoiceChip(
+                      label: Text(IngredientModel.allergenLabel(tag)),
+                      selected: isSelected,
+                      onSelected: (_) => _toggleAllergen(tag),
+                      selectedColor: Colors.red.shade100,
+                      labelStyle: TextStyle(
+                        color:
+                            isSelected ? Colors.red.shade900 : Colors.black87,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 32),
+
+                // Buttons
+                _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(context),
+                              style: OutlinedButton.styleFrom(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: const Text('Cancel',
+                                  style: TextStyle(fontSize: 16)),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: _save,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.deepPurple,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: Text(
+                                widget.existing == null
+                                    ? 'Add'
+                                    : 'Save Changes',
+                                style: const TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
               ],
-              const SizedBox(height: 24),
-
-              // Allergens Selection
-              const Text('Allergen Tags', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: IngredientModel.allergens.map((tag) {
-                  final isSelected = _allergenTags.contains(tag);
-                  return ChoiceChip(
-                    label: Text(IngredientModel.allergenLabel(tag)),
-                    selected: isSelected,
-                    onSelected: (_) => _toggleAllergen(tag),
-                    selectedColor: Colors.red.shade100,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.red.shade900 : Colors.black87,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 32),
-
-              // Buttons
-              _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(context),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: const Text('Cancel', style: TextStyle(fontSize: 16)),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _save,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.deepPurple,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: Text(
-                              widget.existing == null ? 'Add' : 'Save Changes',
-                              style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-            ],
+            ),
           ),
         ),
       ),
-    ),
     );
   }
 }
