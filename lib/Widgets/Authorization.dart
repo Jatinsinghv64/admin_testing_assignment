@@ -1,4 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import '../firebase_options.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -20,6 +22,55 @@ class AuthService {
   // DESTROY HomeScreen — resetting _currentIndex to 0 on every route pop.
   late final Stream<User?> userStream = _auth.authStateChanges();
   User? get currentUser => _auth.currentUser;
+
+  /// Creates a new staff authentication account without signing out the current admin.
+  /// Uses a temporary secondary Firebase app instance.
+  Future<User?> createStaffAuth(String email, String password) async {
+    FirebaseApp? tempApp;
+    try {
+      final appName = 'tempApp_${DateTime.now().millisecondsSinceEpoch}';
+      tempApp = await Firebase.initializeApp(
+        name: appName,
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      final tempAuth = FirebaseAuth.instanceFor(app: tempApp);
+      final cred = await tempAuth.createUserWithEmailAndPassword(
+          email: email, password: password);
+      return cred.user;
+    } catch (e) {
+      debugPrint('❌ Error creating staff auth: $e');
+      rethrow;
+    } finally {
+      if (tempApp != null) {
+        await tempApp.delete();
+      }
+    }
+  }
+
+  /// Deletes a staff authentication account using a temporary secondary app instance.
+  /// Primarily used for rolling back an Auth creation if Firestore save fails.
+  Future<void> deleteStaffAuth(String email, String password) async {
+    FirebaseApp? tempApp;
+    try {
+      final appName = 'tempDelApp_${DateTime.now().millisecondsSinceEpoch}';
+      tempApp = await Firebase.initializeApp(
+        name: appName,
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      final tempAuth = FirebaseAuth.instanceFor(app: tempApp);
+      // Must sign in to delete current user in client-side SDK
+      await tempAuth.signInWithEmailAndPassword(
+          email: email, password: password);
+      await tempAuth.currentUser?.delete();
+      debugPrint('✅ Rollback: Deleted orphan auth account for $email');
+    } catch (e) {
+      debugPrint('⚠️ Error during auth rollback for $email: $e');
+    } finally {
+      if (tempApp != null) {
+        await tempApp.delete();
+      }
+    }
+  }
 
   // Session management keys
   static const String _lastActivityKey = 'last_activity_timestamp';

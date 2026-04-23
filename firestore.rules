@@ -322,5 +322,37 @@ service cloud.firestore {
       allow create: if isAuthenticated(); // service-written only
       allow update, delete: if false;    // immutable — never modified after creation
     }
+
+    // =====================
+    // ATTENDANCE
+    // =====================
+    match /attendance/{docId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if isSuperAdmin();
+
+      // Audit trail sub-collection — immutable after creation
+      match /audit_trail/{entryId} {
+        allow read: if isStaff();
+        allow create: if isStaff();
+        allow update, delete: if false; // immutable — never modified after creation
+      }
+    }
+
+    // =====================
+    // ATTENDANCE CONFIG (single admin-controlled document)
+    // =====================
+    match /attendance_config/{docId} {
+      allow read: if isStaff();
+      allow write: if isStaff() && (isSuperAdmin() || isBranchAdmin());
+    }
+
+    // =====================
+    // SHIFTS
+    // =====================
+    match /shifts/{docId} {
+      allow read: if isStaff();
+      allow write: if isStaff();
+    }
   }
 }

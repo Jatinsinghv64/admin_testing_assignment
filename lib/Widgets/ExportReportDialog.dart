@@ -102,7 +102,14 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
       'icon': Icons.receipt_long,
       'desc': 'Paid expenses list'
     },
+    {
+      'key': 'ck_transfers',
+      'label': 'CK Transfers',
+      'icon': Icons.factory,
+      'desc': 'Central Kitchen stock & dish transfers'
+    },
   ];
+
 
   @override
   void initState() {

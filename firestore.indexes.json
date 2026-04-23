@@ -945,6 +945,49 @@
                     "order": "DESCENDING"
                 }
             ]
+        },
+        {
+            "collectionGroup": "attendance",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {"fieldPath": "date", "order": "ASCENDING"},
+                {"fieldPath": "branchIds", "arrayConfig": "CONTAINS"},
+                {"fieldPath": "clockIn", "order": "DESCENDING"}
+            ]
+        },
+        {
+            "collectionGroup": "attendance",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {"fieldPath": "date", "order": "DESCENDING"},
+                {"fieldPath": "branchIds", "arrayConfig": "CONTAINS"},
+                {"fieldPath": "clockIn", "order": "DESCENDING"}
+            ]
+        },
+        {
+            "collectionGroup": "attendance",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {"fieldPath": "staffId", "order": "ASCENDING"},
+                {"fieldPath": "date", "order": "ASCENDING"}
+            ]
+        },
+        {
+            "collectionGroup": "attendance",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {"fieldPath": "status", "order": "ASCENDING"},
+                {"fieldPath": "isApproved", "order": "ASCENDING"},
+                {"fieldPath": "branchIds", "arrayConfig": "CONTAINS"}
+            ]
+        },
+        {
+            "collectionGroup": "attendance",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {"fieldPath": "date", "order": "DESCENDING"},
+                {"fieldPath": "clockIn", "order": "DESCENDING"}
+            ]
         }
     ],
     "fieldOverrides": []

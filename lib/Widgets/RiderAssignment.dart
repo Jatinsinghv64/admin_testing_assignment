@@ -99,9 +99,13 @@ class RiderAssignmentService {
   /// Transaction-based Manual Assignment.
   /// Returns a RiderAssignmentResult to let the caller handle UI feedback.
   /// This avoids context issues when the calling widget is disposed.
+  ///
+  /// [forceAssign] — when `true`, allows assigning a busy rider by clearing
+  /// their current order link. Use for admin override of busy riders.
   static Future<RiderAssignmentResult> manualAssignRider({
     required String orderId,
     required String riderId,
+    bool forceAssign = false,
   }) async {
     try {
       await _firestore.runTransaction((transaction) async {
@@ -118,11 +122,20 @@ class RiderAssignmentService {
         if (!riderDoc.exists) throw Exception("RIDER_NOT_FOUND");
 
         final orderData = orderDoc.data() as Map<String, dynamic>;
+        final riderData = riderDoc.data() as Map<String, dynamic>;
         final String currentStatus = AppConstants.normalizeStatus(orderData['status'] ?? '');
 
         // Block assignment if the order is already finished or cancelled
         if (AppConstants.isTerminalStatus(currentStatus)) {
           throw Exception("ORDER_COMPLETED");
+        }
+
+        // --- Force-assign: clear previous order link for the busy rider ---
+        DocumentSnapshot? previousOrderDoc;
+        final String previousOrderId = (riderData['assignedOrderId'] ?? '').toString();
+        if (forceAssign && previousOrderId.isNotEmpty && previousOrderId != orderId) {
+          final previousOrderRef = _firestore.collection(AppConstants.collectionOrders).doc(previousOrderId);
+          previousOrderDoc = await transaction.get(previousOrderRef);
         }
 
         // Simplified status flow: pending -> preparing -> rider_assigned
@@ -144,12 +157,29 @@ class RiderAssignmentService {
         }
 
         // ✅ ALL WRITES COME AFTER ALL READS
+        // 0. Force-assign: remove rider from previous order
+        if (forceAssign && previousOrderDoc != null && previousOrderDoc.exists) {
+          final prevData = previousOrderDoc.data() as Map<String, dynamic>?;
+          final prevStatus = AppConstants.normalizeStatus(prevData?['status'] ?? '');
+          // Only clear if the previous order isn't already terminal
+          if (!AppConstants.isTerminalStatus(prevStatus)) {
+            transaction.update(previousOrderDoc.reference, {
+              'riderId': FieldValue.delete(),
+              'status': AppConstants.statusNeedsAssignment,
+              'assignmentNotes': 'Rider reassigned to another order by admin',
+              'lastAssignmentUpdate': FieldValue.serverTimestamp(),
+            });
+          }
+        }
+
         // 1. Update Order: Attach rider
         transaction.update(orderRef, {
           'riderId': riderId,
           'status': statusToSet,
           'timestamps.riderAssigned': FieldValue.serverTimestamp(),
-          'assignmentNotes': 'Manually assigned by admin',
+          'assignmentNotes': forceAssign
+              ? 'Force-assigned by admin (rider was busy)'
+              : 'Manually assigned by admin',
           'autoAssignStarted': FieldValue.delete(),
           'lastAssignmentUpdate': FieldValue.serverTimestamp(),
         });

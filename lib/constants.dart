@@ -115,10 +115,33 @@ class AppConstants {
   static const String orderTypeDineIn = 'dine_in';
 
   // Auto-Assignment Configuration
-  static const String collectionDrivers = 'Drivers'; // Legacy, use staff now
+  // Stock Transfers (Central Kitchen)
+  static const String collectionStockTransfers = 'stock_transfers';
+
   static const int assignmentTimeoutSeconds = 120;
   static const int maxTriedRiders = 5;
   static const int maxSearchRetries = 5;
+
+  // Transfer Statuses
+  static const String transferStatusPending = 'pending';
+  static const String transferStatusApproved = 'approved';
+  static const String transferStatusInTransit = 'in_transit';
+  static const String transferStatusReceived = 'received';
+  static const String transferStatusCancelled = 'cancelled';
+
+  // Transfer Types
+  static const String transferTypeProduction = 'production_distribution';
+  static const String transferTypeIngredient = 'ingredient_transfer';
+  static const String transferTypeBranchRequest = 'branch_request';
+  static const String transferTypeDishTransfer = 'dish_transfer';
+
+  // Transfer Item Types
+  static const String transferItemTypeIngredient = 'ingredient';
+  static const String transferItemTypeDish = 'dish';
+
+  // CK Alerts Collection
+  static const String collectionCKAlerts = 'ck_alerts';
+
   /// Normalize order type for consistent comparison
   /// Handles variations like 'dine-in', 'dine_in', 'DineIn', 'Dine In', etc.
   static String normalizeOrderType(String? orderType) {

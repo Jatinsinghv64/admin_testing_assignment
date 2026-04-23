@@ -38,7 +38,14 @@ class OrderNotificationService with ChangeNotifier {
 
   // Queue to handle high volume of incoming orders
   final Queue<String> _orderQueue = Queue<String>();
-  StreamSubscription? _backupSubscription;
+
+  // ✅ Session-level guard: prevent re-queuing the same order ID across
+  // listener restarts (scope changes, branch reassignments, etc.)
+  final Set<String> _seenOrderIds = {};
+
+  // Multiple subscriptions — one per chunk of branches (≤10 each) to
+  // work around Firestore's arrayContainsAny hard limit of 10 items.
+  final List<StreamSubscription> _backupSubscriptions = [];
 
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _isDialogOpen = false;
@@ -96,11 +103,10 @@ class OrderNotificationService with ChangeNotifier {
     // ✅ NEW: Listen for branch changes
     _scopeListener = () => _onScopeChanged(scopeService);
     scopeService.addListener(_scopeListener!);
-
-    if (scopeService.isLoaded) {
-      _lastKnownBranchIds = List.from(scopeService.branchIds);
-      _startBackupListener(scopeService);
-    }
+    
+    // START FIX: Ensure listener starts immediately on init
+    debugPrint("🚀 OrderNotificationService: Initializing listeners...");
+    _startBackupListener(scopeService);
 
     debugPrint("✅ OrderNotificationService initialized with navigator key");
   }
@@ -144,8 +150,10 @@ class OrderNotificationService with ChangeNotifier {
   /// ✅ NEW: Reset all session-specific state and listeners
   void reset() {
     debugPrint("🧹 Resetting OrderNotificationService...");
-    _backupSubscription?.cancel();
-    _backupSubscription = null;
+    for (final sub in _backupSubscriptions) {
+      sub.cancel();
+    }
+    _backupSubscriptions.clear();
     if (_scopeService != null && _scopeListener != null) {
       _scopeService!.removeListener(_scopeListener!);
     }
@@ -153,69 +161,112 @@ class OrderNotificationService with ChangeNotifier {
     _scopeService = null;
     _lastKnownBranchIds = [];
     _orderQueue.clear();
+    _seenOrderIds.clear();
     _currentOrderId = null;
     _isDialogOpen = false;
     notifyListeners();
   }
 
   void _startBackupListener(UserScopeService scopeService) {
-    _backupSubscription?.cancel();
+    // Cancel all existing backup subscriptions
+    for (final sub in _backupSubscriptions) {
+      sub.cancel();
+    }
+    _backupSubscriptions.clear();
 
-    if (scopeService.branchIds.isEmpty) return;
+    try {
+      final branchIds = scopeService.branchIds;
+      final bool isSuperAdmin = scopeService.isSuperAdmin;
 
-    debugPrint(
-        "🎧 Starting Backup Listener for branches: ${scopeService.branchIds}");
-
-    _backupSubscription = FirebaseFirestore.instance
-        .collection('Orders')
-        .where('branchIds', arrayContainsAny: scopeService.branchIds)
-        .where('status', isEqualTo: 'pending')
-        .orderBy('timestamp', descending: false)
-        .snapshots()
-        .listen((snapshot) {
-      for (var change in snapshot.docChanges) {
-        if (change.type == DocumentChangeType.added) {
-          String orderId = change.doc.id;
-
-          try {
-            final Timestamp? ts = change.doc['timestamp'] as Timestamp?;
-            if (ts != null) {
-              final DateTime orderTime = ts.toDate();
-              final Duration diff = DateTime.now().difference(orderTime);
-
-              if (diff.inHours > 12) {
-                debugPrint(
-                    "👻 Ignoring GHOST ORDER (Too Old): $orderId (${diff.inHours} hours ago)");
-                continue;
-              }
-            }
-          } catch (e) {
-            debugPrint("⚠️ Date parsing error in listener: $e");
-          }
-
-          if (orderId != _currentOrderId && !_orderQueue.contains(orderId)) {
-            debugPrint("📥 Backup Listener found pending order: $orderId");
-            _orderQueue.add(orderId);
-            _processOrderQueue(scopeService);
-          }
+      if (branchIds.isEmpty) {
+        if (isSuperAdmin) {
+          debugPrint("👑 OrderNotificationService: SuperAdmin detected with no branch restriction. Listening to ALL orders.");
+          _backupSubscriptions.add(FirebaseFirestore.instance.collection('Orders')
+            .where('status', whereIn: ['pending', 'pending_payment'])
+            .orderBy('timestamp', descending: true)
+            .limit(20)
+            .snapshots()
+            .listen((s) => _handleOrderSnapshot(s, scopeService),
+              onError: (error) => debugPrint("⚠️ Order backup listener error: $error")));
+          return;
+        } else {
+          debugPrint("⚠️ OrderNotificationService: No branch IDs in scope, skipping backup listener.");
+          return;
         }
       }
-    });
+
+      debugPrint("📡 OrderNotificationService: Starting backup listener for branches: $branchIds");
+
+      // Firestore array-contains-any is limited to 10 items.
+      for (var i = 0; i < branchIds.length; i += 10) {
+        final chunk = branchIds.sublist(i, i + 10 > branchIds.length ? branchIds.length : i + 10);
+        _backupSubscriptions.add(FirebaseFirestore.instance.collection('Orders')
+          .where('branchIds', arrayContainsAny: chunk)
+          .where('status', whereIn: ['pending', 'pending_payment'])
+          .orderBy('timestamp', descending: true)
+          .limit(20)
+          .snapshots()
+          .listen((s) => _handleOrderSnapshot(s, scopeService),
+            onError: (error) => debugPrint("⚠️ Order backup listener error: $error")));
+      }
+    } catch (e) {
+      debugPrint("❌ OrderNotificationService: Failed to start backup listener: $e");
+    }
   }
 
-  void handleFCMOrder(
-      Map<String, dynamic> payload, UserScopeService scopeService) {
-    if (!scopeService.isLoaded) return;
+  void _handleOrderSnapshot(
+      QuerySnapshot snapshot, UserScopeService scopeService) {
+    for (var change in snapshot.docChanges) {
+      if (change.type == DocumentChangeType.added) {
+        final String orderId = change.doc.id;
 
-    final String? orderId = payload['orderId'];
-    if (orderId == null) return;
+        // ✅ Age check: ignore orders older than 12 hours (ghost orders)
+        try {
+          final Timestamp? ts = change.doc['timestamp'] as Timestamp?;
+          if (ts != null) {
+            final Duration diff = DateTime.now().difference(ts.toDate());
+            if (diff.inHours > 12) {
+              debugPrint(
+                  "👻 Ghost order skipped: $orderId (${diff.inHours}h old)");
+              continue;
+            }
+          }
+        } catch (e) {
+          debugPrint("⚠️ Date parse error: $e");
+        }
 
-    debugPrint("🔔 UI: Received Order Notification: $orderId");
+        // ✅ Seen-ID guard: never re-queue an order we already processed
+        // in this session (prevents ghost dialogs on listener restarts).
+        if (_seenOrderIds.contains(orderId)) continue;
 
-    if (orderId != _currentOrderId && !_orderQueue.contains(orderId)) {
-      _orderQueue.add(orderId);
-      _processOrderQueue(scopeService);
+        if (orderId != _currentOrderId && !_orderQueue.contains(orderId)) {
+          debugPrint("📥 Backup Listener queuing order: $orderId");
+          _seenOrderIds.add(orderId);
+          _orderQueue.add(orderId);
+          _processOrderQueue(scopeService);
+        }
+      }
     }
+  }
+
+  void handleFCMOrder(Map<String, dynamic> data, UserScopeService scope) {
+    // Robustly extract orderId from data payload
+    final String? orderId = data['orderId']?.toString() ?? data['id']?.toString() ?? data['order_id']?.toString();
+    
+    if (orderId == null) {
+      debugPrint("⚠️ FCM Message received but no orderId found in data: $data");
+      return;
+    }
+
+    debugPrint("🔔 FCM Order received: $orderId");
+    if (_seenOrderIds.contains(orderId)) {
+      debugPrint("⏭️ FCM Order $orderId already seen, skipping.");
+      return;
+    }
+
+    _seenOrderIds.add(orderId);
+    _orderQueue.add(orderId);
+    _processOrderQueue(scope);
   }
 
   void _processOrderQueue(UserScopeService scopeService) async {
@@ -285,10 +336,32 @@ class OrderNotificationService with ChangeNotifier {
     });
   }
 
-  void _showRobustOrderDialog(String orderId, UserScopeService scopeService) {
+  void _showRobustOrderDialog(String orderId, UserScopeService scopeService,
+      {int retryCount = 0}) {
     final context = _navigatorKey?.currentContext;
 
-    if (context != null && context.mounted) {
+    // ✅ Context null-safety: retry once after 800ms if context isn't ready
+    if (context == null || !context.mounted) {
+      if (retryCount < 2) {
+        debugPrint(
+            "⏳ Navigator context unavailable for order $orderId, retrying (attempt ${retryCount + 1})...");
+        Future.delayed(const Duration(milliseconds: 800), () {
+          _showRobustOrderDialog(orderId, scopeService,
+              retryCount: retryCount + 1);
+        });
+      } else {
+        debugPrint(
+            "❌ Dropping order $orderId — navigator context permanently unavailable after retries");
+        // Remove from seen so FCM can retry via another channel
+        _seenOrderIds.remove(orderId);
+        _isDialogOpen = false;
+        _currentOrderId = null;
+        _processOrderQueue(scopeService);
+      }
+      return;
+    }
+
+    if (context.mounted) {
       _isDialogOpen = true;
       _currentOrderId = orderId;
 

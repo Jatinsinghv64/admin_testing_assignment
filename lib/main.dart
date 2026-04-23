@@ -10,6 +10,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_app_check/firebase_app_check.dart'; // ✅ App Check for security
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'Screens/core/ConnectionUtils.dart';
 import 'Screens/core/MainScreen.dart';
 import 'Screens/core/SplashScreen.dart';
@@ -34,6 +35,9 @@ import 'services/ai/gemini_service.dart';
 import 'services/ai/ai_data_fetcher.dart';
 import 'services/ai/ai_insights_service.dart';
 import 'services/expenses/expense_service.dart'; // ✅ Added
+import 'services/inventory/CKAlertService.dart'; // ✅ CK Alerts
+import 'services/staff/attendance_config_service.dart'; // ✅ Attendance Config
+import 'services/staff/attendance_auto_absent_service.dart'; // ✅ Auto-Absent Timer
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -132,6 +136,9 @@ int getStableId(String id) {
 }
 
 void main() async {
+  if (kIsWeb) {
+    usePathUrlStrategy();
+  }
   // Wrap entire app in error zone for global error handling
   runZonedGuarded<Future<void>>(
     () async {
@@ -244,11 +251,23 @@ class MyApp extends StatelessWidget {
             dataFetcher: AIDataFetcher(),
           ),
         ),
+        ChangeNotifierProvider<CKAlertService>(create: (_) => CKAlertService()),
+        ChangeNotifierProvider<AttendanceConfigService>(
+          create: (ctx) {
+            final svc = AttendanceConfigService();
+            svc.startListening();
+            return svc;
+          },
+        ),
+        ChangeNotifierProvider<AttendanceAutoAbsentService>(
+          create: (_) => AttendanceAutoAbsentService(),
+        ),
       ],
       builder: (context, child) {
         final themeService = context.watch<DashboardThemeService>();
         return MaterialApp(
           themeMode: themeService.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+          navigatorKey: navigatorKey,
           theme: ThemeData(
             useMaterial3: true,
             brightness: Brightness.light,

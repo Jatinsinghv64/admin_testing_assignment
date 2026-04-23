@@ -321,7 +321,9 @@ class _PosScreenState extends State<PosScreen> {
                 'acknowledgedAt': FieldValue.serverTimestamp(),
               }).catchError((e) => debugPrint('⚠️ Failed to acknowledge order: $e'));
 
-              Navigator.of(dialogContext).pop();
+              if (dialogContext.mounted) {
+                Navigator.of(dialogContext).pop();
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red[700],
@@ -331,9 +333,11 @@ class _PosScreenState extends State<PosScreen> {
           ),
         ],
       ),
-    ).whenComplete(() {
-      _isKitchenCancellationDialogOpen = false;
-      _processKitchenCancellationAlerts();
+    ).then((_) {
+      if (mounted) {
+        setState(() => _isKitchenCancellationDialogOpen = false);
+        _processKitchenCancellationAlerts();
+      }
     });
   }
 

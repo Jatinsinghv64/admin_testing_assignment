@@ -2223,7 +2223,22 @@ class _RestockPurchaseOrderScreen extends StatelessWidget {
                           onPressed: () => Navigator.pop(context),
                           child: const Text('Cancel'),
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Go to Central Kitchen → New Transfer for ${ingredient.name}'),
+                                backgroundColor: Colors.deepPurple,
+                                duration: const Duration(seconds: 4),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.factory),
+                          label: const Text('Request from CK'),
+                        ),
+                        const SizedBox(width: 8),
                         ElevatedButton.icon(
                           onPressed: () {
                             Navigator.pop(context);
@@ -2235,21 +2250,16 @@ class _RestockPurchaseOrderScreen extends StatelessWidget {
                                     'Go to Purchases → New PO to order ${ingredient.name}'),
                                 backgroundColor: Colors.deepPurple,
                                 duration: const Duration(seconds: 4),
-                                action: SnackBarAction(
-                                  label: 'OK',
-                                  textColor: Colors.white,
-                                  onPressed: () {},
-                                ),
                               ),
                             );
                           },
                           icon: const Icon(Icons.shopping_cart_checkout),
-                          label: const Text('Go to Purchase Orders'),
+                          label: const Text('New PO'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.deepPurple,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 24, vertical: 14),
+                                horizontal: 16, vertical: 14),
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(10)),
                           ),

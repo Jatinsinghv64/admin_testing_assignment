@@ -18,7 +18,10 @@ class Permissions {
   // --- POS & Kitchen Display Permissions ---
   static const String canManagePOS = 'canManagePOS';
   static const String canViewKitchenDisplay = 'canViewKitchenDisplay';
+  // --- APP SETTINGS/PERMISSIONS ---
   static const String canManageExpenses = 'canManageExpenses';
+  static const String canManageCentralKitchen = 'canManageCentralKitchen';
+  static const String canManageAttendance = 'canManageAttendance';
 }
 
 class AppScreen {
@@ -47,4 +50,6 @@ enum AppTab {
   pos,
   kitchenDisplay,
   expenses,
+  centralKitchen,
+  attendance,
 }

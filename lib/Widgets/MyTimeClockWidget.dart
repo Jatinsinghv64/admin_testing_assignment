@@ -286,7 +286,7 @@ class _MyTimeClockWidgetState extends State<MyTimeClockWidget> {
         DocumentSnapshot? activeRecord;
         for (final doc in docs) {
           final data = doc.data() as Map<String, dynamic>;
-          if (data['clockOut'] == null) {
+          if (data['clockIn'] != null && data['clockOut'] == null) {
             activeRecord = doc;
             break;
           }

@@ -13,6 +13,7 @@ import 'package:file_saver/file_saver.dart';
 import '../constants.dart';
 import '../main.dart';
 import '../Widgets/BranchFilterService.dart';
+import '../services/inventory/CentralKitchenService.dart';
 
 class ExportReportService {
   static Future<void> generateReport({
@@ -50,11 +51,15 @@ class ExportReportService {
     if (selectedSections.contains('expense_summary')) {
       expenseData = await _fetchExpenseData(dateRange, branchIds);
     }
+    List<Map<String, dynamic>> transferData = [];
+    if (selectedSections.contains('ck_transfers')) {
+      transferData = await _fetchTransferData(dateRange, branchIds, userScope);
+    }
 
     if (format == 'pdf') {
-      await _generatePdf(context, orders, dateRange, selectedSections, branchFilter, branchIds, stats, marginData, inventoryData, staffData, promoData, expenseData);
+      await _generatePdf(context, orders, dateRange, selectedSections, branchFilter, branchIds, stats, marginData, inventoryData, staffData, promoData, expenseData, transferData);
     } else {
-      await _generateExcel(orders, dateRange, selectedSections, branchFilter, branchIds, stats, marginData, inventoryData, staffData, promoData, expenseData);
+      await _generateExcel(orders, dateRange, selectedSections, branchFilter, branchIds, stats, marginData, inventoryData, staffData, promoData, expenseData, transferData);
     }
   }
 
@@ -81,6 +86,56 @@ class ExportReportService {
       data['docId'] = d.id;
       return data;
     }).toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> _fetchTransferData(
+    DateTimeRange dateRange,
+    List<String> branchIds,
+    UserScopeService userScope,
+  ) async {
+    try {
+      final ckService = CentralKitchenService();
+      final data = await ckService.getAnalyticsData(
+        branchIds,
+        start: dateRange.start,
+        end: dateRange.end.add(const Duration(days: 1)),
+        isSuperAdmin: userScope.isSuperAdmin,
+      );
+
+      // Fetch raw transfer docs for the detail table
+      Query<Map<String, dynamic>> q = FirebaseFirestore.instance
+          .collection(AppConstants.collectionStockTransfers);
+      if (branchIds.isNotEmpty && !userScope.isSuperAdmin) {
+        q = branchIds.length == 1
+            ? q.where('branchIds', arrayContains: branchIds.first)
+            : q.where('branchIds', arrayContainsAny: branchIds.take(10).toList());
+      }
+      final snap = await q.get();
+      final transfers = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+
+      // Filter by date
+      final filtered = transfers.where((t) {
+        final createdAt = (t['createdAt'] as Timestamp?)?.toDate();
+        if (createdAt == null) return false;
+        return !createdAt.isBefore(dateRange.start) &&
+            !createdAt.isAfter(dateRange.end.add(const Duration(days: 1)));
+      }).toList()
+        ..sort((a, b) {
+          final da = (a['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
+          final db = (b['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
+          return db.compareTo(da);
+        });
+
+      return [
+        // First element = aggregated summary
+        {'__summary__': true, ...data},
+        // Remaining = individual transfers
+        ...filtered,
+      ];
+    } catch (e) {
+      debugPrint('Error fetching transfer data: $e');
+      return [];
+    }
   }
 
   static Future<List<Map<String, dynamic>>> _fetchExpenseData(DateTimeRange dateRange, List<String> branchIds) async {
@@ -430,6 +485,7 @@ class ExportReportService {
     List<Map<String, dynamic>> staffData,
     Map<String, dynamic> promoData,
     List<Map<String, dynamic>> expenseData,
+    List<Map<String, dynamic>> transferData,
   ) async {
     final pdf = pw.Document();
     final dateFmt = DateFormat('MMM dd, yyyy');
@@ -505,7 +561,7 @@ class ExportReportService {
             style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey),
           ),
         ),
-        build: (ctx) => _buildPdfContent(selectedSections, stats, orders, branchFilter, marginData, inventoryData, staffData, promoData, expenseData),
+        build: (ctx) => _buildPdfContent(selectedSections, stats, orders, branchFilter, marginData, inventoryData, staffData, promoData, expenseData, transferData),
       ),
     );
 
@@ -525,6 +581,7 @@ class ExportReportService {
     List<Map<String, dynamic>> staffData,
     Map<String, dynamic> promoData,
     List<Map<String, dynamic>> expenseData,
+    List<Map<String, dynamic>> transferData,
   ) {
     final widgets = <pw.Widget>[];
 
@@ -592,6 +649,11 @@ class ExportReportService {
 
     if (selectedSections.contains('expense_summary')) {
       widgets.addAll(_buildExpenseSection(expenseData));
+      widgets.add(pw.SizedBox(height: 16));
+    }
+
+    if (selectedSections.contains('ck_transfers')) {
+      widgets.addAll(_buildTransferSection(transferData));
       widgets.add(pw.SizedBox(height: 16));
     }
 
@@ -1001,6 +1063,113 @@ class ExportReportService {
     ];
   }
 
+  static List<pw.Widget> _buildTransferSection(List<Map<String, dynamic>> transferData) {
+    if (transferData.isEmpty) {
+      return [
+        _pdfSection('Central Kitchen Transfers'),
+        pw.SizedBox(height: 8),
+        pw.Text('No transfers recorded for this period.',
+            style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey600)),
+      ];
+    }
+
+    // Extract summary (first element)
+    final summaryRaw = transferData.firstWhere(
+        (t) => t['__summary__'] == true,
+        orElse: () => {});
+    final totalCount = summaryRaw['totalCount'] ?? 0;
+    final receivedCount = summaryRaw['receivedCount'] ?? 0;
+    final pendingCount = summaryRaw['pendingCount'] ?? 0;
+    final totalValue = (summaryRaw['totalValue'] as num?)?.toDouble() ?? 0;
+    final receivedValue = (summaryRaw['receivedValue'] as num?)?.toDouble() ?? 0;
+
+    final details = transferData.where((t) => t['__summary__'] != true).toList();
+
+    final widgets = <pw.Widget>[
+      _pdfSection('Central Kitchen Transfers'),
+      pw.SizedBox(height: 8),
+      pw.Container(
+        padding: const pw.EdgeInsets.all(12),
+        decoration: pw.BoxDecoration(
+            color: PdfColors.grey100,
+            borderRadius: pw.BorderRadius.circular(6)),
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+          children: [
+            _pdfKpi('Total Transfers', '$totalCount', PdfColors.blue),
+            _pdfKpi('Received', '$receivedCount', PdfColors.green),
+            _pdfKpi('Pending', '$pendingCount', PdfColors.orange),
+            _pdfKpi('Total Value', 'QAR ${totalValue.toStringAsFixed(0)}', PdfColors.purple),
+            _pdfKpi('Received Value', 'QAR ${receivedValue.toStringAsFixed(0)}', PdfColors.teal),
+          ],
+        ),
+      ),
+      pw.SizedBox(height: 8),
+    ];
+
+    if (details.isNotEmpty) {
+      final dateFmt = DateFormat('dd/MM HH:mm');
+      widgets.add(pw.Table.fromTextArray(
+        headerStyle:
+            pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 9),
+        headerDecoration: const pw.BoxDecoration(color: PdfColors.deepPurple),
+        cellPadding: const pw.EdgeInsets.all(5),
+        cellStyle: const pw.TextStyle(fontSize: 9),
+        cellAlignment: pw.Alignment.center,
+        headers: ['Transfer #', 'Date', 'From', 'To', 'Items', 'Value', 'Status'],
+        data: details.take(50).map((t) {
+          final createdAt = (t['createdAt'] as Timestamp?)?.toDate();
+          final items = (t['items'] as List? ?? []);
+          final dishCount = items.where((i) =>
+              (i['itemType'] ?? '') == AppConstants.transferItemTypeDish).length;
+          final ingCount = items.length - dishCount;
+          final itemSummary = [
+            if (ingCount > 0) '$ingCount ingr.',
+            if (dishCount > 0) '$dishCount dish',
+          ].join(' + ');
+          return [
+            t['transferNumber'] ?? '-',
+            createdAt != null ? dateFmt.format(createdAt) : '-',
+            t['sourceBranchName'] ?? '-',
+            t['destinationBranchName'] ?? '-',
+            itemSummary.isEmpty ? '${items.length}' : itemSummary,
+            'QAR ${((t['totalCost'] as num?)?.toDouble() ?? 0).toStringAsFixed(2)}',
+            (t['status'] ?? '-').toString().toUpperCase(),
+          ];
+        }).toList(),
+      ));
+    }
+
+    // Top items transferred
+    final topItems = (summaryRaw['topItems'] as List? ?? []).cast<Map<String, dynamic>>();
+    if (topItems.isNotEmpty) {
+      widgets.addAll([
+        pw.SizedBox(height: 8),
+        pw.Text('Top Transferred Items',
+            style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height: 4),
+        pw.Table.fromTextArray(
+          headerStyle:
+              pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 9),
+          headerDecoration: const pw.BoxDecoration(color: PdfColors.deepPurple),
+          cellPadding: const pw.EdgeInsets.all(5),
+          cellStyle: const pw.TextStyle(fontSize: 9),
+          headers: ['Item', 'Type', 'Total Qty'],
+          data: topItems.map((i) => [
+            i['name']?.toString() ?? '-',
+            (i['itemType'] ?? AppConstants.transferItemTypeIngredient).toString() ==
+                    AppConstants.transferItemTypeDish
+                ? '🍽️ Dish'
+                : '🥬 Ingredient',
+            '${(i['quantity'] as num?)?.toStringAsFixed(1) ?? '0'}',
+          ]).toList(),
+        ),
+      ]);
+    }
+
+    return widgets;
+  }
+
   // ─── Excel Generation ───────────────────────────────────────
   static Future<void> _generateExcel(
     List<Map<String, dynamic>> orders,
@@ -1014,6 +1183,7 @@ class ExportReportService {
     List<Map<String, dynamic>> staffData,
     Map<String, dynamic> promoData,
     List<Map<String, dynamic>> expenseData,
+    List<Map<String, dynamic>> transferData,
   ) async {
     final excel = xl.Excel.createExcel();
     final dateFmt = DateFormat('MMM dd, yyyy');
@@ -1159,6 +1329,38 @@ class ExportReportService {
           xl.TextCellValue(e['category'].toString()),
           xl.TextCellValue(e['vendor'].toString()),
           xl.DoubleCellValue(e['amount'] as double),
+        ]);
+      }
+    }
+
+    // CK Transfers
+    if (selectedSections.contains('ck_transfers') && transferData.isNotEmpty) {
+      final tSheet = excel['CK Transfers'];
+      tSheet.appendRow([
+        xl.TextCellValue('Transfer #'), xl.TextCellValue('Date'),
+        xl.TextCellValue('From Branch'), xl.TextCellValue('To Branch'),
+        xl.TextCellValue('Items'), xl.TextCellValue('Value (QAR)'), xl.TextCellValue('Status'),
+      ]);
+      final dateFmt = DateFormat('yyyy-MM-dd HH:mm');
+      for (final t in transferData) {
+        if (t['__summary__'] == true) continue;
+        final createdAt = (t['createdAt'] as Timestamp?)?.toDate();
+        final items = (t['items'] as List? ?? []);
+        final dishCount = items.where((i) =>
+            (i['itemType'] ?? '') == AppConstants.transferItemTypeDish).length;
+        final ingCount = items.length - dishCount;
+        final itemSummary = [
+          if (ingCount > 0) '$ingCount ingredient',
+          if (dishCount > 0) '$dishCount dish',
+        ].join(' + ');
+        tSheet.appendRow([
+          xl.TextCellValue(t['transferNumber']?.toString() ?? ''),
+          xl.TextCellValue(createdAt != null ? dateFmt.format(createdAt) : ''),
+          xl.TextCellValue(t['sourceBranchName']?.toString() ?? ''),
+          xl.TextCellValue(t['destinationBranchName']?.toString() ?? ''),
+          xl.TextCellValue(itemSummary.isEmpty ? '${items.length} items' : itemSummary),
+          xl.DoubleCellValue((t['totalCost'] as num?)?.toDouble() ?? 0),
+          xl.TextCellValue(t['status']?.toString() ?? ''),
         ]);
       }
     }
