@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'inventory/stock_status.dart';
 
 class IngredientModel {
   final String id;
@@ -9,6 +10,9 @@ class IngredientModel {
   final double costPerUnit;
   final Map<String, double> branchStocks;
   final Map<String, double> branchMinThresholds;
+  final Map<String, double> branchReservedStocks;
+  final Map<String, double> branchInTransitStocks;
+  final Map<String, double> branchParLevels;
   final List<String> supplierIds;
   final List<String> allergenTags;
   final bool isPerishable;
@@ -30,6 +34,9 @@ class IngredientModel {
     required this.costPerUnit,
     required this.branchStocks,
     required this.branchMinThresholds,
+    this.branchReservedStocks = const {},
+    this.branchInTransitStocks = const {},
+    this.branchParLevels = const {},
     required this.supplierIds,
     required this.allergenTags,
     required this.isPerishable,
@@ -43,10 +50,64 @@ class IngredientModel {
     required this.updatedAt,
   });
 
-  // Stock status helpers
+  // ─── Stock status helpers ─────────────────────────────────────────────────
   double getStock(String branchId) => branchStocks[branchId] ?? 0.0;
   double getMinThreshold(String branchId) =>
       branchMinThresholds[branchId] ?? 0.0;
+  double getReserved(String branchId) => branchReservedStocks[branchId] ?? 0.0;
+  double getInTransit(String branchId) => branchInTransitStocks[branchId] ?? 0.0;
+  double getParLevel(String branchId) => branchParLevels[branchId] ?? 0.0;
+
+  /// Available = On-hand − Reserved. This is what can actually be used/sold.
+  double getAvailable(String branchId) {
+    final onHand = getStock(branchId);
+    final reserved = getReserved(branchId);
+    return (onHand - reserved).clamp(0.0, double.infinity);
+  }
+
+  /// Full stock breakdown for a branch — used in the Global Visibility screen.
+  StockBreakdown getStockBreakdown(String branchId, {String branchName = ''}) {
+    final onHand = getStock(branchId);
+    final reserved = getReserved(branchId);
+    final inTransit = getInTransit(branchId);
+    final available = (onHand - reserved).clamp(0.0, double.infinity);
+    final par = getParLevel(branchId);
+    final reorder = getMinThreshold(branchId);
+
+    StockStatus status;
+    if (onHand <= 0) {
+      status = StockStatus.outOfStock;
+    } else if (available <= 0) {
+      status = StockStatus.critical;
+    } else if (reorder > 0 && available <= reorder) {
+      status = StockStatus.low;
+    } else if (par > 0 && available < par) {
+      status = StockStatus.belowPar;
+    } else if (par > 0 && available > par * 1.5) {
+      status = StockStatus.overstocked;
+    } else {
+      status = StockStatus.normal;
+    }
+
+    return StockBreakdown(
+      branchId: branchId,
+      branchName: branchName,
+      onHand: onHand,
+      reserved: reserved,
+      inTransit: inTransit,
+      available: available,
+      parLevel: par,
+      reorderPoint: reorder,
+      status: status,
+    );
+  }
+
+  /// Whether stock is at or below PAR level for a branch.
+  bool isAtOrBelowPar(String branchId) {
+    final par = getParLevel(branchId);
+    if (par <= 0) return false;
+    return getAvailable(branchId) <= par;
+  }
 
   double getStockForBranches(List<String> branchIds) {
     final effectiveBranchIds = _effectiveBranchIds(branchIds);
@@ -164,6 +225,9 @@ class IngredientModel {
       costPerUnit: (data['costPerUnit'] as num?)?.toDouble() ?? 0.0,
       branchStocks: _parseBranchStocks(data),
       branchMinThresholds: _parseBranchThresholds(data),
+      branchReservedStocks: _parseNumMap(data, 'branchReservedStocks'),
+      branchInTransitStocks: _parseNumMap(data, 'branchInTransitStocks'),
+      branchParLevels: _parseNumMap(data, 'branchParLevels'),
       supplierIds: List<String>.from(data['supplierIds'] as List? ?? []),
       allergenTags: List<String>.from(data['allergenTags'] as List? ?? []),
       isPerishable: data['isPerishable'] as bool? ?? false,
@@ -187,6 +251,9 @@ class IngredientModel {
       'costPerUnit': costPerUnit,
       'branchStocks': branchStocks,
       'branchMinThresholds': branchMinThresholds,
+      'branchReservedStocks': branchReservedStocks,
+      'branchInTransitStocks': branchInTransitStocks,
+      'branchParLevels': branchParLevels,
       'supplierIds': supplierIds,
       'allergenTags': allergenTags,
       'isPerishable': isPerishable,
@@ -210,6 +277,9 @@ class IngredientModel {
     double? costPerUnit,
     Map<String, double>? branchStocks,
     Map<String, double>? branchMinThresholds,
+    Map<String, double>? branchReservedStocks,
+    Map<String, double>? branchInTransitStocks,
+    Map<String, double>? branchParLevels,
     List<String>? supplierIds,
     List<String>? allergenTags,
     bool? isPerishable,
@@ -232,6 +302,12 @@ class IngredientModel {
       branchStocks: branchStocks ?? Map.from(this.branchStocks),
       branchMinThresholds:
           branchMinThresholds ?? Map.from(this.branchMinThresholds),
+      branchReservedStocks:
+          branchReservedStocks ?? Map.from(this.branchReservedStocks),
+      branchInTransitStocks:
+          branchInTransitStocks ?? Map.from(this.branchInTransitStocks),
+      branchParLevels:
+          branchParLevels ?? Map.from(this.branchParLevels),
       supplierIds: supplierIds ?? this.supplierIds,
       allergenTags: allergenTags ?? this.allergenTags,
       isPerishable: isPerishable ?? this.isPerishable,
@@ -274,6 +350,15 @@ class IngredientModel {
       final oldThreshold = (data['minStockThreshold'] as num).toDouble();
       final String firstBranch = (data['branchIds'] as List).first.toString();
       return {firstBranch: oldThreshold};
+    }
+    return {};
+  }
+
+  /// Generic num-map parser for reserved/inTransit/parLevel fields.
+  static Map<String, double> _parseNumMap(Map<String, dynamic> data, String key) {
+    if (data[key] is Map) {
+      final map = data[key] as Map;
+      return map.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
     }
     return {};
   }

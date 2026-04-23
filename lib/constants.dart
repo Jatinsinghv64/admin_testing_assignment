@@ -142,6 +142,26 @@ class AppConstants {
   // CK Alerts Collection
   static const String collectionCKAlerts = 'ck_alerts';
 
+  // --- Inventory Management (Phase 2 & 3) ---
+  static const String collectionBranchOrders = 'branch_orders';
+  static const String collectionProductionBatches = 'production_batches';
+
+  // Branch Order Statuses
+  static const String branchOrderStatusDraft = 'draft';
+  static const String branchOrderStatusSubmitted = 'submitted';
+  static const String branchOrderStatusApproved = 'approved';
+  static const String branchOrderStatusFulfilled = 'fulfilled';
+  static const String branchOrderStatusRejected = 'rejected';
+
+  // Production Batch Statuses
+  static const String productionStatusPlanned = 'planned';
+  static const String productionStatusInProgress = 'in_progress';
+  static const String productionStatusCompleted = 'completed';
+  static const String productionStatusCancelled = 'cancelled';
+
+  // Transfer Types (extended)
+  static const String transferTypeInterBranch = 'inter_branch';
+
   /// Normalize order type for consistent comparison
   /// Handles variations like 'dine-in', 'dine_in', 'DineIn', 'Dine In', etc.
   static String normalizeOrderType(String? orderType) {

@@ -22,7 +22,9 @@ import '../settings/RecipesScreen.dart';
 import '../../services/ExportReportService.dart';
 import 'ingredient_import_format_dialog.dart';
 import 'QuickStockInScreen.dart';
-import '../../Widgets/ai/reorder_predictions_panel.dart';
+
+import 'GlobalStockVisibilityScreen.dart';
+import 'ActualVsTheoreticalScreen.dart';
 import '../../Widgets/ai/trending_suggestions_panel.dart';
 
 // ─── Theme Colors (matching app ThemeData: light bg, deepPurple primary) ─────
@@ -52,9 +54,11 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
 
   static const _tabLabels = [
     'Stock Overview',
+    'Network Stock',
     'Stock List',
     'Stocktake',
     'Waste',
+    'Variance',
     'Categories',
     'Menu Items',
     'Recipes',
@@ -62,9 +66,11 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
   ];
   static const _tabIcons = [
     Icons.dashboard_outlined,
+    Icons.public_outlined,
     Icons.inventory_2_outlined,
     Icons.fact_check_outlined,
     Icons.delete_sweep_outlined,
+    Icons.analytics_outlined,
     Icons.category_outlined,
     Icons.restaurant_menu_outlined,
     Icons.menu_book_outlined,
@@ -74,7 +80,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 8, vsync: this);
+    _tabController = TabController(length: 10, vsync: this);
     _tabController.addListener(_onTabChanged);
   }
 
@@ -350,9 +356,9 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
   @override
   Widget build(BuildContext context) {
     final idx = _tabController.index;
-    final isCategoryTab = idx == 4;
-    final isMenuTab = idx == 5;
-    final isRecipeTab = idx == 6;
+    final isCategoryTab = idx == 6;
+    final isMenuTab = idx == 7;
+    final isRecipeTab = idx == 8;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -403,13 +409,15 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
               controller: _tabController,
               children: [
                 _StockOverviewTab(
-                  onGoStockList: () => _tabController.animateTo(1),
-                  onGoStocktake: () => _tabController.animateTo(2),
-                  onGoWaste: () => _tabController.animateTo(3),
+                  onGoStockList: () => _tabController.animateTo(2),
+                  onGoStocktake: () => _tabController.animateTo(3),
+                  onGoWaste: () => _tabController.animateTo(4),
                 ),
+                const GlobalStockVisibilityScreen(),
                 const IngredientStockListScreen(),
                 const StocktakeScreen(),
                 const WasteDashboardScreen(),
+                const ActualVsTheoreticalScreen(),
                 _CategoriesManagementTab(searchQuery: _searchQuery),
                 _MenuItemsManagementTab(searchQuery: _searchQuery),
                 const RecipesScreen(),
@@ -465,7 +473,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                   ),
                 ),
                 // Export button
-                if (idx == 0 || idx == 1) ...[
+                if (idx == 0 || idx == 3) ...[
                   _headerButton(
                     icon: Icons.qr_code_scanner,
                     label: 'Quick Stock-In',
@@ -475,7 +483,7 @@ class _InventoryDashboardScreenState extends State<InventoryDashboardScreen>
                     ),
                   ),
                   const SizedBox(width: 10),
-                  if (idx == 1) ...[
+                  if (idx == 3) ...[
                     _headerButton(
                       icon: Icons.upload_file_rounded,
                       label: 'Bulk Upload',
@@ -765,31 +773,7 @@ class _StockOverviewTabState extends State<_StockOverviewTab> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        flex: 3,
-                        child: _card(
-                          title: 'AI Smart Reorder',
-                          trailing: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.deepPurple.shade400, Colors.deepPurple.shade700],
-                              ),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: const [
-                                Icon(Icons.auto_awesome, color: Colors.white, size: 12),
-                                SizedBox(width: 4),
-                                Text('AI Powered', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-                              ],
-                            ),
-                          ),
-                          child: const ReorderPredictionsPanel(),
-                        ),
-                      ),
-                      const SizedBox(width: 20),
+
                       Expanded(
                         flex: 2,
                         child: GestureDetector(
